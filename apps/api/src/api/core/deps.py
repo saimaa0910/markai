@@ -80,11 +80,18 @@ class RoleChecker:
                 .first()
             )
         else:
+            try:
+                org_uuid = uuid.UUID(str(org_id))
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid organization ID format",
+                )
             membership = (
                 db.query(UserOrganization)
                 .filter(
                     UserOrganization.user_id == current_user.id,
-                    UserOrganization.organization_id == org_id,
+                    UserOrganization.organization_id == org_uuid,
                 )
                 .first()
             )

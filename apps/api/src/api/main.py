@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from api.core.config import settings
-from api.routes import auth, users, organizations
+from api.routes import auth, users, organizations, crm, ai, generator
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -25,6 +25,13 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(users.router, prefix=settings.API_V1_STR)
 app.include_router(organizations.router, prefix=settings.API_V1_STR)
+app.include_router(crm.companies_router, prefix=settings.API_V1_STR)
+app.include_router(crm.contacts_router, prefix=settings.API_V1_STR)
+app.include_router(crm.leads_router, prefix=settings.API_V1_STR)
+app.include_router(crm.activities_router, prefix=settings.API_V1_STR)
+app.include_router(ai.prompts_router, prefix=settings.API_V1_STR)
+app.include_router(ai.conversations_router, prefix=settings.API_V1_STR)
+app.include_router(generator.generator_router, prefix=settings.API_V1_STR)
 
 
 @app.exception_handler(Exception)

@@ -38,6 +38,7 @@ COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src"
 
 EXPOSE 8000
 

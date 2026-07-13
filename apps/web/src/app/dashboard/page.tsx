@@ -212,11 +212,14 @@ export default function Dashboard() {
               </Card>
 
               {/* Grid content placeholders */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="flex flex-col gap-3">
                   <h3 className="font-bold text-lg">AI Assistants</h3>
                   <p className="text-sm text-neutral-400">Launch marketing prompts, copy generation models and dynamic AI Chat agents.</p>
-                  <button className="self-start mt-2 px-4 py-2 rounded-lg bg-neutral-900 border border-white/10 hover:border-violet-500/30 text-sm font-semibold transition-all">
+                  <button
+                    onClick={() => router.push('/dashboard/ai')}
+                    className="self-start mt-2 px-4 py-2 rounded-lg bg-neutral-900 border border-white/10 hover:border-violet-500/30 text-sm font-semibold transition-all cursor-pointer"
+                  >
                     Configure AI Gateway
                   </button>
                 </Card>
@@ -224,8 +227,22 @@ export default function Dashboard() {
                 <Card className="flex flex-col gap-3">
                   <h3 className="font-bold text-lg">CRM Pipeline</h3>
                   <p className="text-sm text-neutral-400">Integrate contacts, schedule email triggers, and qualify marketing leads.</p>
-                  <button className="self-start mt-2 px-4 py-2 rounded-lg bg-neutral-900 border border-white/10 hover:border-violet-500/30 text-sm font-semibold transition-all">
+                  <button
+                    onClick={() => router.push('/dashboard/crm')}
+                    className="self-start mt-2 px-4 py-2 rounded-lg bg-neutral-900 border border-white/10 hover:border-violet-500/30 text-sm font-semibold transition-all cursor-pointer"
+                  >
                     Open CRM Contacts
+                  </button>
+                </Card>
+
+                <Card className="flex flex-col gap-3">
+                  <h3 className="font-bold text-lg">AI Content Generator</h3>
+                  <p className="text-sm text-neutral-400">Generate creative copywriting variants, emails, and run A/B ratings tests.</p>
+                  <button
+                    onClick={() => router.push('/dashboard/generator')}
+                    className="self-start mt-2 px-4 py-2 rounded-lg bg-neutral-900 border border-white/10 hover:border-violet-500/30 text-sm font-semibold transition-all cursor-pointer"
+                  >
+                    Open Content Generator
                   </button>
                 </Card>
               </div>
