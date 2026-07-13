@@ -1,0 +1,25 @@
+{
+  "name": "eaimos-monorepo",
+  "version": "1.0.0",
+  "description": "Enterprise AI Marketing Operating System (EAIMOS) Monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/ui",
+    "packages/shared",
+    "packages/types"
+  ],
+  "scripts": {
+    "web:dev": "npm run dev --workspace=apps/web",
+    "web:build": "npm run build --workspace=apps/web",
+    "web:start": "npm run start --workspace=apps/web",
+    "web:lint": "npm run lint --workspace=apps/web",
+    "packages:build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  }
+}

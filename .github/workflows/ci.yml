@@ -1,0 +1,99 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  frontend-check:
+    name: Frontend Typecheck and Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build Web App
+        run: npm run web:build
+
+      - name: Check Formatting (Prettier)
+        run: npx prettier --check "**/*.{ts,tsx,js,jsx,json,md,css}"
+
+  backend-check:
+    name: Backend Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.2.1'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install Dependencies
+        run: |
+          cd apps/api
+          poetry install --no-interaction
+
+      - name: Run Black formatter check
+        run: |
+          cd apps/api
+          poetry run black --check src
+
+      - name: Run Flake8 linter check
+        run: |
+          cd apps/api
+          poetry run flake8 src
+
+      - name: Run Mypy typecheck
+        run: |
+          cd apps/api
+          poetry run mypy src
+
+  docker-build-test:
+    name: Test Docker Builds
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build DB Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./infra/docker/postgres
+          push: false
+
+      - name: Build API Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/api
+          file: ./infra/docker/api/Dockerfile
+          push: false
+
+      - name: Build Web Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./infra/docker/web/Dockerfile
+          push: false
