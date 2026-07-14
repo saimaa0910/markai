@@ -67,6 +67,7 @@ class MessageCreate(BaseModel):
     content: str
     model_name: str
     prompt_id: Optional[uuid.UUID] = None  # Optional prompt template applied
+    system_prompt: Optional[str] = None
     rag_enabled: Optional[bool] = False
 
 
@@ -202,4 +203,22 @@ class TokenUsageResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- PLAYGROUND SCHEMAS ---
+
+class PlaygroundRunRequest(BaseModel):
+    system_prompt: Optional[str] = None
+    user_prompt: str
+    model_name: str
+
+
+class PlaygroundRunResponse(BaseModel):
+    output: str
+    provider: str
+    model: str
+    tokens_used: int
+    cost_usd: float
+    latency_ms: int
+
 

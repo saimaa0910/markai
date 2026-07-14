@@ -25,6 +25,8 @@ from api.schemas.ai import (
     DocumentChunkResponse,
     KnowledgeDocumentResponse,
     QuerySimilarChunksRequest,
+    PlaygroundRunRequest,
+    PlaygroundRunResponse,
 )
 
 prompts_router = APIRouter(prefix="/ai/prompts", tags=["ai-prompts"])
@@ -123,6 +125,57 @@ def delete_prompt(
     PromptService.delete_prompt_family(
         db=db, name=name, organization_id=membership.organization_id
     )
+
+
+@prompts_router.post("/test", response_model=PlaygroundRunResponse)
+def test_prompt(
+    test_in: PlaygroundRunRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    # 1. Build messages
+    messages = []
+    if test_in.system_prompt:
+        messages.append({"role": "system", "content": test_in.system_prompt})
+    messages.append({"role": "user", "content": test_in.user_prompt})
+
+    # 2. Call gateway
+    from api.ai.gateway.coordinator import AIGateway
+    gateway = AIGateway()
+    
+    res = gateway.chat(
+        db=db,
+        messages=messages,
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        model_name=test_in.model_name,
+    )
+
+    # 3. Log Token Usage to DB
+    from api.models.ai_usage import AITokenUsage
+    usage = AITokenUsage(
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        provider=res.get("provider", "unknown"),
+        model_name=res.get("model", test_in.model_name),
+        prompt_tokens=res.get("prompt_tokens", 0),
+        completion_tokens=res.get("completion_tokens", 0),
+        total_tokens=res.get("prompt_tokens", 0) + res.get("completion_tokens", 0),
+        cost_usd=res.get("cost_usd", 0.0),
+        latency_ms=res.get("latency_ms", 0),
+        status="success",
+    )
+    db.add(usage)
+    db.commit()
+
+    return {
+        "output": res["content"],
+        "provider": res.get("provider", "unknown"),
+        "model": res.get("model", test_in.model_name),
+        "tokens_used": res.get("prompt_tokens", 0) + res.get("completion_tokens", 0),
+        "cost_usd": float(res.get("cost_usd", 0.0)),
+        "latency_ms": res.get("latency_ms", 0),
+    }
 
 
 # ==========================================
@@ -264,6 +317,8 @@ def post_message(
                 detail="Applied prompt template does not exist inside this organization.",
             )
         system_instruction = prompt.content
+    elif msg_in.system_prompt:
+        system_instruction = msg_in.system_prompt
 
     # 3. Log user message
     user_msg = Message(

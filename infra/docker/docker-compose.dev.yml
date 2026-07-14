@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  api:
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../../apps/api:/app
+      - /app/.venv
+    environment:
+      - ENVIRONMENT=development
+
+  web:
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../../apps/web:/app/apps/web
+      - ../../packages:/app/packages
+      - /app/apps/web/.next
+      - /app/node_modules
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NODE_ENV=development

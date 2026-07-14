@@ -21,7 +21,7 @@ class Message(Base):
         String(50), nullable=False
     )  # 'user', 'assistant', 'system'
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    model_used: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
     provider_used: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

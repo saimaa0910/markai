@@ -16,33 +16,54 @@ from api.models.ai_registry import AIModelRegistry, AIRoutingRule
 from api.models.ai_usage import AITokenUsage
 from api.models.knowledge import KnowledgeDocument, DocumentChunk
 from api.models.file_asset import FileAsset
+# Phase 2 — AI Agent Platform
+from api.models.agent import (
+    AgentDefinition, AgentSession, AgentRun, AgentLog,
+    AgentType, AgentStatus, AgentRunStatus
+)
+# Phase 3 — Agent Memory System
+from api.models.memory import (
+    AgentMemory, ConversationMemory, OrganizationMemory, MemoryType
+)
+# Phase 4 — Workflow Engine
+from api.models.workflow import (
+    WorkflowDefinition, WorkflowExecution, WorkflowStep,
+    WorkflowTrigger, WorkflowStatus, ExecutionStatus
+)
+# Phase 5 — Integration & Notification Platform
+from api.models.integration import (
+    Integration, IntegrationCredential, SyncJob,
+    IntegrationProvider, IntegrationStatus,
+    Notification, NotificationPreference,
+    NotificationChannel, NotificationPriority
+)
 
 __all__ = [
-    "Base",
-    "User",
-    "Organization",
-    "UserOrganization",
-    "UserRole",
-    "Company",
-    "Contact",
-    "Lead",
-    "LeadStatus",
-    "Activity",
-    "ActivityType",
-    "Prompt",
-    "Conversation",
-    "Message",
-    "GeneratedContent",
-    "ContentVariant",
-    "Campaign",
-    "CampaignTemplate",
-    "CampaignAnalytics",
-    "CampaignStatus",
-    "CampaignChannel",
-    "AIModelRegistry",
-    "AIRoutingRule",
-    "AITokenUsage",
-    "KnowledgeDocument",
-    "DocumentChunk",
+    # Foundation
+    "Base", "User", "Organization", "UserOrganization", "UserRole",
+    # CRM
+    "Company", "Contact", "Lead", "LeadStatus", "Activity", "ActivityType",
+    # AI Platform
+    "Prompt", "Conversation", "Message",
+    "GeneratedContent", "ContentVariant",
+    "AIModelRegistry", "AIRoutingRule", "AITokenUsage",
+    "KnowledgeDocument", "DocumentChunk",
+    # Campaigns
+    "Campaign", "CampaignTemplate", "CampaignAnalytics",
+    "CampaignStatus", "CampaignChannel",
+    # Files
     "FileAsset",
+    # Phase 2: Agents
+    "AgentDefinition", "AgentSession", "AgentRun", "AgentLog",
+    "AgentType", "AgentStatus", "AgentRunStatus",
+    # Phase 3: Memory
+    "AgentMemory", "ConversationMemory", "OrganizationMemory", "MemoryType",
+    # Phase 4: Workflow
+    "WorkflowDefinition", "WorkflowExecution", "WorkflowStep",
+    "WorkflowTrigger", "WorkflowStatus", "ExecutionStatus",
+    # Phase 5: Integrations & Notifications
+    "Integration", "IntegrationCredential", "SyncJob",
+    "IntegrationProvider", "IntegrationStatus",
+    "Notification", "NotificationPreference",
+    "NotificationChannel", "NotificationPriority",
 ]

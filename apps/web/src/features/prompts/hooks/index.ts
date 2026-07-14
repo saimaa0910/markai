@@ -97,6 +97,9 @@ export function usePromptHistory(name: string | null) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+import { apiClient } from '@/services/api-client';
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Hook: usePromptTesting
 // ─────────────────────────────────────────────────────────────────────────────
 export function usePromptTesting() {
@@ -106,11 +109,13 @@ export function usePromptTesting() {
       model,
       content,
       variables,
+      systemPrompt,
     }: {
       provider: string;
       model: string;
       content: string;
       variables: Record<string, string>;
+      systemPrompt?: string;
     }): Promise<PromptTestingResult> => {
       // Sift prompt variables replacements
       let rendered = content;
@@ -118,24 +123,25 @@ export function usePromptTesting() {
         rendered = rendered.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), val);
       });
 
-      // Simple artificial delay representing gateway completion loop
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      // Call the real backend /ai/prompts/test endpoint
+      const res = await apiClient.post('/ai/prompts/test', {
+        system_prompt: systemPrompt || 'You are a helpful AI assistant.',
+        user_prompt: rendered,
+        model_name: model,
+      });
 
-      const tokens = Math.round(rendered.length / 4.2) + 80;
-      const latency = 150 + Math.round(Math.random() * 250);
-      const isLargeModel = model.includes('4') || model.includes('large');
-      const cost = tokens * (isLargeModel ? 0.000015 : 0.0000015);
+      const { output, provider: resProvider, model: resModel, tokens_used, cost_usd, latency_ms } = res.data;
 
       return {
         id: `test-${Date.now()}`,
-        provider,
-        model,
+        provider: resProvider,
+        model: resModel,
         prompt_name: 'Sandbox Inferences',
         variables_used: variables,
-        output: `Evaluated completion outputs for model: ${model}.\nRendered text length: ${rendered.length} characters.\nGenerated completion result successfully.`,
-        latency_ms: latency,
-        tokens_used: tokens,
-        cost_usd: cost,
+        output: output,
+        latency_ms: latency_ms,
+        tokens_used: tokens_used,
+        cost_usd: cost_usd,
         created_at: new Date().toISOString(),
       };
     },

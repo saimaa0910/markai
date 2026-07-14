@@ -6,12 +6,13 @@ const API_BASE_URL = typeof window !== 'undefined'
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request Interceptor: Attach access token
+// Request Interceptor: Attach access token & active tenant organization ID
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     if (typeof window !== 'undefined') {
@@ -23,8 +24,12 @@ apiClient.interceptors.request.use(
           if (token && config.headers) {
             config.headers.Authorization = `Bearer ${token}`;
           }
+          const orgId = parsed.state?.activeOrg?.id;
+          if (orgId && config.headers) {
+            config.headers['X-Organization-ID'] = orgId;
+          }
         } catch (e) {
-          console.error('Failed to parse auth token from storage', e);
+          console.error('Failed to parse auth token/org from storage', e);
         }
       }
     }
@@ -71,6 +76,14 @@ apiClient.interceptors.response.use(
         }
       }
     }
+
+    // Enhance timeout/network errors with descriptive message fields
+    if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
+      error.message = 'The server request timed out. Please verify provider connectivity and try again.';
+    } else if (!error.response) {
+      error.message = 'Network error: Cannot reach the Viptant API server.';
+    }
+
     return Promise.reject(error);
   }
 );

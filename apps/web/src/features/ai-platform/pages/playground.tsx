@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { apiClient } from '@/services/api-client';
+
 
 interface PromptTemplate {
   name: string;
@@ -159,23 +161,32 @@ export function PlaygroundPage() {
     setIsGenerating(true);
     setResponseOutput('');
 
-    // Determine target template answer or default
-    const matchingTemplate = TEMPLATES.find((t) => t.userPrompt.slice(0, 15) === userPrompt.slice(0, 15));
-    const targetResponse = matchingTemplate 
-      ? matchingTemplate.sampleResponse 
-      : `Response generated using ${selModel || 'model'} preset:\n\nUser Prompt: "${compiledPrompt}"\n\nTemperature config: ${temperature}\nSystem Instructions: "${systemPrompt}"\n\nTask compiled successfully.`;
+    try {
+      // Call real backend prompts test endpoint
+      const res = await apiClient.post('/ai/prompts/test', {
+        system_prompt: systemPrompt,
+        user_prompt: compiledPrompt,
+        model_name: selModel || 'gpt-4o-mini',
+      });
 
-    let currentIdx = 0;
-    timerRef.current = setInterval(() => {
-      if (currentIdx < targetResponse.length) {
-        setResponseOutput((prev) => prev + targetResponse.charAt(currentIdx));
-        currentIdx += 2;
-      } else {
-        if (timerRef.current) clearInterval(timerRef.current);
-        setIsGenerating(false);
-        toast.success('Generation Complete', 'Response output generated.');
-      }
-    }, 10);
+      const targetResponse = res.data.output || 'No response returned from the model.';
+
+      let currentIdx = 0;
+      timerRef.current = setInterval(() => {
+        if (currentIdx < targetResponse.length) {
+          setResponseOutput((prev) => prev + targetResponse.charAt(currentIdx));
+          currentIdx += 2;
+        } else {
+          if (timerRef.current) clearInterval(timerRef.current);
+          setIsGenerating(false);
+          toast.success('Generation Complete', 'Response output generated.');
+        }
+      }, 10);
+    } catch (err: any) {
+      setIsGenerating(false);
+      const errMsg = err.response?.data?.detail || 'Could not connect to AI Gateway.';
+      toast.error('Generation Failed', errMsg);
+    }
   };
 
   const handleStop = () => {
