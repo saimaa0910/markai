@@ -66,6 +66,14 @@ class LeadCreate(LeadBase):
     pass
 
 
+class LeadUpdate(BaseModel):
+    title: Optional[str] = None
+    status: Optional[LeadStatus] = None
+    value: Optional[float] = None
+    contact_id: Optional[uuid.UUID] = None
+    company_id: Optional[uuid.UUID] = None
+
+
 class LeadResponse(LeadBase):
     id: uuid.UUID
     organization_id: uuid.UUID

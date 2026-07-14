@@ -4,11 +4,14 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { Card } from '@eaimos/ui';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/auth';
-import { KeyRound, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from '@/components/ui/toast';
+import { KeyRound, Mail, AlertTriangle } from 'lucide-react';
+import { apiClient } from '@/services/api-client';
 
 const loginSchema = z.object({
   email: z.string().email({ message: "Invalid email address" }),
@@ -17,14 +20,21 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-export default function Login() {
+function LoginContent() {
   const router = useRouter();
-  const setAuth = useAuthStore((state) => state.setAuth);
+  const searchParams = useSearchParams();
+  const { setAuth, setActiveOrg, setOrganizations } = useAuthStore();
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
 
+  React.useEffect(() => {
+    if (searchParams.get('expired') === 'true') {
+      toast.info('Session Expired', 'Please sign in again to continue.');
+    }
+  }, [searchParams]);
+
   const {
-    register: formRegister,
+    register,
     handleSubmit,
     formState: { errors },
   } = useForm<LoginFormValues>({
@@ -35,116 +45,114 @@ export default function Login() {
     setLoading(true);
     setError(null);
     try {
-      // Format as urlencoded form data for OAuth2 compliance
       const params = new URLSearchParams();
       params.append('username', data.email);
       params.append('password', data.password);
 
-      const res = await fetch('http://localhost:8000/api/v1/auth/login', {
-        method: 'POST',
+      const loginRes = await apiClient.post('/auth/login', params, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: params.toString(),
       });
 
-      const tokenData = await res.json();
-      if (!res.ok) {
-        throw new Error(tokenData.detail || 'Login failed');
-      }
+      const { access_token, refresh_token } = loginRes.data;
 
-      // Fetch user profile info
-      const userRes = await fetch('http://localhost:8000/api/v1/users/me', {
-        headers: {
-          Authorization: `Bearer ${tokenData.access_token}`,
-        },
+      // Fetch Profile
+      const profileRes = await apiClient.get('/users/me', {
+        headers: { Authorization: `Bearer ${access_token}` },
       });
 
-      const userData = await userRes.json();
-      if (!userRes.ok) {
-        throw new Error('Failed to retrieve user profile.');
+      setAuth(access_token, refresh_token, profileRes.data);
+
+      // Fetch User's Organizations
+      const orgsRes = await apiClient.get('/organizations', {
+        headers: { Authorization: `Bearer ${access_token}` },
+      });
+
+      const orgs = orgsRes.data || [];
+      setOrganizations(orgs);
+
+      if (orgs.length > 0) {
+        setActiveOrg(orgs[0]);
       }
 
-      // Save to Zustand
-      setAuth(tokenData.access_token, tokenData.refresh_token, userData);
-
-      // Redirect to dashboard
+      toast.success('Successfully Signed In', `Welcome back, ${profileRes.data.full_name || 'User'}!`);
       router.push('/dashboard');
     } catch (err: any) {
-      setError(err.message || 'An error occurred during sign in.');
+      const msg = err.response?.data?.detail || err.message || 'Incorrect email or password.';
+      setError(msg);
+      toast.error('Authentication Failed', msg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center bg-black text-white px-6">
-      {/* Background patterns */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-80 h-80 bg-violet-600/10 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-[160px]" />
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-bold tracking-tight text-white">
+          Sign in to your account
+        </h1>
+        <p className="text-sm text-neutral-400">
+          Enter your credentials to access the EAIMOS Workspace.
+        </p>
       </div>
 
-      <div className="relative w-full max-w-md">
-        <Card className="glass shadow-2xl p-8 border-white/10">
-          <div className="flex flex-col items-center mb-8 text-center">
-            <div className="inline-flex p-3 rounded-xl border border-violet-500/20 bg-violet-500/5 text-violet-400 mb-4">
-              <KeyRound className="w-6 h-6 animate-bounce" />
-            </div>
-            <h2 className="text-2xl font-bold tracking-tight">Sign In</h2>
-            <p className="text-sm text-neutral-400 mt-1">Access the EAIMOS marketing operating system</p>
-          </div>
+      {error && (
+        <div className="p-3.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex gap-2.5 items-center">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
-          {error && (
-            <div className="mb-6 p-4 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
-              {error}
-            </div>
-          )}
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        <Input
+          label="Email Address"
+          type="email"
+          placeholder="name@company.com"
+          error={errors.email?.message}
+          disabled={loading}
+          leftIcon={<Mail className="w-4 h-4" />}
+          {...register('email')}
+        />
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Email Address</label>
-              <input
-                type="email"
-                {...formRegister('email')}
-                placeholder="name@company.com"
-                className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/15 focus:border-violet-500 focus:outline-none transition-colors text-sm"
-              />
-              {errors.email && <p className="text-xs text-rose-400 mt-1">{errors.email.message}</p>}
-            </div>
+        <Input
+          label="Password"
+          type="password"
+          placeholder="••••••••"
+          error={errors.password?.message}
+          disabled={loading}
+          leftIcon={<KeyRound className="w-4 h-4" />}
+          {...register('password')}
+        />
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Password</label>
-              <input
-                type="password"
-                {...formRegister('password')}
-                placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/15 focus:border-violet-500 focus:outline-none transition-colors text-sm"
-              />
-              {errors.password && <p className="text-xs text-rose-400 mt-1">{errors.password.message}</p>}
-            </div>
+        <div className="flex justify-between items-center text-xs mt-1">
+          <label className="flex items-center gap-2 cursor-pointer text-neutral-400 hover:text-white transition-colors">
+            <input type="checkbox" className="rounded bg-neutral-900 border-white/10" />
+            <span>Remember me</span>
+          </label>
+          <Link href="/auth/forgot-password" className="text-violet-400 hover:text-violet-300 transition-colors">
+            Forgot password?
+          </Link>
+        </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 rounded-lg bg-violet-600 hover:bg-violet-700 transition-colors font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Signing In...
-                </>
-              ) : (
-                'Sign In'
-              )}
-            </button>
-          </form>
+        <Button type="submit" variant="violet" isLoading={loading} className="w-full mt-2">
+          Sign In
+        </Button>
+      </form>
 
-          <p className="text-center text-xs text-neutral-400 mt-6">
-            Don't have an account?{' '}
-            <Link href="/auth/register" className="text-violet-400 hover:underline">
-              Create one
-            </Link>
-          </p>
-        </Card>
+      <div className="text-center text-xs text-neutral-400">
+        Don't have an account?{' '}
+        <Link href="/auth/register" className="text-violet-400 hover:text-violet-300 font-semibold transition-colors">
+          Create an account
+        </Link>
       </div>
     </div>
+  );
+}
+
+export default function Login() {
+  return (
+    <React.Suspense fallback={<div className="text-neutral-500 text-xs">Loading Auth Session...</div>}>
+      <LoginContent />
+    </React.Suspense>
   );
 }

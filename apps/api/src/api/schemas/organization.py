@@ -18,3 +18,16 @@ class OrganizationResponse(OrganizationBase):
 
     class Config:
         from_attributes = True
+
+
+class OrganizationMemberResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    full_name: str
+    is_active: bool
+    is_superuser: bool
+    role: str
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True

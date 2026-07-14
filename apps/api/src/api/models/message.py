@@ -1,6 +1,6 @@
 import uuid
-from typing import TYPE_CHECKING
-from sqlalchemy import ForeignKey, String, Text
+from typing import TYPE_CHECKING, Optional
+from sqlalchemy import ForeignKey, String, Text, Integer, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
@@ -22,6 +22,12 @@ class Message(Base):
     )  # 'user', 'assistant', 'system'
     content: Mapped[str] = mapped_column(Text, nullable=False)
     model_used: Mapped[str] = mapped_column(String(100), nullable=False)
+    
+    provider_used: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 6), nullable=True)
 
     # Relationships
     conversation: Mapped["Conversation"] = relationship(

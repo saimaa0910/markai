@@ -4,10 +4,13 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { Card } from '@eaimos/ui';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Sparkles, Globe, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { toast } from '@/components/ui/toast';
+import { Sparkles, Mail, KeyRound, User, Building, AlertTriangle } from 'lucide-react';
+import { apiClient } from '@/services/api-client';
 
 const registerSchema = z.object({
   email: z.string().email({ message: "Invalid email address" }),
@@ -24,7 +27,7 @@ export default function Register() {
   const [loading, setLoading] = React.useState(false);
 
   const {
-    register: formRegister,
+    register,
     handleSubmit,
     formState: { errors },
   } = useForm<RegisterFormValues>({
@@ -35,121 +38,98 @@ export default function Register() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/v1/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: data.email,
-          password: data.password,
-          full_name: data.fullName,
-          org_name: data.orgName,
-        }),
+      const res = await apiClient.post('/auth/register', {
+        email: data.email,
+        password: data.password,
+        full_name: data.fullName,
+        org_name: data.orgName,
       });
 
-      const result = await res.json();
-      if (!res.ok) {
-        throw new Error(result.detail || 'Registration failed');
+      if (res.status === 201 || res.status === 200) {
+        toast.success(
+          'Account Created Successfully!',
+          'Your organization has been configured. Sign in to start.'
+        );
+        router.push('/auth/login');
       }
-
-      router.push('/auth/login');
     } catch (err: any) {
-      setError(err.message || 'An error occurred during registration.');
+      const msg = err.response?.data?.detail || err.message || 'An error occurred during registration.';
+      setError(msg);
+      toast.error('Registration Failed', msg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center bg-black text-white px-6">
-      {/* Background patterns */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-80 h-80 bg-violet-600/10 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-[160px]" />
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+          Create your account <Sparkles className="w-5 h-5 text-violet-400 animate-pulse" />
+        </h1>
+        <p className="text-sm text-neutral-400">
+          Set up your organization and unified marketing dashboard.
+        </p>
       </div>
 
-      <div className="relative w-full max-w-md">
-        <Card className="glass shadow-2xl p-8 border-white/10">
-          <div className="flex flex-col items-center mb-8 text-center">
-            <div className="inline-flex p-3 rounded-xl border border-violet-500/20 bg-violet-500/5 text-violet-400 mb-4">
-              <Sparkles className="w-6 h-6 animate-pulse" />
-            </div>
-            <h2 className="text-2xl font-bold tracking-tight">Create your Account</h2>
-            <p className="text-sm text-neutral-400 mt-1">Get started with EAIMOS unified dashboard</p>
-          </div>
+      {error && (
+        <div className="p-3.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex gap-2.5 items-center">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
-          {error && (
-            <div className="mb-6 p-4 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
-              {error}
-            </div>
-          )}
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
+        <Input
+          label="Full Name"
+          type="text"
+          placeholder="John Doe"
+          error={errors.fullName?.message}
+          disabled={loading}
+          leftIcon={<User className="w-4 h-4" />}
+          {...register('fullName')}
+        />
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Full Name</label>
-              <input
-                type="text"
-                {...formRegister('fullName')}
-                placeholder="John Doe"
-                className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/15 focus:border-violet-500 focus:outline-none transition-colors text-sm"
-              />
-              {errors.fullName && <p className="text-xs text-rose-400 mt-1">{errors.fullName.message}</p>}
-            </div>
+        <Input
+          label="Email Address"
+          type="email"
+          placeholder="name@company.com"
+          error={errors.email?.message}
+          disabled={loading}
+          leftIcon={<Mail className="w-4 h-4" />}
+          {...register('email')}
+        />
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Email Address</label>
-              <input
-                type="email"
-                {...formRegister('email')}
-                placeholder="name@company.com"
-                className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/15 focus:border-violet-500 focus:outline-none transition-colors text-sm"
-              />
-              {errors.email && <p className="text-xs text-rose-400 mt-1">{errors.email.message}</p>}
-            </div>
+        <Input
+          label="Organization Name"
+          type="text"
+          placeholder="Acme Corporation"
+          error={errors.orgName?.message}
+          disabled={loading}
+          leftIcon={<Building className="w-4 h-4" />}
+          {...register('orgName')}
+        />
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Organization Name</label>
-              <input
-                type="text"
-                {...formRegister('orgName')}
-                placeholder="Acme Corporation"
-                className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/15 focus:border-violet-500 focus:outline-none transition-colors text-sm"
-              />
-              {errors.orgName && <p className="text-xs text-rose-400 mt-1">{errors.orgName.message}</p>}
-            </div>
+        <Input
+          label="Password"
+          type="password"
+          placeholder="••••••••"
+          error={errors.password?.message}
+          disabled={loading}
+          leftIcon={<KeyRound className="w-4 h-4" />}
+          {...register('password')}
+        />
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Password</label>
-              <input
-                type="password"
-                {...formRegister('password')}
-                placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-lg bg-white/5 border border-white/15 focus:border-violet-500 focus:outline-none transition-colors text-sm"
-              />
-              {errors.password && <p className="text-xs text-rose-400 mt-1">{errors.password.message}</p>}
-            </div>
+        <Button type="submit" variant="violet" isLoading={loading} className="w-full mt-2">
+          Register Now
+        </Button>
+      </form>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 rounded-lg bg-violet-600 hover:bg-violet-700 transition-colors font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Registering...
-                </>
-              ) : (
-                'Register Now'
-              )}
-            </button>
-          </form>
-
-          <p className="text-center text-xs text-neutral-400 mt-6">
-            Already have an account?{' '}
-            <Link href="/auth/login" className="text-violet-400 hover:underline">
-              Sign In
-            </Link>
-          </p>
-        </Card>
+      <div className="text-center text-xs text-neutral-400">
+        Already have an account?{' '}
+        <Link href="/auth/login" className="text-violet-400 hover:text-violet-300 font-semibold transition-colors">
+          Sign In
+        </Link>
       </div>
     </div>
   );

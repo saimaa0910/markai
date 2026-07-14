@@ -17,6 +17,7 @@ from api.schemas.crm import (
     ContactResponse,
     LeadCreate,
     LeadResponse,
+    LeadUpdate,
     ActivityCreate,
     ActivityResponse,
 )
@@ -260,6 +261,34 @@ def delete_lead(
         )
     db.delete(lead)
     db.commit()
+
+
+@leads_router.patch("/{lead_id}", response_model=LeadResponse)
+def update_lead(
+    lead_id: uuid.UUID,
+    lead_in: LeadUpdate,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    lead = (
+        db.query(Lead)
+        .filter(Lead.id == lead_id, Lead.organization_id == membership.organization_id)
+        .first()
+    )
+    if not lead:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found"
+        )
+
+    # Apply updates
+    update_data = lead_in.model_dump(exclude_unset=True)
+    for field, val in update_data.items():
+        setattr(lead, field, val)
+
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+    return lead
 
 
 # ==========================================

@@ -41,7 +41,7 @@ docker compose -f infra/docker/docker-compose.yml up --build -d
 ---
 
 ## 4. Step 3: Run Database Migrations Inside Docker
-
+1
 Once the postgres database container is up and healthy, we must run the Alembic database migrations inside the running API container to construct user schemas, organization logs, CRM profiles, and AI libraries.
 
 Execute this single command to migrate the database:

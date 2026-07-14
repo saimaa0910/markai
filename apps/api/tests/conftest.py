@@ -1,5 +1,6 @@
+import datetime
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from api.database.session import get_db
 from api.models import Base
@@ -11,6 +12,12 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///./test_db.db"
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
+
+@event.listens_for(engine, "connect")
+def register_sqlite_now(dbapi_connection, connection_record):
+    # Teach SQLite what now() is for compatibility with PostgreSQL migrations
+    dbapi_connection.create_function("now", 0, lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

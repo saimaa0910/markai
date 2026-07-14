@@ -1,37 +1,107 @@
 @import "tailwindcss";
 
+/* ─── Semantic CSS design tokens (dark mode — default) ─────────────────── */
 @layer base {
   :root {
+    /* Core palette */
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
-    
-    --card: 240 10% 3.9%;
+
+    --card: 240 8% 5%;
     --card-foreground: 0 0% 98%;
-    
-    --popover: 240 10% 3.9%;
+
+    --popover: 240 10% 6%;
     --popover-foreground: 0 0% 98%;
-    
+
     --primary: 263.4 90% 50.4%;
     --primary-foreground: 210 20% 98%;
-    
+
     --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
-    
+
     --muted: 240 3.7% 15.9%;
     --muted-foreground: 240 5% 64.9%;
-    
+
     --accent: 240 3.7% 15.9%;
     --accent-foreground: 0 0% 98%;
-    
-    --destructive: 0 62.8% 30.6%;
+
+    --destructive: 0 62.8% 40%;
     --destructive-foreground: 0 0% 98%;
-    
+
     --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
+    --input: 240 4% 13%;
     --ring: 263.4 90% 50.4%;
+
+    /* Extended semantic tokens */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 10%;
+
+    /* Sidebar */
+    --sidebar-bg: 240 10% 3%;
+    --sidebar-border: 240 3.7% 10%;
+    --sidebar-foreground: 240 5% 64.9%;
+    --sidebar-active-bg: 263.4 90% 50.4%;
+    --sidebar-active-foreground: 0 0% 100%;
+
+    /* Charts */
+    --chart-1: 263.4 90% 50.4%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 199 89% 48%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 84% 60%;
+
+    /* Scrollbar (dark) */
+    --scrollbar-track: 0 0% 5%;
+    --scrollbar-thumb: 240 3.7% 20%;
+    --scrollbar-thumb-hover: 263.4 60% 40%;
+  }
+
+  /* ─── Light mode overrides ─────────────────────────────────────────────── */
+  :root:not(.dark) {
+    --background: 0 0% 98%;
+    --foreground: 240 10% 3.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --primary: 263.4 90% 50.4%;
+    --primary-foreground: 210 20% 98%;
+
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 88%;
+    --input: 240 5.9% 90%;
+    --ring: 263.4 90% 50.4%;
+
+    --success: 142 71% 38%;
+    --warning: 38 92% 40%;
+
+    --sidebar-bg: 0 0% 97%;
+    --sidebar-border: 240 5.9% 88%;
+    --sidebar-foreground: 240 3.8% 46.1%;
+
+    --scrollbar-track: 0 0% 94%;
+    --scrollbar-thumb: 240 5.9% 75%;
+    --scrollbar-thumb-hover: 263.4 60% 55%;
   }
 }
 
+/* ─── Tailwind v4 @theme mappings ────────────────────────────────────────── */
 @theme {
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
@@ -52,24 +122,194 @@
   --color-popover-foreground: hsl(var(--popover-foreground));
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
 }
 
+/* ─── Scroll jitter & CLS prevention ────────────────────────────────────── */
+/*
+  Force the browser to always reserve scrollbar width so layout never
+  shifts when content height crosses the viewport threshold.
+*/
+html {
+  overflow-y: scroll;                  /* always-visible scrollbar gutter    */
+  scrollbar-gutter: stable;            /* modern CLS prevention              */
+  scroll-behavior: smooth;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+/*
+  Prevent double-scrollbars: body itself must NOT scroll independently;
+  only the inner content areas scroll.
+*/
 body {
+  overflow: hidden;                    /* body overflow managed by children  */
+  height: 100dvh;
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  overflow-x: hidden;
+  font-family: var(--font-geist-sans, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* Glassmorphism custom classes */
+/* Fix mobile viewport unit jitter (100vh vs 100dvh) */
+@supports (height: 100dvh) {
+  body { height: 100dvh; }
+}
+
+/* ─── Custom scrollbar styling ───────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--scrollbar-track));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--scrollbar-thumb));
+  border-radius: 9999px;
+  transition: background 0.2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--scrollbar-thumb-hover));
+}
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--scrollbar-thumb)) hsl(var(--scrollbar-track));
+}
+
+/* ─── Theme transition — smooth, no flash ───────────────────────────────── */
+*,
+*::before,
+*::after {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.2s ease,
+    fill 0.2s ease,
+    stroke 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+/* Opt-out animations from theme transitions (keeps chart animations snappy) */
+svg, canvas, video, img {
+  transition: none;
+}
+
+/* ─── Reduced-motion support ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* ─── Overflow / sticky header fixes ────────────────────────────────────── */
+
+/* Dashboard wrapper — single scrollable column, header sticks */
+.dashboard-content {
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100dvh;
+  overscroll-behavior-y: contain;
+}
+
+/* Prevent sticky header/sidebar from jittering during scroll */
+.sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  will-change: transform;          /* GPU-composite: no layout reflow       */
+  transform: translateZ(0);
+}
+
+/* Sidebar: no scroll on its own, let inner nav scroll */
+.sidebar-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+/* Glassmorphism classes */
 .glass {
   background: rgba(10, 10, 12, 0.45);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+:root:not(.dark) .glass {
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+}
 
 .glass-glow {
   box-shadow: 0 0 25px rgba(139, 92, 246, 0.15);
   border: 1px solid rgba(139, 92, 246, 0.25);
 }
+
+/* Grid dots background */
+.bg-grid-dots {
+  background-image: radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+:root:not(.dark) .bg-grid-dots {
+  background-image: radial-gradient(rgba(0,0,0,0.05) 1px, transparent 1px);
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+  will-change: transform;
+}
+.animate-marquee:hover,
+.marquee-track:hover .animate-marquee {
+  animation-play-state: paused;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 16px rgba(139, 92, 246, 0.25); }
+  50%       { box-shadow: 0 0 36px rgba(139, 92, 246, 0.50); }
+}
+.glow-pulse {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+@keyframes gradient-x {
+  0%,100% { background-position: 0% 50%; }
+  50%     { background-position: 100% 50%; }
+}
+.animate-gradient-x {
+  background-size: 200% auto;
+  animation: gradient-x 4s ease infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
+.animate-float { animation: float 5s ease-in-out infinite; }
+.animate-float-slow { animation: float 7s ease-in-out infinite; }
+.animate-float-delayed { animation: float 6s ease-in-out 1.5s infinite; }
+
+/* ─── Focus-visible ring for accessibility ───────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+

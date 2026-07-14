@@ -11,6 +11,11 @@ from api.models.conversation import Conversation
 from api.models.message import Message
 from api.models.content_generator import GeneratedContent
 from api.models.content_variant import ContentVariant
+from api.models.campaign import Campaign, CampaignTemplate, CampaignAnalytics, CampaignStatus, CampaignChannel
+from api.models.ai_registry import AIModelRegistry, AIRoutingRule
+from api.models.ai_usage import AITokenUsage
+from api.models.knowledge import KnowledgeDocument, DocumentChunk
+from api.models.file_asset import FileAsset
 
 __all__ = [
     "Base",
@@ -29,4 +34,15 @@ __all__ = [
     "Message",
     "GeneratedContent",
     "ContentVariant",
+    "Campaign",
+    "CampaignTemplate",
+    "CampaignAnalytics",
+    "CampaignStatus",
+    "CampaignChannel",
+    "AIModelRegistry",
+    "AIRoutingRule",
+    "AITokenUsage",
+    "KnowledgeDocument",
+    "DocumentChunk",
+    "FileAsset",
 ]

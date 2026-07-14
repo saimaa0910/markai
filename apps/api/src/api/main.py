@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from api.core.config import settings
-from api.routes import auth, users, organizations, crm, ai, generator
+from api.routes import auth, users, organizations, crm, ai, generator, campaigns, files
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -31,7 +31,13 @@ app.include_router(crm.leads_router, prefix=settings.API_V1_STR)
 app.include_router(crm.activities_router, prefix=settings.API_V1_STR)
 app.include_router(ai.prompts_router, prefix=settings.API_V1_STR)
 app.include_router(ai.conversations_router, prefix=settings.API_V1_STR)
+app.include_router(ai.knowledge_router, prefix=settings.API_V1_STR)
+app.include_router(ai.models_router, prefix=settings.API_V1_STR)
+app.include_router(ai.routing_rules_router, prefix=settings.API_V1_STR)
+app.include_router(ai.usage_router, prefix=settings.API_V1_STR)
 app.include_router(generator.generator_router, prefix=settings.API_V1_STR)
+app.include_router(campaigns.campaigns_router, prefix=settings.API_V1_STR)
+app.include_router(files.router, prefix=settings.API_V1_STR)
 
 
 @app.exception_handler(Exception)
