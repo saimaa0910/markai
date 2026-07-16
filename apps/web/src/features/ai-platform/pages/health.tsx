@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useProviders, useProviderLogs } from '../hooks';
+import { useProviders, useProviderLogs, useIncidents } from '../hooks';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
 import { StatCard } from '@/components/ui/stat-card';
@@ -21,51 +21,27 @@ interface IncidentLog {
   resolved: boolean;
 }
 
-const MOCK_INCIDENTS: IncidentLog[] = [
-  {
-    id: 'inc-1',
-    provider: 'groq',
-    timestamp: '2026-07-14T08:30:00Z',
-    type: 'Rate Limit Exhausted',
-    message: 'HTTP 429 received on llama3 inference node. Automatic fallback router redirected traffic to openai.',
-    resolved: true,
-  },
-  {
-    id: 'inc-2',
-    provider: 'anthropic',
-    timestamp: '2026-07-13T22:15:00Z',
-    type: 'High Latency Spike',
-    message: 'Average response latency exceeded 3200ms threshold on claude-3-5-sonnet.',
-    resolved: true,
-  },
-  {
-    id: 'inc-3',
-    provider: 'google',
-    timestamp: '2026-07-14T10:12:00Z',
-    type: 'Network Handshake Fail',
-    message: 'Connection timed out to gemini-1.5-flash API endpoint. Gateway retrying with fallback targets.',
-    resolved: false,
-  },
-];
 
 export function HealthPage() {
   const { providers, isLoading, refetch } = useProviders();
-  const [incidents, setIncidents] = React.useState<IncidentLog[]>(MOCK_INCIDENTS);
+  const { incidents, resolveIncident, refetch: refetchIncidents } = useIncidents();
   const [isRefreshing, setIsRefreshing] = React.useState(false);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await refetch();
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await refetchIncidents();
     setIsRefreshing(false);
     toast.success('Live Monitoring Refreshed', 'Handshake logs updated in real time.');
   };
 
-  const handleResolveIncident = (id: string) => {
-    setIncidents(
-      incidents.map((inc) => (inc.id === id ? { ...inc, resolved: true } : inc))
-    );
-    toast.success('Incident Resolved', 'Marked target outage log as resolved.');
+  const handleResolveIncident = async (id: string) => {
+    try {
+      await resolveIncident.mutateAsync(id);
+      toast.success('Incident Resolved', 'Marked target outage log as resolved.');
+    } catch (e) {
+      toast.error('Failed to Resolve', 'Could not complete incident resolution.');
+    }
   };
 
   // Aggregated general stats

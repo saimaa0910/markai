@@ -81,7 +81,7 @@ export function ComparisonSection() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white">Viptant AI Marketing OS</h3>
-                  <p className="text-xs text-violet-400 font-medium">The intelligent way forward</p>
+                  <p className="text-xs text-black-400 font-medium">The intelligent way forward</p>
                 </div>
               </div>
               <ul className="space-y-3.5">

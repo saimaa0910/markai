@@ -2,13 +2,13 @@ import os
 import time
 import json
 import httpx
-from typing import Generator, List, Dict, Any
+from typing import Generator, List, Dict, Any, Optional
 from api.ai.providers.base import BaseLLMProvider
 
 
 class ClaudeProvider(BaseLLMProvider):
-    def __init__(self) -> None:
-        self.api_key = os.getenv("ANTHROPIC_API_KEY")
+    def __init__(self, api_key: Optional[str] = None) -> None:
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self.client = httpx.Client(timeout=30.0)
 
     def _prepare_payload(self, messages: List[Dict[str, str]], model: str, temperature: float, **kwargs) -> Dict[str, Any]:
@@ -47,7 +47,8 @@ class ClaudeProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             system_instructions = [m["content"] for m in messages if m["role"] == "system"]
             user_prompts = [m["content"] for m in messages if m["role"] == "user"]
             instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
@@ -61,6 +62,8 @@ class ClaudeProvider(BaseLLMProvider):
                 "provider": "anthropic",
                 "model": model,
             }
+        elif not self.api_key:
+            raise RuntimeError("Claude API key is not configured.")
 
         payload = self._prepare_payload(messages, model, temperature, **kwargs)
         start_time = time.perf_counter()
@@ -93,7 +96,8 @@ class ClaudeProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             mock_text = f"[Simulated Claude Stream ({model})]: Stream content."
             for word in mock_text.split(" "):
                 time.sleep(0.02)
@@ -103,6 +107,8 @@ class ClaudeProvider(BaseLLMProvider):
                     "completion_tokens": 15,
                 }
             return
+        elif not self.api_key:
+            raise RuntimeError("Claude API key is not configured.")
 
         payload = self._prepare_payload(messages, model, temperature, stream=True, **kwargs)
         with self.client.stream(
@@ -172,8 +178,11 @@ class ClaudeProvider(BaseLLMProvider):
         return self.chat(messages=json_messages, model=model)
 
     def health(self) -> bool:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             return True
+        if not self.api_key:
+            return False
         try:
             self.chat(
                 messages=[{"role": "user", "content": "ping"}],

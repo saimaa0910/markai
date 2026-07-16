@@ -2,13 +2,14 @@ import os
 import time
 import json
 import httpx
-from typing import Generator, List, Dict, Any
+from typing import Generator, List, Dict, Any, Optional
 from api.ai.providers.base import BaseLLMProvider
 
 
 class OpenAIProvider(BaseLLMProvider):
-    def __init__(self) -> None:
-        self.api_key = os.getenv("OPENAI_API_KEY")
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         # Instantiate a client that is safe to reuse
         self.client = httpx.Client(timeout=30.0)
 
@@ -19,7 +20,8 @@ class OpenAIProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             system_instructions = [m["content"] for m in messages if m["role"] == "system"]
             user_prompts = [m["content"] for m in messages if m["role"] == "user"]
             instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
@@ -33,10 +35,12 @@ class OpenAIProvider(BaseLLMProvider):
                 "provider": "openai",
                 "model": model,
             }
+        elif not self.api_key:
+            raise RuntimeError("OpenAI API key is not configured.")
 
         start_time = time.perf_counter()
         response = self.client.post(
-            "https://api.openai.com/v1/chat/completions",
+            f"{self.base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -68,7 +72,8 @@ class OpenAIProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             mock_text = f"[Simulated OpenAI Stream ({model})]: Streamed response."
             for word in mock_text.split(" "):
                 time.sleep(0.02)
@@ -78,10 +83,12 @@ class OpenAIProvider(BaseLLMProvider):
                     "completion_tokens": 20,
                 }
             return
+        elif not self.api_key:
+            raise RuntimeError("OpenAI API key is not configured.")
 
         with self.client.stream(
             "POST",
-            "https://api.openai.com/v1/chat/completions",
+            f"{self.base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -114,12 +121,15 @@ class OpenAIProvider(BaseLLMProvider):
                         pass
 
     def embeddings(self, text: str, model: str) -> List[float]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             # Return standard mock embedding vector (1536 dimension)
             return [0.01] * 1536
+        elif not self.api_key:
+            raise RuntimeError("OpenAI API key is not configured.")
 
         response = self.client.post(
-            "https://api.openai.com/v1/embeddings",
+            f"{self.base_url}/embeddings",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -154,8 +164,11 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
     def health(self) -> bool:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             return True
+        if not self.api_key:
+            return False
         try:
             # Perform tiny check query
             self.chat(

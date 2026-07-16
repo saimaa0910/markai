@@ -1,4 +1,6 @@
 import * as React from 'react';
+import { useProviders, useAdminConsoleLimits } from '../hooks';
+import { useAuthStore } from '@/store/auth';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
 import { StatCard } from '@/components/ui/stat-card';
@@ -29,12 +31,6 @@ interface AuditLog {
   timestamp: string;
 }
 
-const MOCK_ORGS: OrgCap[] = [
-  { id: 'org-1', name: 'Saimaa0910 Corp', creditLimit: 5000, creditUsed: 1250, rpmLimit: 1000, tpmLimit: 150000 },
-  { id: 'org-2', name: 'Viptant Marketing', creditLimit: 2500, creditUsed: 840, rpmLimit: 500, tpmLimit: 80000 },
-  { id: 'org-3', name: 'Acme Growth Inc', creditLimit: 1000, creditUsed: 980, rpmLimit: 200, tpmLimit: 30000 },
-];
-
 const MOCK_AUDITS: AuditLog[] = [
   { id: 'aud-1', actor: 'admin@viptant.com', action: 'ROTATE_API_KEY', target: 'openai_key_s4', timestamp: '2026-07-14T09:40:00Z' },
   { id: 'aud-2', actor: 'admin@viptant.com', action: 'CREDITS_ADD', target: 'org-1 (+$500)', timestamp: '2026-07-14T08:12:00Z' },
@@ -43,64 +39,111 @@ const MOCK_AUDITS: AuditLog[] = [
 
 export function AdminPage() {
   const [activeTab, setActiveTab] = React.useState<'orgs' | 'keys' | 'limits' | 'audits'>('orgs');
-  const [orgs, setOrgs] = React.useState<OrgCap[]>(MOCK_ORGS);
+  const { orgLimits, providerKeys, addCredits, updateLimits, rotateKey, isLoading } = useAdminConsoleLimits();
+  const { providers } = useProviders();
+  const { activeOrg, user } = useAuthStore();
   const [audits, setAudits] = React.useState<AuditLog[]>(MOCK_AUDITS);
   
   // Credit update inputs
   const [amountToAdd, setAmountToAdd] = React.useState<Record<string, string>>({});
   
   // Rate limits inputs
-  const [rpmInput, setRpmInput] = React.useState<Record<string, number>>({
-    'org-1': 1000,
-    'org-2': 500,
-    'org-3': 200,
-  });
+  const [rpmInput, setRpmInput] = React.useState<Record<string, number>>({});
 
-  const handleAddCredits = (orgId: string) => {
+  const orgs = React.useMemo<OrgCap[]>(() => {
+    return orgLimits.map((limit) => {
+      const isCurrent = limit.organization_id === activeOrg?.id;
+      return {
+        id: limit.organization_id,
+        name: isCurrent ? (activeOrg?.name || 'Active Organization') : `Tenant Org (${limit.organization_id.substring(0, 8)})`,
+        creditLimit: limit.credit_limit,
+        creditUsed: limit.credit_used,
+        rpmLimit: limit.rpm_limit,
+        tpmLimit: limit.tpm_limit,
+      };
+    });
+  }, [orgLimits, activeOrg]);
+
+  React.useEffect(() => {
+    if (orgLimits.length) {
+      const initialRpm: Record<string, number> = {};
+      orgLimits.forEach((org) => {
+        initialRpm[org.organization_id] = org.rpm_limit;
+      });
+      setRpmInput(initialRpm);
+    }
+  }, [orgLimits]);
+
+  const handleAddCredits = async (orgId: string) => {
     const amount = Number(amountToAdd[orgId]);
     if (isNaN(amount) || amount <= 0) {
       toast.error('Invalid Amount', 'Enter a positive numeric balance.');
       return;
     }
 
-    setOrgs(
-      orgs.map((org) =>
-        org.id === orgId ? { ...org, creditLimit: org.creditLimit + amount } : org
-      )
-    );
-    
-    // Add to audit trail
-    const newAudit: AuditLog = {
-      id: `aud-${Date.now()}`,
-      actor: 'admin@viptant.com',
-      action: 'CREDITS_ADD',
-      target: `${orgs.find(o => o.id === orgId)?.name} (+$${amount})`,
-      timestamp: new Date().toISOString(),
-    };
-    setAudits([newAudit, ...audits]);
-    setAmountToAdd((prev) => ({ ...prev, [orgId]: '' }));
-    toast.success('Credits Added', `Injected $${amount} to organization limits.`);
+    try {
+      await addCredits.mutateAsync({ orgId, amount });
+      
+      const newAudit: AuditLog = {
+        id: `aud-${Date.now()}`,
+        actor: user?.email || 'admin@viptant.com',
+        action: 'CREDITS_ADD',
+        target: `${orgs.find(o => o.id === orgId)?.name} (+$${amount})`,
+        timestamp: new Date().toISOString(),
+      };
+      setAudits([newAudit, ...audits]);
+      setAmountToAdd((prev) => ({ ...prev, [orgId]: '' }));
+      toast.success('Credits Added', `Injected $${amount} to organization limits.`);
+    } catch (e) {
+      toast.error('Credits Update Failed', 'Unable to inject credits.');
+    }
   };
 
-  const handleRotateKey = (keyName: string) => {
-    toast.success('Key Rotated', `${keyName} credential secret rotated successfully.`);
-    const newAudit: AuditLog = {
-      id: `aud-${Date.now()}`,
-      actor: 'admin@viptant.com',
-      action: 'ROTATE_API_KEY',
-      target: keyName,
-      timestamp: new Date().toISOString(),
-    };
-    setAudits([newAudit, ...audits]);
+  const handleRotateKey = async (providerName: string, label: string) => {
+    const keyVal = prompt(`Enter new API key for ${label}:`);
+    if (!keyVal) return;
+
+    const toastId = toast.loading(`Rotating API key for ${label}...`);
+    try {
+      await rotateKey.mutateAsync({ providerName, api_key: keyVal });
+      
+      const newAudit: AuditLog = {
+        id: `aud-${Date.now()}`,
+        actor: user?.email || 'admin@viptant.com',
+        action: 'ROTATE_API_KEY',
+        target: label,
+        timestamp: new Date().toISOString(),
+      };
+      setAudits([newAudit, ...audits]);
+      toast.dismiss(toastId);
+      toast.success('Key Rotated', `${label} credential secret rotated successfully.`);
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error('Rotation Failed', 'Could not apply key changes.');
+    }
   };
 
-  const handleSaveRateLimits = (orgId: string) => {
-    const nextRpm = rpmInput[orgId];
-    setOrgs(
-      orgs.map((org) => (org.id === orgId ? { ...org, rpmLimit: nextRpm } : org))
-    );
-    toast.success('Rate Limits Applied', 'Modified organization rate parameters.');
+  const handleSaveRateLimits = async (orgId: string) => {
+    const nextRpm = rpmInput[orgId] || 60;
+    try {
+      await updateLimits.mutateAsync({ orgId, rpmLimit: nextRpm, tpmLimit: 50000 });
+      toast.success('Rate Limits Applied', 'Modified organization rate parameters.');
+    } catch (e) {
+      toast.error('Limits Save Failed', 'Could not apply rate limits.');
+    }
   };
+
+  const providerKeysDisplay = React.useMemo(() => {
+    return providers.map((prov) => {
+      const match = providerKeys.find((k: any) => k.provider_name.toLowerCase() === prov.key.toLowerCase());
+      return {
+        id: prov.key,
+        label: `${prov.name} API Credentials`,
+        masked: match ? match.masked_key : 'No custom key configured (using system fallback)',
+        providerName: prov.key,
+      };
+    });
+  }, [providers, providerKeys]);
 
   return (
     <div className="flex flex-col gap-6 max-w-[1400px] mx-auto pb-12">
@@ -242,12 +285,8 @@ export function AdminPage() {
                   </div>
 
                   <div className="flex flex-col gap-3 mt-2">
-                    {[
-                      { key: 'groq_key', label: 'Groq Auth Token', masked: 'groq_sec_sk_*****_t9fd' },
-                      { key: 'openai_key', label: 'OpenAI Secret Key', masked: 'sk-proj-*****_y4a2' },
-                      { key: 'google_key', label: 'Google Studio Key', masked: 'ai_studio_api_*****_23m1' },
-                    ].map((row) => (
-                      <div key={row.key} className="p-3.5 rounded-xl border border-white/5 bg-neutral-950/40 flex items-center justify-between gap-4 text-xs font-mono">
+                    {providerKeysDisplay.map((row) => (
+                      <div key={row.id} className="p-3.5 rounded-xl border border-white/5 bg-neutral-950/40 flex items-center justify-between gap-4 text-xs font-mono">
                         <div className="flex flex-col gap-1">
                           <span className="font-sans font-bold text-white">{row.label}</span>
                           <span className="text-neutral-500 text-[10px]">{row.masked}</span>
@@ -255,7 +294,7 @@ export function AdminPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleRotateKey(row.label)}
+                          onClick={() => handleRotateKey(row.providerName, row.label)}
                           className="h-7 text-[9px] border-white/5 bg-neutral-900 hover:bg-neutral-800"
                         >
                           <RotateCw className="w-3 h-3 mr-1" />

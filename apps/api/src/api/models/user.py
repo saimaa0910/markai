@@ -1,5 +1,5 @@
-from typing import List, TYPE_CHECKING
-from sqlalchemy import String, Boolean
+from typing import List, Optional, TYPE_CHECKING
+from sqlalchemy import String, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
 
@@ -17,6 +17,8 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    preferences: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Relationships
     memberships: Mapped[List["UserOrganization"]] = relationship(

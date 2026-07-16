@@ -18,13 +18,13 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="w-full flex flex-col gap-1.5">
         {label && (
-          <label className="text-xs font-semibold text-neutral-400 select-none">
+          <label className="text-xs font-semibold text-muted-foreground select-none">
             {label}
           </label>
         )}
         <div className="relative flex items-center">
           {leftIcon && (
-            <div className="absolute left-3 text-neutral-500 pointer-events-none">
+            <div className="pointer-events-none absolute left-3 text-muted-foreground">
               {leftIcon}
             </div>
           )}
@@ -32,16 +32,16 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             type={type}
             ref={ref}
             className={cn(
-              'w-full bg-neutral-950/60 border rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-500 transition-all focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50 disabled:opacity-50 disabled:pointer-events-none',
+              'w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground transition-all focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 disabled:pointer-events-none disabled:opacity-50',
               leftIcon ? 'pl-9' : 'pl-3',
-              error ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/50' : 'border-white/10',
+              error ? 'border-destructive focus:border-destructive focus:ring-destructive/40' : 'border-border',
               className
             )}
             {...props}
           />
         </div>
-        {error && <span className="text-[11px] font-medium text-rose-400">{error}</span>}
-        {!error && helperText && <span className="text-[11px] text-neutral-500">{helperText}</span>}
+        {error && <span className="text-[11px] font-medium text-destructive">{error}</span>}
+        {!error && helperText && <span className="text-[11px] text-muted-foreground">{helperText}</span>}
       </div>
     );
   }
@@ -62,21 +62,21 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <div className="w-full flex flex-col gap-1.5">
         {label && (
-          <label className="text-xs font-semibold text-neutral-400 select-none">
+          <label className="text-xs font-semibold text-muted-foreground select-none">
             {label}
           </label>
         )}
         <textarea
           ref={ref}
           className={cn(
-            'w-full min-h-[80px] bg-neutral-950/60 border rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-500 transition-all focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50 disabled:opacity-50 disabled:pointer-events-none resize-y',
-            error ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/50' : 'border-white/10',
+            'w-full min-h-[80px] resize-y rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground transition-all focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 disabled:pointer-events-none disabled:opacity-50',
+            error ? 'border-destructive focus:border-destructive focus:ring-destructive/40' : 'border-border',
             className
           )}
           {...props}
         />
-        {error && <span className="text-[11px] font-medium text-rose-400">{error}</span>}
-        {!error && helperText && <span className="text-[11px] text-neutral-500">{helperText}</span>}
+        {error && <span className="text-[11px] font-medium text-destructive">{error}</span>}
+        {!error && helperText && <span className="text-[11px] text-muted-foreground">{helperText}</span>}
       </div>
     );
   }
@@ -103,7 +103,7 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className="w-full flex flex-col gap-1.5">
         {label && (
-          <label className="text-xs font-semibold text-neutral-400 select-none">
+          <label className="text-xs font-semibold text-muted-foreground select-none">
             {label}
           </label>
         )}
@@ -111,24 +111,24 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           <select
             ref={ref}
             className={cn(
-              'w-full bg-neutral-950/60 border rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-500 transition-all focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50 disabled:opacity-50 disabled:pointer-events-none appearance-none cursor-pointer',
-              error ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/50' : 'border-white/10',
+              'w-full appearance-none cursor-pointer rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground transition-all focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/40 disabled:pointer-events-none disabled:opacity-50',
+              error ? 'border-destructive focus:border-destructive focus:ring-destructive/40' : 'border-border',
               className
             )}
             {...props}
           >
             {options.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-neutral-900 text-white">
+              <option key={opt.value} value={opt.value} className="bg-card text-foreground">
                 {opt.label}
               </option>
             ))}
           </select>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500 text-xs">
+          <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
             ▼
           </div>
         </div>
-        {error && <span className="text-[11px] font-medium text-rose-400">{error}</span>}
-        {!error && helperText && <span className="text-[11px] text-neutral-500">{helperText}</span>}
+        {error && <span className="text-[11px] font-medium text-destructive">{error}</span>}
+        {!error && helperText && <span className="text-[11px] text-muted-foreground">{helperText}</span>}
       </div>
     );
   }
@@ -147,21 +147,21 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
   ({ className, label, error, ...props }, ref) => {
     return (
       <div className="flex flex-col gap-1">
-        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+        <label className="inline-flex cursor-pointer select-none items-center gap-2">
           <input
             type="checkbox"
             ref={ref}
             className={cn(
-              'rounded border border-white/10 bg-neutral-950/60 text-violet-600 focus:ring-violet-500/50 focus:ring-offset-0 focus:ring-1 w-4 h-4 cursor-pointer',
+              'h-4 w-4 cursor-pointer rounded border border-border bg-card text-primary focus:ring-1 focus:ring-primary/40 focus:ring-offset-0',
               className
             )}
             {...props}
           />
-          <span className="text-sm text-neutral-300 hover:text-white transition-colors">
+          <span className="text-sm text-muted-foreground transition-colors hover:text-foreground">
             {label}
           </span>
         </label>
-        {error && <span className="text-[11px] font-medium text-rose-400 pl-6">{error}</span>}
+        {error && <span className="pl-6 text-[11px] font-medium text-destructive">{error}</span>}
       </div>
     );
   }

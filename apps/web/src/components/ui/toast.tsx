@@ -23,15 +23,15 @@ export const toast = {
 export function ToastProvider() {
   return (
     <SonnerToaster
-      theme="dark"
+      theme="system"
       className="toaster group"
       toastOptions={{
         classNames: {
-          toast: 'group toast bg-neutral-900 border border-white/10 text-white rounded-lg shadow-2xl p-4 flex gap-3 items-center',
+          toast: 'group toast rounded-lg border border-border bg-card text-foreground shadow-card p-4 flex gap-3 items-center',
           title: 'text-sm font-semibold',
-          description: 'text-xs text-neutral-400',
-          actionButton: 'bg-neutral-800 text-white hover:bg-neutral-700',
-          cancelButton: 'bg-transparent text-neutral-400 hover:text-white',
+          description: 'text-xs text-muted-foreground',
+          actionButton: 'bg-primary text-primary-foreground hover:bg-primary/90',
+          cancelButton: 'bg-transparent text-muted-foreground hover:text-foreground',
         },
       }}
     />

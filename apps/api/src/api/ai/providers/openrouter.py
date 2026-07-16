@@ -2,13 +2,13 @@ import os
 import time
 import json
 import httpx
-from typing import Generator, List, Dict, Any
+from typing import Generator, List, Dict, Any, Optional
 from api.ai.providers.base import BaseLLMProvider
 
 
 class OpenRouterProvider(BaseLLMProvider):
-    def __init__(self) -> None:
-        self.api_key = os.getenv("OPENROUTER_API_KEY")
+    def __init__(self, api_key: Optional[str] = None) -> None:
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         self.client = httpx.Client(timeout=30.0)
 
     def chat(
@@ -18,7 +18,8 @@ class OpenRouterProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             system_instructions = [m["content"] for m in messages if m["role"] == "system"]
             user_prompts = [m["content"] for m in messages if m["role"] == "user"]
             instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
@@ -32,6 +33,8 @@ class OpenRouterProvider(BaseLLMProvider):
                 "provider": "openrouter",
                 "model": model,
             }
+        elif not self.api_key:
+            raise RuntimeError("OpenRouter API key is not configured.")
 
         start_time = time.perf_counter()
         response = self.client.post(
@@ -69,7 +72,8 @@ class OpenRouterProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             mock_text = f"[Simulated OpenRouter Stream ({model})]: Content here."
             for word in mock_text.split(" "):
                 time.sleep(0.02)
@@ -79,6 +83,8 @@ class OpenRouterProvider(BaseLLMProvider):
                     "completion_tokens": 10,
                 }
             return
+        elif not self.api_key:
+            raise RuntimeError("OpenRouter API key is not configured.")
 
         with self.client.stream(
             "POST",
@@ -143,8 +149,11 @@ class OpenRouterProvider(BaseLLMProvider):
         )
 
     def health(self) -> bool:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             return True
+        if not self.api_key:
+            return False
         try:
             self.chat(
                 messages=[{"role": "user", "content": "ping"}],

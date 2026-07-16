@@ -60,7 +60,7 @@ class ConversationResponse(ConversationBase):
 class MessageBase(BaseModel):
     role: str  # 'user', 'assistant', 'system'
     content: str
-    model_used: str
+    model_used: Optional[str] = None
 
 
 class MessageCreate(BaseModel):
@@ -74,6 +74,11 @@ class MessageCreate(BaseModel):
 class MessageResponse(MessageBase):
     id: uuid.UUID
     conversation_id: uuid.UUID
+    provider_used: Optional[str] = None
+    latency_ms: Optional[int] = None
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    cost_usd: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -205,7 +210,7 @@ class TokenUsageResponse(BaseModel):
         from_attributes = True
 
 
-# --- PLAYGROUND SCHEMAS ---
+# --- PLAYGROUND RUN SCHEMAS ---
 
 class PlaygroundRunRequest(BaseModel):
     system_prompt: Optional[str] = None
@@ -220,5 +225,87 @@ class PlaygroundRunResponse(BaseModel):
     tokens_used: int
     cost_usd: float
     latency_ms: int
+
+
+# --- PROVIDER SCHEMAS ---
+
+class ProviderResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    is_active: bool
+    priority: int
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProviderCreate(BaseModel):
+    name: str
+    is_active: Optional[bool] = True
+    priority: Optional[int] = 1
+
+
+class ProviderUpdate(BaseModel):
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+    priority: Optional[int] = None
+
+
+class ProviderHealthResponse(BaseModel):
+    provider_name: str
+    is_healthy: bool
+    latency: float
+    last_checked: datetime.datetime
+    error_message: Optional[str] = None
+
+
+# --- PLAYGROUND REAL SCHEMAS ---
+
+from typing import Dict
+class PlaygroundChatRequest(BaseModel):
+    messages: List[Dict[str, str]]
+    model_name: str
+    temperature: Optional[float] = 0.7
+    system_prompt: Optional[str] = None
+
+
+# --- COMPARE SCHEMAS ---
+
+class CompareRequest(BaseModel):
+    prompt: str
+    model_names: List[str]
+    system_prompt: Optional[str] = None
+
+
+class CompareResponseElement(BaseModel):
+    model_name: str
+    provider: str
+    response: str
+    latency_ms: int
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+    status: str
+    error_message: Optional[str] = None
+
+
+class CompareResponse(BaseModel):
+    results: List[CompareResponseElement]
+
+
+# --- ROUTER SCHEMAS ---
+
+class RouterSettingsResponse(BaseModel):
+    routing_mode: str
+    fallback_provider: Optional[str] = None
+    is_active: bool
+
+
+class RouterSettingsUpdate(BaseModel):
+    routing_mode: Optional[str] = None
+    fallback_provider: Optional[str] = None
+    is_active: Optional[bool] = None
+
 
 

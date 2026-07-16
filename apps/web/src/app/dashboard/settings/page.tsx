@@ -5,32 +5,101 @@ import { useAuthStore } from '@/store/auth';
 import { Card } from '@eaimos/ui';
 import { 
   Settings, Key, CreditCard, Radio, ToggleLeft, ToggleRight, 
-  Plus, Check, Trash2, Building, Shield, User, Globe, AlertTriangle, Palette
+  Plus, Check, Trash2, Building, Shield, User, Globe, AlertTriangle, Palette,
+  Upload, UserCheck, Eye, Lock, Mail, Users, UserPlus, Clock, Bell, Copy
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input, Select } from '@/components/ui/input';
 import { toast } from '@/components/ui/toast';
 import { apiClient } from '@/services/api-client';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ThemeSwitcher } from '@/components/ui/theme-switcher';
 
 export default function SettingsDashboard() {
   const queryClient = useQueryClient();
-  const { activeOrg, organizations, setOrganizations, setActiveOrg } = useAuthStore();
-  const [activeTab, setActiveTab] = React.useState<'org' | 'billing' | 'keys' | 'integrations' | 'appearance'>('org');
+  const { activeOrg, organizations, setOrganizations, setActiveOrg, user: currentUser } = useAuthStore();
+  const [activeTab, setActiveTab] = React.useState<'profile' | 'org' | 'billing' | 'keys' | 'integrations' | 'appearance'>('profile');
 
-  // Org form creation/edit states
-  const [editOrgName, setEditOrgName] = React.useState(activeOrg?.name || '');
+  // --- Queries ---
+  const { data: userProfile, refetch: refetchProfile } = useQuery({
+    queryKey: ['user-profile'],
+    queryFn: async () => {
+      const res = await apiClient.get('/users/me');
+      return res.data;
+    },
+  });
+
+  const { data: members = [], refetch: refetchMembers } = useQuery({
+    queryKey: ['org-members', activeOrg?.id],
+    queryFn: async () => {
+      if (!activeOrg) return [];
+      const res = await apiClient.get(`/organizations/${activeOrg.id}/members/`);
+      return res.data || [];
+    },
+    enabled: !!activeOrg,
+  });
+
+  const { data: invitations = [], refetch: refetchInvitations } = useQuery({
+    queryKey: ['org-invitations', activeOrg?.id],
+    queryFn: async () => {
+      if (!activeOrg) return [];
+      const res = await apiClient.get(`/organizations/${activeOrg.id}/invitations/`);
+      return res.data || [];
+    },
+    enabled: !!activeOrg,
+  });
+
+  // --- Profile state variables ---
+  const [fullName, setFullName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  React.useEffect(() => {
+    if (userProfile) {
+      setFullName(userProfile.full_name || '');
+      setEmail(userProfile.email || '');
+    }
+  }, [userProfile]);
+
+  // --- Password change states ---
+  const [oldPassword, setOldPassword] = React.useState('');
+  const [newPassword, setNewPassword] = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
+
+  // --- Org form states ---
+  const [editOrgName, setEditOrgName] = React.useState('');
   const [newOrgName, setNewOrgName] = React.useState('');
   const [creatingOrg, setCreatingOrg] = React.useState(false);
+  const [inviteEmail, setInviteEmail] = React.useState('');
+  const [inviteRole, setInviteRole] = React.useState('MEMBER');
 
-  // API key states
+  React.useEffect(() => {
+    if (activeOrg) {
+      setEditOrgName(activeOrg.name);
+    }
+  }, [activeOrg]);
+
+  // --- API key states ---
   const [apiKeys, setApiKeys] = React.useState<{ id: string; label: string; token: string; created: string }[]>([
     { id: 'key_1', label: 'Production API Key', token: 'ea_live_••••••••••••••••••••3a9b', created: '2026-07-01' }
   ]);
   const [newKeyLabel, setNewKeyLabel] = React.useState('');
 
-  // Integrations states
+  // --- Preferences state ---
+  const [timezone, setTimezone] = React.useState('UTC');
+  const [language, setLanguage] = React.useState('en');
+  const [notifyEmail, setNotifyEmail] = React.useState(true);
+  const [notifyInApp, setNotifyInApp] = React.useState(true);
+
+  React.useEffect(() => {
+    if (userProfile?.preferences) {
+      const prefs = userProfile.preferences;
+      setTimezone(prefs.timezone || 'UTC');
+      setLanguage(prefs.language || 'en');
+      setNotifyEmail(prefs.notify_email !== false);
+      setNotifyInApp(prefs.notify_in_app !== false);
+    }
+  }, [userProfile]);
+
+  // --- Integrations states ---
   const [integrations, setIntegrations] = React.useState([
     { id: 'slack', name: 'Slack Alerts', desc: 'Push automated campaign performance alerts.', active: true },
     { id: 'gmail', name: 'Gmail Connector', desc: 'Sync customer mailing lists and outbound logs.', active: false },
@@ -38,12 +107,122 @@ export default function SettingsDashboard() {
     { id: 'openai', name: 'OpenAI Developer Keys', desc: 'Enable secondary completions via custom keys.', active: true }
   ]);
 
-  // Handle Org switch/refresh
-  React.useEffect(() => {
-    if (activeOrg) {
-      setEditOrgName(activeOrg.name);
+  // --- Mutations ---
+  const updateProfileMutation = useMutation({
+    mutationFn: async () => {
+      return apiClient.patch('/users/me', { full_name: fullName, email });
+    },
+    onSuccess: () => {
+      refetchProfile();
+      toast.success('Profile Saved', 'Your user profile details have been updated.');
+    },
+    onError: (err: any) => {
+      toast.error('Update Failed', err.response?.data?.detail || err.message);
     }
-  }, [activeOrg]);
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: async () => {
+      if (newPassword !== confirmPassword) {
+        throw new Error('New passwords do not match');
+      }
+      return apiClient.post(`/auth/password-change?old_password=${encodeURIComponent(oldPassword)}&new_password=${encodeURIComponent(newPassword)}`);
+    },
+    onSuccess: () => {
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      toast.success('Password Updated', 'Your security password has been changed.');
+    },
+    onError: (err: any) => {
+      toast.error('Change Failed', err.response?.data?.detail || err.message);
+    }
+  });
+
+  const updateOrgMutation = useMutation({
+    mutationFn: async () => {
+      return apiClient.patch(`/organizations/${activeOrg?.id}?name=${encodeURIComponent(editOrgName)}`);
+    },
+    onSuccess: (res) => {
+      const updatedOrg = res.data;
+      setActiveOrg(updatedOrg);
+      setOrganizations(organizations.map(org => org.id === updatedOrg.id ? updatedOrg : org));
+      toast.success('Organization Updated', 'Workspace configuration settings successfully saved.');
+    },
+    onError: (err: any) => {
+      toast.error('Save Failed', err.response?.data?.detail || err.message);
+    }
+  });
+
+  const inviteMutation = useMutation({
+    mutationFn: async () => {
+      return apiClient.post(`/organizations/${activeOrg?.id}/invitations/?email=${encodeURIComponent(inviteEmail)}&role=${inviteRole}`);
+    },
+    onSuccess: () => {
+      setInviteEmail('');
+      refetchInvitations();
+      toast.success('Invitation Created', 'Onboarding invitation link printed to logs.');
+    },
+    onError: (err: any) => {
+      toast.error('Invite Failed', err.response?.data?.detail || err.message);
+    }
+  });
+
+  const updateMemberRoleMutation = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      return apiClient.patch(`/organizations/${activeOrg?.id}/members/${userId}?role=${role}`);
+    },
+    onSuccess: () => {
+      refetchMembers();
+      toast.success('Role Updated', 'Team member access tier updated.');
+    },
+    onError: (err: any) => {
+      toast.error('Update Failed', err.response?.data?.detail || err.message);
+    }
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return apiClient.delete(`/organizations/${activeOrg?.id}/members/${userId}`);
+    },
+    onSuccess: () => {
+      refetchMembers();
+      toast.success('Member Removed', 'User has been removed from workspace.');
+    },
+    onError: (err: any) => {
+      toast.error('Removal Failed', err.response?.data?.detail || err.message);
+    }
+  });
+
+  const updatePrefsMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      return apiClient.patch('/users/me/preferences', payload);
+    },
+    onSuccess: () => {
+      refetchProfile();
+      toast.success('Preferences Saved', 'General workspace settings updated.');
+    },
+    onError: (err: any) => {
+      toast.error('Save Failed', err.response?.data?.detail || err.message);
+    }
+  });
+
+  // Avatar Upload simulation
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      await apiClient.post('/users/me/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      refetchProfile();
+      toast.success('Avatar Uploaded', 'Your profile photo has been refreshed.');
+    } catch (err: any) {
+      toast.error('Upload Failed', err.response?.data?.detail || err.message);
+    }
+  };
 
   const handleCreateOrg = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,44 +231,27 @@ export default function SettingsDashboard() {
     try {
       const res = await apiClient.post('/organizations/', { name: newOrgName });
       const newOrg = res.data;
-      
       const updatedOrgs = [...organizations, newOrg];
       setOrganizations(updatedOrgs);
       setActiveOrg(newOrg);
       setNewOrgName('');
       toast.success('Organization Created', `Switching to ${newOrg.name} workspace.`);
     } catch (err: any) {
-      toast.error('Creation Failed', err.response?.data?.detail || 'An error occurred.');
+      toast.error('Creation Failed', err.response?.data?.detail || err.message);
     } finally {
       setCreatingOrg(false);
     }
   };
 
-  const handleToggleIntegration = (id: string) => {
-    setIntegrations(integrations.map(int => {
-      if (int.id === id) {
-        const nextActive = !int.active;
-        toast.info(
-          nextActive ? 'Integration Linked' : 'Integration Severed',
-          `The ${int.name} webhook has been ${nextActive ? 'activated' : 'deactivated'}.`
-        );
-        return { ...int, active: nextActive };
-      }
-      return int;
-    }));
-  };
-
   const handleCreateAPIKey = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKeyLabel.trim()) return;
-    
     const newKey = {
       id: `key_${Date.now()}`,
       label: newKeyLabel,
       token: `ea_live_val_${Math.random().toString(36).substring(2, 10)}••••••••`,
       created: new Date().toLocaleDateString()
     };
-    
     setApiKeys([...apiKeys, newKey]);
     setNewKeyLabel('');
     toast.success('API Token Generated', 'Make sure to save it now. It won\'t be shown again.');
@@ -100,6 +262,10 @@ export default function SettingsDashboard() {
     toast.success('API Key Revoked', 'The credentials are no longer authorized.');
   };
 
+  const hasPermission = (perm: string) => {
+    return userProfile?.permissions?.includes(perm) || userProfile?.is_superuser;
+  };
+
   return (
     <div className="flex flex-col gap-8 max-w-[1400px] mx-auto pb-12">
       {/* Header */}
@@ -107,7 +273,7 @@ export default function SettingsDashboard() {
         <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-2">
           Settings Console <Settings className="w-6 h-6 text-violet-500" />
         </h1>
-        <p className="text-neutral-400 mt-1">Configure tenant profiles, check active pricing tiers, and integrate webhooks.</p>
+        <p className="text-neutral-400 mt-1">Configure tenant profiles, check active pricing tiers, manage team roles, and integrate webhooks.</p>
       </header>
 
       {/* Tabs Layout Split */}
@@ -116,11 +282,12 @@ export default function SettingsDashboard() {
         {/* Navigation Sidebar */}
         <Card className="glass p-3 border-white/5 flex flex-col gap-1">
           {[
-            { id: 'org', label: 'Organization & Profile', icon: Building },
+            { id: 'profile', label: 'My Profile & Security', icon: User },
+            { id: 'org', label: 'Organization & Team', icon: Building },
             { id: 'billing', label: 'Billing & Subscriptions', icon: CreditCard },
             { id: 'keys', label: 'API Credentials', icon: Key },
             { id: 'integrations', label: 'Connected Apps', icon: Radio },
-            { id: 'appearance', label: 'Appearance', icon: Palette },
+            { id: 'appearance', label: 'Preferences', icon: Palette },
           ].map(tab => {
             const Icon = tab.icon;
             return (
@@ -144,14 +311,109 @@ export default function SettingsDashboard() {
         <div className="lg:col-span-3">
 
           {/* ================================================== */}
-          {/* TAB: ORGANIZATION & PROFILE */}
+          {/* TAB: MY PROFILE & SECURITY */}
+          {/* ================================================== */}
+          {activeTab === 'profile' && (
+            <div className="flex flex-col gap-6">
+              <Card className="glass p-6 border-white/5 flex flex-col gap-6">
+                <div>
+                  <h3 className="font-bold text-base text-white">Profile Details</h3>
+                  <p className="text-xs text-neutral-400 mt-1">Update your basic profile settings and photo.</p>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-8 items-start">
+                  <div className="flex flex-col items-center gap-3 shrink-0">
+                    <img 
+                      src={userProfile?.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${fullName}`}
+                      alt="Avatar" 
+                      className="w-20 h-20 rounded-full border border-violet-500/20 bg-neutral-900 object-cover"
+                    />
+                    <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/20 text-[11px] text-neutral-300 hover:text-white cursor-pointer transition-colors bg-neutral-950/60 font-semibold">
+                      <Upload className="w-3.5 h-3.5" /> Upload Photo
+                      <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} />
+                    </label>
+                  </div>
+
+                  <div className="flex-1 flex flex-col gap-4 max-w-md">
+                    <Input
+                      label="Full Name"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Jane Smith"
+                    />
+
+                    <Input
+                      label="Email Address"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="jane@company.com"
+                    />
+
+                    <Button 
+                      variant="violet" 
+                      onClick={() => updateProfileMutation.mutate()}
+                      isLoading={updateProfileMutation.isPending}
+                      className="self-start mt-2 px-5 py-2 text-xs"
+                    >
+                      Save Profile
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="glass p-6 border-white/5 flex flex-col gap-6">
+                <div>
+                  <h3 className="font-bold text-base text-white flex items-center gap-2"><Lock className="w-4 h-4 text-violet-400" /> Change Security Password</h3>
+                  <p className="text-xs text-neutral-400 mt-1">Ensure your password uses at least 8 characters with a mix of symbols.</p>
+                </div>
+
+                <div className="flex flex-col gap-4 max-w-md">
+                  <Input
+                    label="Current Password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                  />
+
+                  <Input
+                    label="New Password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                  />
+
+                  <Input
+                    label="Confirm New Password"
+                    type="password"
+                    placeholder="••••••••"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                  />
+
+                  <Button 
+                    variant="violet"
+                    onClick={() => changePasswordMutation.mutate()}
+                    isLoading={changePasswordMutation.isPending}
+                    className="self-start mt-2 px-5 py-2 text-xs"
+                  >
+                    Change Password
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* ================================================== */}
+          {/* TAB: ORGANIZATION & TEAM */}
           {/* ================================================== */}
           {activeTab === 'org' && (
             <div className="flex flex-col gap-6">
               <Card className="glass p-6 border-white/5 flex flex-col gap-6">
                 <div>
                   <h3 className="font-bold text-base text-white">Active Tenant Profile</h3>
-                  <p className="text-xs text-neutral-400 mt-1">Details of the current operating workspace environment.</p>
+                  <p className="text-xs text-neutral-400 mt-1">Configure details of the current operating workspace environment.</p>
                 </div>
                 
                 <div className="flex flex-col gap-4 max-w-md">
@@ -159,8 +421,8 @@ export default function SettingsDashboard() {
                     label="Organization Name"
                     value={editOrgName}
                     onChange={(e) => setEditOrgName(e.target.value)}
-                    disabled
-                    helperText="Organization names are locked. Create a new organization below to configure a separate tenant workspace."
+                    disabled={!hasPermission('manage_users')}
+                    helperText="Manage users permissions are required to rename organizations."
                   />
 
                   <Input
@@ -168,31 +430,154 @@ export default function SettingsDashboard() {
                     value={activeOrg?.slug || ''}
                     disabled
                   />
+
+                  {hasPermission('manage_users') && (
+                    <Button 
+                      variant="violet"
+                      onClick={() => updateOrgMutation.mutate()}
+                      isLoading={updateOrgMutation.isPending}
+                      className="self-start mt-2 px-5"
+                    >
+                      Update Organization Name
+                    </Button>
+                  )}
                 </div>
               </Card>
 
-              {/* Create new organization panel */}
+              {/* Members listing */}
               <Card className="glass p-6 border-white/5 flex flex-col gap-6">
-                <div>
-                  <h3 className="font-bold text-base text-white">Configure Separate Organization</h3>
-                  <p className="text-xs text-neutral-400 mt-1">Spin up an isolated tenant workspace to manage separate campaign goals.</p>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="font-bold text-base text-white flex items-center gap-2"><Users className="w-4 h-4 text-violet-400" /> Active Workspace Members</h3>
+                    <p className="text-xs text-neutral-400 mt-1 font-normal">Manage team access tiers and roles in this active organization.</p>
+                  </div>
+                  <Badge variant="violet">{members.length} Users</Badge>
                 </div>
 
-                <form onSubmit={handleCreateOrg} className="flex gap-3 max-w-md items-end">
-                  <div className="flex-1">
-                    <Input
-                      label="New Organization Name"
-                      placeholder="Acme Global Inc"
-                      required
-                      value={newOrgName}
-                      onChange={(e) => setNewOrgName(e.target.value)}
-                    />
-                  </div>
-                  <Button type="submit" variant="violet" isLoading={creatingOrg} className="h-10 px-5 shrink-0">
-                    Create Org
-                  </Button>
-                </form>
+                <div className="flex flex-col gap-3.5 mt-2">
+                  {members.map((member: any) => (
+                    <div key={member.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3.5 rounded-lg bg-neutral-950/60 border border-white/5 gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center text-xs font-bold text-white uppercase select-none">
+                          {(member.full_name || member.email).charAt(0)}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                            {member.full_name} {member.id === currentUser?.id && <span className="text-[10px] bg-white/10 text-neutral-400 px-1.5 py-0.5 rounded-md font-bold">You</span>}
+                          </span>
+                          <span className="text-[10px] text-neutral-500 font-mono mt-0.5">{member.email}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 self-end sm:self-center">
+                        <Select
+                          value={member.role?.toUpperCase() || 'MEMBER'}
+                          onChange={(e) => updateMemberRoleMutation.mutate({ userId: member.id, role: e.target.value })}
+                          disabled={!hasPermission('manage_users') || member.id === currentUser?.id || member.role?.toUpperCase() === 'OWNER'}
+                          options={[
+                            { label: 'Owner', value: 'OWNER' },
+                            { label: 'Admin', value: 'ADMIN' },
+                            { label: 'Member', value: 'MEMBER' },
+                            { label: 'Viewer', value: 'GUEST' },
+                          ]}
+                          className="h-8 max-w-[120px] text-xs py-0 select-none bg-neutral-900 border-white/10"
+                        />
+
+                        {hasPermission('manage_users') && member.id !== currentUser?.id && member.role?.toUpperCase() !== 'OWNER' && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => removeMemberMutation.mutate(member.id)}
+                            className="p-1 h-8 w-8 text-neutral-500 hover:text-rose-400 hover:bg-rose-500/5 rounded-md"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </Card>
+
+              {/* Invite User & Pending Invitations */}
+              {hasPermission('manage_users') && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Invite user */}
+                  <Card className="glass p-6 border-white/5 flex flex-col gap-6">
+                    <div>
+                      <h3 className="font-bold text-base text-white flex items-center gap-2"><UserPlus className="w-4 h-4 text-violet-400" /> Send Invite</h3>
+                      <p className="text-xs text-neutral-400 mt-1">Add team members via secure onboarding links.</p>
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                      <Input
+                        label="Email Address"
+                        placeholder="collaborator@company.com"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        leftIcon={<Mail className="w-4 h-4" />}
+                      />
+
+                      <Select
+                        label="Default Role"
+                        value={inviteRole}
+                        onChange={(e) => setInviteRole(e.target.value)}
+                        options={[
+                          { label: 'Admin', value: 'ADMIN' },
+                          { label: 'Member', value: 'MEMBER' },
+                          { label: 'Viewer', value: 'GUEST' },
+                        ]}
+                      />
+
+                      <Button 
+                        variant="violet" 
+                        onClick={() => inviteMutation.mutate()}
+                        isLoading={inviteMutation.isPending}
+                        className="mt-2 w-full"
+                      >
+                        Send Invitation
+                      </Button>
+                    </div>
+                  </Card>
+
+                  {/* Pending invites */}
+                  <Card className="glass p-6 border-white/5 flex flex-col gap-6">
+                    <div>
+                      <h3 className="font-bold text-base text-white flex items-center gap-2"><Clock className="w-4 h-4 text-violet-400" /> Pending Invites</h3>
+                      <p className="text-xs text-neutral-400 mt-1">Copy and share active registration links.</p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 overflow-y-auto max-h-[220px]">
+                      {invitations.length === 0 ? (
+                        <div className="text-center py-6 text-neutral-500 text-xs flex flex-col items-center gap-2 bg-neutral-950/20 border border-dashed border-white/5 rounded-lg">
+                          <Users className="w-5 h-5 text-neutral-600" />
+                          <span>No pending invitations active.</span>
+                        </div>
+                      ) : (
+                        invitations.map((invite: any) => (
+                          <div key={invite.id} className="flex justify-between items-center p-3 rounded-lg bg-neutral-950/40 border border-white/5">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-xs font-semibold text-white truncate max-w-[130px]">{invite.email}</span>
+                              <span className="text-[9px] text-neutral-500 flex items-center gap-1">Role: {invite.role}</span>
+                            </div>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => {
+                                navigator.clipboard.writeText(invite.invite_link);
+                                toast.success('Link Copied', 'Invitation onboarding URL copied to clipboard.');
+                              }}
+                              className="h-7 px-2 text-[10px] gap-1 text-violet-400 hover:text-white hover:bg-violet-500/10 border border-violet-500/15"
+                            >
+                              <Copy className="w-3 h-3" /> Copy URL
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </Card>
+                </div>
+              )}
             </div>
           )}
 
@@ -323,8 +708,8 @@ export default function SettingsDashboard() {
                     </div>
 
                     <button 
-                      onClick={() => handleToggleIntegration(int.id)}
-                      className="text-neutral-500 hover:text-white transition-colors cursor-pointer"
+                      onClick={() => setIntegrations(integrations.map(i => i.id === int.id ? { ...i, active: !i.active } : i))}
+                      className="text-neutral-500 hover:text-white transition-colors cursor-pointer border-0 bg-transparent p-0"
                     >
                       {int.active ? (
                         <ToggleRight className="w-9 h-9 text-violet-500" />
@@ -339,22 +724,97 @@ export default function SettingsDashboard() {
           )}
 
           {/* ================================================== */}
-          {/* TAB: APPEARANCE */}
+          {/* TAB: PREFERENCES */}
           {/* ================================================== */}
           {activeTab === 'appearance' && (
             <div className="flex flex-col gap-6">
+              {/* Preferences Form */}
               <Card className="glass p-6 border-white/5 flex flex-col gap-6">
                 <div>
-                  <h3 className="font-bold text-base text-white">Color Theme</h3>
+                  <h3 className="font-bold text-base text-white flex items-center gap-2"><Globe className="w-4 h-4 text-violet-400" /> Workspace Preferences</h3>
+                  <p className="text-xs text-neutral-400 mt-1">Configure timezone, language options, and user custom preferences.</p>
+                </div>
+
+                <div className="flex flex-col gap-4 max-w-md">
+                  <Select
+                    label="Language"
+                    value={language}
+                    onChange={(e) => setLanguage(e.target.value)}
+                    options={[
+                      { label: 'English (US)', value: 'en' },
+                      { label: 'Español (ES)', value: 'es' },
+                      { label: 'Français (FR)', value: 'fr' },
+                      { label: 'Deutsch (DE)', value: 'de' },
+                    ]}
+                  />
+
+                  <Select
+                    label="Timezone"
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    options={[
+                      { label: 'Coordinated Universal Time (UTC)', value: 'UTC' },
+                      { label: 'US Eastern Standard Time (EST)', value: 'EST' },
+                      { label: 'US Pacific Standard Time (PST)', value: 'PST' },
+                      { label: 'Greenwich Mean Time (GMT)', value: 'GMT' },
+                      { label: 'India Standard Time (IST)', value: 'IST' },
+                    ]}
+                  />
+
+                  <div className="flex flex-col gap-3.5 border-t border-white/5 pt-4">
+                    <h4 className="text-xs font-semibold text-white">Notifications Channels</h4>
+                    <label className="flex items-center justify-between cursor-pointer text-xs text-neutral-400 hover:text-white transition-colors">
+                      <span>Enable Email Updates</span>
+                      <button 
+                        type="button"
+                        onClick={() => setNotifyEmail(!notifyEmail)}
+                        className="border-0 bg-transparent p-0 cursor-pointer"
+                      >
+                        {notifyEmail ? <ToggleRight className="w-8 h-8 text-violet-500" /> : <ToggleLeft className="w-8 h-8 text-neutral-600" />}
+                      </button>
+                    </label>
+
+                    <label className="flex items-center justify-between cursor-pointer text-xs text-neutral-400 hover:text-white transition-colors">
+                      <span>Enable In-App Push alerts</span>
+                      <button 
+                        type="button"
+                        onClick={() => setNotifyInApp(!notifyInApp)}
+                        className="border-0 bg-transparent p-0 cursor-pointer"
+                      >
+                        {notifyInApp ? <ToggleRight className="w-8 h-8 text-violet-500" /> : <ToggleLeft className="w-8 h-8 text-neutral-600" />}
+                      </button>
+                    </label>
+                  </div>
+
+                  <Button 
+                    variant="violet"
+                    onClick={() => updatePrefsMutation.mutate({
+                      timezone,
+                      language,
+                      notify_email: notifyEmail,
+                      notify_in_app: notifyInApp,
+                    })}
+                    isLoading={updatePrefsMutation.isPending}
+                    className="self-start mt-2 px-5 py-2 text-xs"
+                  >
+                    Save Preferences
+                  </Button>
+                </div>
+              </Card>
+
+              {/* Theme Selector */}
+              <Card className="glass p-6 border-white/5 flex flex-col gap-6">
+                <div>
+                  <h3 className="font-bold text-base text-white flex items-center gap-2"><Palette className="w-4 h-4 text-violet-400" /> Theme & Appearance</h3>
                   <p className="text-xs text-neutral-400 mt-1">
-                    Choose between light, dark, or system-synced color scheme. Changes are applied instantly and persisted across sessions.
+                    Choose between light, dark, or system-synced color scheme.
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-4">
                   <ThemeSwitcher variant="tabs" className="self-start" />
 
-                  <div className="grid grid-cols-3 gap-4 mt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-2">
                     {[
                       {
                         label: 'Dark',
@@ -384,27 +844,6 @@ export default function SettingsDashboard() {
                   </div>
                 </div>
               </Card>
-
-              <Card className="glass p-6 border-white/5 flex flex-col gap-4">
-                <div>
-                  <h3 className="font-bold text-base text-white">Interface Density</h3>
-                  <p className="text-xs text-neutral-400 mt-1">Adjust the visual spacing density of the dashboard interface.</p>
-                </div>
-                <div className="flex gap-3 flex-wrap">
-                  {['Compact', 'Default', 'Comfortable'].map((d) => (
-                    <button
-                      key={d}
-                      className={`px-4 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                        d === 'Default'
-                          ? 'border-violet-500/30 bg-violet-600/10 text-violet-400'
-                          : 'border-white/8 text-neutral-500 hover:text-white hover:border-white/15'
-                      }`}
-                    >
-                      {d}
-                    </button>
-                  ))}
-                </div>
-              </Card>
             </div>
           )}
 
@@ -412,5 +851,16 @@ export default function SettingsDashboard() {
 
       </div>
     </div>
+  );
+}
+
+// Helper Badge Component since it might be imported differently in this layout
+function Badge({ children, variant = 'neutral' }: { children: React.ReactNode, variant?: 'neutral' | 'violet' }) {
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+      variant === 'violet' ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20' : 'bg-neutral-800 text-neutral-400 border border-white/5'
+    }`}>
+      {children}
+    </span>
   );
 }

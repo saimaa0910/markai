@@ -1,7 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
 const API_BASE_URL = typeof window !== 'undefined' 
-  ? (window.location.hostname === 'localhost' ? 'http://localhost:8000/api/v1' : '/api/v1')
+  ? (window.location.port === '3000' ? 'http://localhost:8000/api/v1' : '/api/v1')
   : 'http://localhost:8000/api/v1';
 
 export const apiClient = axios.create({

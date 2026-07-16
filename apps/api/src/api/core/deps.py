@@ -109,3 +109,71 @@ class RoleChecker:
             )
 
         return membership
+
+
+class PermissionChecker:
+    """
+    Dependency that enforces specific permissions for the active organization.
+    """
+
+    def __init__(self, required_permission: str) -> None:
+        self.required_permission = required_permission
+
+    def __call__(
+        self,
+        current_user: User = Depends(get_current_user),
+        org_id: Optional[str] = Depends(get_active_organization_id),
+        db: Session = Depends(get_db),
+    ) -> UserOrganization:
+        if not org_id:
+            membership = (
+                db.query(UserOrganization)
+                .filter(UserOrganization.user_id == current_user.id)
+                .first()
+            )
+        else:
+            try:
+                org_uuid = uuid.UUID(str(org_id))
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid organization ID format",
+                )
+            membership = (
+                db.query(UserOrganization)
+                .filter(
+                    UserOrganization.user_id == current_user.id,
+                    UserOrganization.organization_id == org_uuid,
+                )
+                .first()
+            )
+
+        if not membership:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not a member of the active organization",
+            )
+
+        # Superusers bypass normal permission checks
+        if current_user.is_superuser:
+            return membership
+
+        from api.models.auth import Role
+
+        # Resolve role name
+        role_name = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
+        db_role = db.query(Role).filter(Role.name == role_name).first()
+        if not db_role:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access forbidden: Role configuration not found",
+            )
+
+        permissions = [p.name for p in db_role.permissions]
+        if self.required_permission not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access forbidden: Missing required permission '{self.required_permission}'",
+            )
+
+        return membership

@@ -2,13 +2,13 @@ import os
 import time
 import json
 import httpx
-from typing import Generator, List, Dict, Any
+from typing import Generator, List, Dict, Any, Optional
 from api.ai.providers.base import BaseLLMProvider
 
 
 class GeminiProvider(BaseLLMProvider):
-    def __init__(self) -> None:
-        self.api_key = os.getenv("GEMINI_API_KEY")
+    def __init__(self, api_key: Optional[str] = None) -> None:
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.client = httpx.Client(timeout=30.0)
 
     def _prepare_payload(self, messages: List[Dict[str, str]], temperature: float) -> Dict[str, Any]:
@@ -49,7 +49,8 @@ class GeminiProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             system_instructions = [m["content"] for m in messages if m["role"] == "system"]
             user_prompts = [m["content"] for m in messages if m["role"] == "user"]
             instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
@@ -63,6 +64,8 @@ class GeminiProvider(BaseLLMProvider):
                 "provider": "google",
                 "model": model,
             }
+        elif not self.api_key:
+            raise RuntimeError("Gemini API key is not configured.")
 
         payload = self._prepare_payload(messages, temperature)
         start_time = time.perf_counter()
@@ -95,7 +98,8 @@ class GeminiProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             mock_text = f"[Simulated Gemini Stream ({model})]: Streamed response."
             for word in mock_text.split(" "):
                 time.sleep(0.02)
@@ -105,6 +109,8 @@ class GeminiProvider(BaseLLMProvider):
                     "completion_tokens": 15,
                 }
             return
+        elif not self.api_key:
+            raise RuntimeError("Gemini API key is not configured.")
 
         payload = self._prepare_payload(messages, temperature)
         with self.client.stream(
@@ -138,8 +144,11 @@ class GeminiProvider(BaseLLMProvider):
                     pass
 
     def embeddings(self, text: str, model: str) -> List[float]:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             return [0.02] * 1536
+        elif not self.api_key:
+            raise RuntimeError("Gemini API key is not configured.")
 
         response = self.client.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent?key={self.api_key}",
@@ -172,7 +181,8 @@ class GeminiProvider(BaseLLMProvider):
         # Enforce json response mime type
         payload["generationConfig"]["responseMimeType"] = "application/json"
         
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             return {
                 "content": "{}",
                 "prompt_tokens": 10,
@@ -181,6 +191,8 @@ class GeminiProvider(BaseLLMProvider):
                 "provider": "google",
                 "model": model,
             }
+        elif not self.api_key:
+            raise RuntimeError("Gemini API key is not configured.")
 
         response = self.client.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}",
@@ -203,8 +215,11 @@ class GeminiProvider(BaseLLMProvider):
         }
 
     def health(self) -> bool:
-        if not self.api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
             return True
+        if not self.api_key:
+            return False
         try:
             self.chat(
                 messages=[{"role": "user", "content": "ping"}],

@@ -5,8 +5,12 @@ from fastapi.responses import JSONResponse
 from api.core.config import settings
 from api.routes import (
     auth, users, organizations, crm, ai, generator, campaigns, files,
-    agents, memory, workflows, integrations, notifications, analytics
+    agents, memory, workflows, integrations, notifications, analytics,
+    infrastructure, router, security, observability
 )
+from api.routes.chat import chat_router
+from api.middleware.logging import LoggingMiddleware
+from api.middleware.telemetry_middleware import TelemetryMiddleware
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -26,6 +30,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(TelemetryMiddleware)
+
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(users.router, prefix=settings.API_V1_STR)
@@ -40,6 +47,11 @@ app.include_router(ai.knowledge_router, prefix=settings.API_V1_STR)
 app.include_router(ai.models_router, prefix=settings.API_V1_STR)
 app.include_router(ai.routing_rules_router, prefix=settings.API_V1_STR)
 app.include_router(ai.usage_router, prefix=settings.API_V1_STR)
+app.include_router(ai.providers_router, prefix=settings.API_V1_STR)
+app.include_router(ai.playground_router, prefix=settings.API_V1_STR)
+app.include_router(ai.compare_router, prefix=settings.API_V1_STR)
+app.include_router(router.router, prefix=settings.API_V1_STR)
+app.include_router(ai.analytics_router, prefix=settings.API_V1_STR)
 app.include_router(generator.generator_router, prefix=settings.API_V1_STR)
 app.include_router(campaigns.campaigns_router, prefix=settings.API_V1_STR)
 app.include_router(files.router, prefix=settings.API_V1_STR)
@@ -49,6 +61,114 @@ app.include_router(workflows.router, prefix=settings.API_V1_STR)
 app.include_router(integrations.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(analytics.router, prefix=settings.API_V1_STR)
+app.include_router(chat_router, prefix=settings.API_V1_STR)
+app.include_router(infrastructure.router, prefix=settings.API_V1_STR)
+app.include_router(security.router, prefix=settings.API_V1_STR)
+app.include_router(observability.router, prefix=settings.API_V1_STR)
+
+
+@app.on_event("startup")
+def on_startup():
+    from api.core.telemetry import init_telemetry
+    init_telemetry(app)
+
+    from api.database.session import SessionLocal
+    from api.models.organization import Organization
+    from api.models.user import User
+    from api.models.membership import UserOrganization, UserRole
+    from api.models.auth import Role, Permission
+    from api.core.security import get_password_hash
+    
+    db = SessionLocal()
+    try:
+        # Seed permissions
+        perms_to_seed = {
+            "manage_users": "Manage organization members and roles",
+            "manage_billing": "Manage billing subscription and details",
+            "create_content": "Create prompts and campaign content",
+            "view_analytics": "View dashboard analytics and reports",
+        }
+        db_perms = {}
+        for perm_name, desc in perms_to_seed.items():
+            perm = db.query(Permission).filter(Permission.name == perm_name).first()
+            if not perm:
+                perm = Permission(name=perm_name, description=desc)
+                db.add(perm)
+                db.flush()
+            db_perms[perm_name] = perm
+        
+        # Seed roles and link permissions
+        roles_to_seed = {
+            "OWNER": (
+                "Organization Owner with all permissions",
+                ["manage_users", "manage_billing", "create_content", "view_analytics"],
+            ),
+            "ADMIN": (
+                "Organization Administrator with management permissions",
+                ["manage_users", "create_content", "view_analytics"],
+            ),
+            "MEMBER": (
+                "Standard Organization Member",
+                ["create_content", "view_analytics"],
+            ),
+            "GUEST": (
+                "Read-only Guest User",
+                ["view_analytics"],
+            ),
+        }
+        for role_name, (desc, perm_names) in roles_to_seed.items():
+            role = db.query(Role).filter(Role.name == role_name).first()
+            if not role:
+                role = Role(name=role_name, description=desc)
+                db.add(role)
+                db.flush()
+            
+            # Update permissions
+            role.permissions = [db_perms[pn] for pn in perm_names if pn in db_perms]
+        
+        db.commit()
+
+        # Seed initial models & providers registry on every startup
+        from api.routes.ai import sync_providers_and_models
+        sync_providers_and_models(db)
+
+        user_exists = db.query(User).first()
+        if not user_exists:
+            # Seed default admin user
+            admin_user = User(
+                email="admin@viptant.ai",
+                hashed_password=get_password_hash("adminpassword"),
+                full_name="Default Administrator",
+                is_active=True,
+            )
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+            
+            # Seed default organization
+            org = Organization(
+                name="Viptant Enterprise",
+                slug="viptant-enterprise",
+            )
+            db.add(org)
+            db.commit()
+            db.refresh(org)
+            
+            # Seed Owner membership
+            membership = UserOrganization(
+                user_id=admin_user.id,
+                organization_id=org.id,
+                role=UserRole.OWNER,
+            )
+            db.add(membership)
+            db.commit()
+            
+            print("Successfully seeded initial tenant organization and admin user credentials.")
+    except Exception as e:
+        print(f"Error seeding initial startup data: {e}")
+    finally:
+        db.close()
+
 
 
 

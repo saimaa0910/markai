@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import { Card } from '@eaimos/ui';
+import { apiClient } from '@/services/api-client';
 import { 
   Columns, Sparkles, Zap, DollarSign, BrainCircuit, Play, 
   HelpCircle, ChevronRight, CheckCircle2, AlertTriangle, ShieldCheck 
@@ -107,98 +108,76 @@ export function ComparePage() {
       setSelectedIds([...selectedIds, id]);
     }
   };
-
   const handleRunComparison = async () => {
     if (isRunning) return;
     setIsRunning(true);
-    toast.info('Inference Started', `Spawning parallel streams for ${selectedIds.length} models...`);
+    toast.info('Inference Started', `Spawning comparison for ${selectedIds.length} models...`);
 
     const selectedModels = models.filter((m) => selectedIds.includes(m.id));
     const initialList: ModelComparisonState[] = selectedModels.map((m) => {
-      const preset = MODEL_PRESETS[m.model_name] || { response: '', speed: 45, quality: 75 };
       return {
         modelName: m.name,
         provider: m.provider,
         latencySec: 0,
-        tokensPerSec: preset.speed,
+        tokensPerSec: 0,
         costUsd: 0,
         tokensCount: 0,
         response: '',
         isGenerating: true,
-        qualityScore: preset.quality,
+        qualityScore: 75,
       };
     });
 
     setComparisonList(initialList);
 
-    // Parallel streaming simulation
-    await Promise.all(
-      selectedModels.map(async (m, idx) => {
-        const preset = MODEL_PRESETS[m.model_name] || {
-          response: `Standard completion response for ${m.name} under parameters.`,
-          speed: 45,
-          quality: 75,
-        };
+    try {
+      const modelNames = selectedModels.map((m) => m.model_name);
+      const res = await apiClient.post('/ai/compare/', {
+        prompt,
+        model_names: modelNames
+      });
 
-        // Simulated network latency lag
-        const latencySec = m.provider === 'groq' ? 0.35 : m.provider === 'google' ? 0.6 : 1.1;
-        await new Promise((resolve) => setTimeout(resolve, latencySec * 1000));
+      const results = res.data.results || [];
+      const updatedList: ModelComparisonState[] = selectedModels.map((m) => {
+        const matchingResult = results.find((r: any) => r.model_name === m.model_name);
+        if (matchingResult && matchingResult.status === 'success') {
+          const totalTokens = matchingResult.prompt_tokens + matchingResult.completion_tokens;
+          const latencySec = matchingResult.latency_ms / 1000;
+          return {
+            modelName: m.name,
+            provider: m.provider,
+            latencySec,
+            tokensPerSec: latencySec > 0 ? Math.round(matchingResult.completion_tokens / latencySec) : 0,
+            costUsd: matchingResult.cost_usd,
+            tokensCount: totalTokens,
+            response: matchingResult.response,
+            isGenerating: false,
+            qualityScore: m.provider === 'openai' ? 92 : m.provider === 'anthropic' ? 95 : 80,
+          };
+        } else {
+          return {
+            modelName: m.name,
+            provider: m.provider,
+            latencySec: 0,
+            tokensPerSec: 0,
+            costUsd: 0,
+            tokensCount: 0,
+            response: matchingResult?.error_message || 'Inference failed.',
+            isGenerating: false,
+            qualityScore: 0,
+          };
+        }
+      });
 
-        let currentResponse = '';
-        let charIndex = 0;
-        const totalChars = preset.response.length;
-        const totalTokens = Math.round(totalChars / 4);
-
-        // Update latency stats
-        setComparisonList((prev) => {
-          const next = [...prev];
-          if (next[idx]) {
-            next[idx].latencySec = latencySec;
-          }
-          return next;
-        });
-
-        // Loop typing stream
-        await new Promise<void>((resolve) => {
-          const interval = setInterval(() => {
-            if (charIndex < totalChars) {
-              currentResponse += preset.response.charAt(charIndex);
-              charIndex += 3;
-              setComparisonList((prev) => {
-                const next = [...prev];
-                if (next[idx]) {
-                  next[idx].response = currentResponse;
-                  next[idx].tokensCount = Math.round(currentResponse.length / 4);
-                }
-                return next;
-              });
-            } else {
-              clearInterval(interval);
-              resolve();
-            }
-          }, 15);
-        });
-
-        // Set finished, calculate cost
-        const costInput = (totalTokens * 0.4) * m.input_token_price / 1000;
-        const costOutput = (totalTokens * 0.6) * m.output_token_price / 1000;
-        const finalCost = parseFloat((costInput + costOutput).toFixed(5));
-
-        setComparisonList((prev) => {
-          const next = [...prev];
-          if (next[idx]) {
-            next[idx].isGenerating = false;
-            next[idx].costUsd = finalCost;
-          }
-          return next;
-        });
-      })
-    );
-
-    setIsRunning(false);
-    toast.success('Comparison Finished', 'All model inferences completed.');
+      setComparisonList(updatedList);
+      toast.success('Comparison Finished', 'All model inferences completed.');
+    } catch (err: any) {
+      toast.error('Comparison Failed', err?.message || 'Error occurred calling model registry.');
+      setComparisonList(prev => prev.map(item => ({ ...item, isGenerating: false, response: 'Error running comparison.' })));
+    } finally {
+      setIsRunning(false);
+    }
   };
-
   return (
     <div className="flex flex-col gap-6 max-w-[1400px] mx-auto pb-12">
       <PageHeader

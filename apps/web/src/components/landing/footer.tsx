@@ -19,34 +19,26 @@ export function Footer() {
   const [email, setEmail] = React.useState('');
 
   return (
-    <footer className="border-t border-white/6 bg-neutral-950/60">
-      <div className="max-w-7xl mx-auto px-6 py-16">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 mb-16">
-          {/* Brand + newsletter */}
-          <div className="lg:col-span-4 flex flex-col gap-6">
-            {/* Logo */}
+    <footer className="border-t border-border bg-card/70">
+      <div className="mx-auto max-w-7xl px-6 py-16">
+        <div className="mb-16 grid grid-cols-1 gap-12 lg:grid-cols-12">
+          <div className="flex flex-col gap-6 lg:col-span-4">
             <BrandLogo size="md" onClick={() => router.push('/')} />
-            <p className="text-sm text-neutral-500 leading-relaxed max-w-xs">
+            <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
               The AI-Native Marketing Operating System. Plan, create, automate, and analyze — all in one intelligent workspace.
             </p>
 
             {/* Newsletter */}
             <div>
-              <p className="text-xs font-semibold text-neutral-400 mb-2.5 uppercase tracking-wider">Stay Updated</p>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setEmail('');
-                }}
-                className="flex gap-2"
-              >
+              <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Stay Updated</p>
+              <form onSubmit={(e) => { e.preventDefault(); setEmail(''); }} className="flex gap-2">
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@company.com"
-                  className="flex-1 px-3 py-2.5 rounded-lg bg-neutral-900 border border-white/8 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-violet-500 transition-colors"
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 />
                 <button
                   type="submit"
@@ -64,24 +56,17 @@ export function Footer() {
                 { Icon: Linkedin, href: 'https://linkedin.com/company/viptant' },
                 { Icon: Github, href: 'https://github.com/viptant' },
               ].map(({ Icon, href }) => (
-                <a
-                  key={href}
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-9 h-9 rounded-lg bg-neutral-900 border border-white/8 flex items-center justify-center text-neutral-400 hover:text-white hover:border-white/20 transition-colors"
-                >
-                  <Icon className="w-4 h-4" />
+                <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground">
+                  <Icon className="h-4 w-4" />
                 </a>
               ))}
             </div>
           </div>
 
-          {/* Link columns */}
-          <div className="lg:col-span-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-8">
+          <div className="grid grid-cols-2 gap-8 sm:grid-cols-3 md:grid-cols-5 lg:col-span-8">
             {Object.entries(FOOTER_LINKS).map(([category, links]) => (
               <div key={category}>
-                <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-widest mb-4">{category}</h4>
+                <h4 className="mb-4 text-xs font-bold uppercase tracking-widest text-muted-foreground">{category}</h4>
                 <ul className="space-y-2.5">
                   {links.map((link) => (
                     <li key={link}>

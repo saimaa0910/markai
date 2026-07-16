@@ -12,6 +12,7 @@ import {
 import { toast } from '@/components/ui/toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiClient } from '@/services/api-client';
+import { useAuthStore } from '@/store/auth';
 
 
 interface PromptTemplate {
@@ -111,9 +112,8 @@ export function PlaygroundPage() {
   const [responseOutput, setResponseOutput] = React.useState('');
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [outputView, setOutputView] = React.useState<'markdown' | 'code' | 'raw' | 'streaming'>('markdown');
-  
-  // Streaming controller reference
-  const timerRef = React.useRef<NodeJS.Timeout | null>(null);
+    // AbortController reference
+  const abortControllerRef = React.useRef<AbortController | null>(null);
 
   // Set default model on load
   React.useEffect(() => {
@@ -162,39 +162,85 @@ export function PlaygroundPage() {
     setResponseOutput('');
 
     try {
-      // Call real backend prompts test endpoint
-      const res = await apiClient.post('/ai/prompts/test', {
-        system_prompt: systemPrompt,
-        user_prompt: compiledPrompt,
-        model_name: selModel || 'gpt-4o-mini',
+      const messages = [{ role: 'user', content: compiledPrompt }];
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/ai/playground/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${useAuthStore.getState().accessToken || ''}`,
+          'X-Organization-ID': useAuthStore.getState().activeOrg?.id || '',
+        },
+        body: JSON.stringify({
+          messages,
+          model_name: selModel || 'llama3-8b-8192',
+          temperature,
+          system_prompt: systemPrompt
+        }),
+        signal: controller.signal
       });
 
-      const targetResponse = res.data.output || 'No response returned from the model.';
+      if (!response.ok) {
+        throw new Error(`Failed to initialize stream: ${response.statusText}`);
+      }
 
-      let currentIdx = 0;
-      timerRef.current = setInterval(() => {
-        if (currentIdx < targetResponse.length) {
-          setResponseOutput((prev) => prev + targetResponse.charAt(currentIdx));
-          currentIdx += 2;
-        } else {
-          if (timerRef.current) clearInterval(timerRef.current);
-          setIsGenerating(false);
-          toast.success('Generation Complete', 'Response output generated.');
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder('utf-8');
+
+      if (!reader) {
+        throw new Error('No readable stream body.');
+      }
+
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6).trim();
+            if (dataStr) {
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (parsed.error) {
+                  toast.error('Stream Error', parsed.error);
+                } else if (parsed.content) {
+                  setResponseOutput((prev) => prev + parsed.content);
+                }
+              } catch (e) {
+                // Ignore partial JSON parsing errors
+              }
+            }
+          }
         }
-      }, 10);
-    } catch (err: any) {
+      }
       setIsGenerating(false);
-      const errMsg = err.response?.data?.detail || 'Could not connect to AI Gateway.';
-      toast.error('Generation Failed', errMsg);
+      toast.success('Generation Complete', 'Response output generated.');
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return;
+      }
+      setIsGenerating(false);
+      toast.error('Generation Failed', err.message || 'Could not connect to AI Gateway.');
+    } finally {
+      abortControllerRef.current = null;
     }
   };
 
   const handleStop = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      setIsGenerating(false);
-      toast.info('Generation Stopped', 'Output generation suspended.');
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
+    setIsGenerating(false);
+    toast.info('Generation Stopped', 'Output generation suspended.');
   };
 
   const handleCopy = () => {

@@ -24,7 +24,15 @@ dependencies = [
     "pgvector (>=0.5.0,<0.6.0)",
     "tiktoken (>=0.13.0,<0.14.0)",
     "structlog (>=26.1.0,<27.0.0)",
-    "httpx>=0.27.0"
+    "httpx>=0.27.0",
+    "celery>=5.4.0",
+    "opentelemetry-api (>=1.43.0,<2.0.0)",
+    "opentelemetry-sdk (>=1.43.0,<2.0.0)",
+    "opentelemetry-instrumentation-fastapi (>=0.64b0,<0.65)",
+    "opentelemetry-instrumentation-sqlalchemy (>=0.64b0,<0.65)",
+    "opentelemetry-instrumentation-redis (>=0.64b0,<0.65)",
+    "opentelemetry-exporter-otlp (>=1.43.0,<2.0.0)",
+    "prometheus-client (>=0.25.0,<0.26.0)"
 ]
 
 [tool.poetry]

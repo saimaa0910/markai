@@ -13,3 +13,6 @@ RUN git clone --branch v0.7.0 https://github.com/pgvector/pgvector.git \
     && make install \
     && cd .. \
     && rm -rf pgvector
+
+COPY init.sql /docker-entrypoint-initdb.d/
+

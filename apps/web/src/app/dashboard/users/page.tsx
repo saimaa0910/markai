@@ -80,6 +80,7 @@ export default function UsersPage() {
         full_name:  inviteForm.full_name,
         password:   inviteForm.password || 'TemporaryPass123!',
         organization_id: activeOrg?.id,
+        role:       inviteForm.role.toUpperCase(),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });

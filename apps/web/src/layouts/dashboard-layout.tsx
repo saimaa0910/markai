@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Users, Megaphone, Bot, Settings, Search, 
   Bell, ChevronLeft, ChevronRight, Menu, LogOut, Building, Check, X,
   Brain, BookOpen, MessageSquare, BarChart2, Plug, FolderOpen,
-  Cpu, Database, TrendingUp, Router, SlidersHorizontal, ChevronDown, Terminal, Columns, Activity, Shield, UploadCloud, Sparkles, FileText, Code, History, Library
+  Cpu, Database, TrendingUp, Router, SlidersHorizontal, ChevronDown, Terminal, Columns, Activity, Shield, UploadCloud, Sparkles, FileText, Code, History, Library, Server
 } from 'lucide-react';
 import { cn } from '@eaimos/shared';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [aiExpanded, setAiExpanded] = React.useState(pathname.startsWith('/dashboard/ai'));
   const [knowledgeExpanded, setKnowledgeExpanded] = React.useState(pathname.startsWith('/dashboard/knowledge'));
   const [promptsExpanded, setPromptsExpanded] = React.useState(pathname.startsWith('/dashboard/prompts'));
+  const [agentsExpanded, setAgentsExpanded] = React.useState(pathname.startsWith('/dashboard/agents'));
+  const [workflowsExpanded, setWorkflowsExpanded] = React.useState(pathname.startsWith('/dashboard/workflows'));
   const [showProfileMenu, setShowProfileMenu] = React.useState(false);
   const [notifications, setNotifications] = React.useState([
     { id: '1', category: 'AI Completed', categoryColor: 'text-violet-400', time: '2m ago', title: 'Variant A Creative generated', description: 'AI variant copy draft for "Summer Promo Ad" is complete.' },
@@ -82,6 +84,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     { name: 'Usage', href: '/dashboard/ai/usage', icon: TrendingUp },
     { name: 'Analytics', href: '/dashboard/ai/analytics', icon: BarChart2 },
     { name: 'Router', href: '/dashboard/ai/router', icon: Router },
+    { name: 'Security Center', href: '/dashboard/ai/security', icon: Shield },
+    { name: 'Infrastructure', href: '/dashboard/ai/infrastructure', icon: Server },
+    { name: 'Observability', href: '/dashboard/ai/observability', icon: Activity },
     { name: 'Settings', href: '/dashboard/ai/settings', icon: SlidersHorizontal },
   ];
 
@@ -104,6 +109,27 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     { name: 'Version Control', href: '/dashboard/prompts/history', icon: History },
     { name: 'Template Gallery', href: '/dashboard/prompts/templates', icon: Library },
     { name: 'Performance Stats', href: '/dashboard/prompts/analytics', icon: BarChart2 },
+  ];
+
+  const agentsSubItems = [
+    { name: 'Dashboard', href: '/dashboard/agents', icon: LayoutDashboard },
+    { name: 'Marketplace', href: '/dashboard/agents/marketplace', icon: Library },
+    { name: 'Create Agent', href: '/dashboard/agents/create', icon: Bot },
+    { name: 'Playground', href: '/dashboard/agents/playground', icon: Terminal },
+    { name: 'Templates', href: '/dashboard/agents/templates', icon: Library },
+    { name: 'Runs Timeline', href: '/dashboard/agents/runs', icon: History },
+    { name: 'Execution Logs', href: '/dashboard/agents/logs', icon: Activity },
+    { name: 'Analytics', href: '/dashboard/agents/analytics', icon: BarChart2 },
+    { name: 'Settings', href: '/dashboard/agents/settings', icon: Settings },
+  ];
+
+  const workflowsSubItems = [
+    { name: 'Dashboard', href: '/dashboard/workflows', icon: LayoutDashboard },
+    { name: 'Visual Builder', href: '/dashboard/workflows/create', icon: Sparkles },
+    { name: 'Templates', href: '/dashboard/workflows/templates', icon: Library },
+    { name: 'Executions History', href: '/dashboard/workflows/history', icon: History },
+    { name: 'Workflow Logs', href: '/dashboard/workflows/logs', icon: Activity },
+    { name: 'Settings', href: '/dashboard/workflows/settings', icon: Settings },
   ];
   return (
     <div className="min-h-screen bg-black flex text-white font-sans">
@@ -205,6 +231,104 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
               {sidebarOpen && aiExpanded && (
                 <div className="ml-6 flex flex-col gap-0.5 border-l border-white/5 pl-3">
                   {aiSubItems.map((sub) => {
+                    const SubIcon = sub.icon;
+                    const isActive = pathname === sub.href;
+                    return (
+                      <button
+                        key={sub.href}
+                        onClick={() => router.push(sub.href)}
+                        className={cn(
+                          "flex items-center gap-2.5 py-1.5 px-2 rounded-md text-xs transition-all text-left cursor-pointer w-full",
+                          isActive
+                            ? "bg-violet-600/10 text-violet-400 font-semibold"
+                            : "text-neutral-500 hover:text-white hover:bg-white/5"
+                        )}
+                      >
+                        <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                        {sub.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Agents Platform Group */}
+            <div className="flex flex-col gap-0.5 mt-1">
+              <button
+                onClick={() => {
+                  if (!sidebarOpen) router.push('/dashboard/agents');
+                  else setAgentsExpanded(!agentsExpanded);
+                }}
+                className={cn(
+                  "flex items-center gap-3 py-2 px-3 rounded-lg text-sm transition-all text-left cursor-pointer w-full",
+                  pathname.startsWith('/dashboard/agents')
+                    ? "bg-violet-600/10 text-violet-400 font-semibold border-l-2 border-violet-500 rounded-l-none"
+                    : "text-neutral-400 hover:text-white hover:bg-white/5"
+                )}
+              >
+                <Bot className={cn("w-4 h-4 shrink-0", pathname.startsWith('/dashboard/agents') ? "text-violet-400" : "text-neutral-400")} />
+                {sidebarOpen && (
+                  <>
+                    <span className="flex-1">Agents Platform</span>
+                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", agentsExpanded && "rotate-180")} />
+                  </>
+                )}
+              </button>
+
+              {/* Agents Sub-items */}
+              {sidebarOpen && agentsExpanded && (
+                <div className="ml-6 flex flex-col gap-0.5 border-l border-white/5 pl-3">
+                  {agentsSubItems.map((sub) => {
+                    const SubIcon = sub.icon;
+                    const isActive = pathname === sub.href;
+                    return (
+                      <button
+                        key={sub.href}
+                        onClick={() => router.push(sub.href)}
+                        className={cn(
+                          "flex items-center gap-2.5 py-1.5 px-2 rounded-md text-xs transition-all text-left cursor-pointer w-full",
+                          isActive
+                            ? "bg-violet-600/10 text-violet-400 font-semibold"
+                            : "text-neutral-500 hover:text-white hover:bg-white/5"
+                        )}
+                      >
+                        <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                        {sub.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Workflow Studio Group */}
+            <div className="flex flex-col gap-0.5 mt-1">
+              <button
+                onClick={() => {
+                  if (!sidebarOpen) router.push('/dashboard/workflows');
+                  else setWorkflowsExpanded(!workflowsExpanded);
+                }}
+                className={cn(
+                  "flex items-center gap-3 py-2 px-3 rounded-lg text-sm transition-all text-left cursor-pointer w-full",
+                  pathname.startsWith('/dashboard/workflows')
+                    ? "bg-violet-600/10 text-violet-400 font-semibold border-l-2 border-violet-500 rounded-l-none"
+                    : "text-neutral-400 hover:text-white hover:bg-white/5"
+                )}
+              >
+                <Activity className={cn("w-4 h-4 shrink-0", pathname.startsWith('/dashboard/workflows') ? "text-violet-400" : "text-neutral-400")} />
+                {sidebarOpen && (
+                  <>
+                    <span className="flex-1">Workflow Studio</span>
+                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", workflowsExpanded && "rotate-180")} />
+                  </>
+                )}
+              </button>
+
+              {/* Workflows Sub-items */}
+              {sidebarOpen && workflowsExpanded && (
+                <div className="ml-6 flex flex-col gap-0.5 border-l border-white/5 pl-3">
+                  {workflowsSubItems.map((sub) => {
                     const SubIcon = sub.icon;
                     const isActive = pathname === sub.href;
                     return (

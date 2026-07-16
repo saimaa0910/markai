@@ -372,9 +372,14 @@ export function useProviderHealth() {
 
   const testConnection = useMutation({
     mutationFn: async (providerKey: string) => {
-      // Simulate real API ping check with 800ms artificial network delay
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      return { success: true, latency: Math.round(150 + Math.random() * 200) };
+      const provsRes = await apiClient.get('/ai/providers/');
+      const provList = provsRes.data || [];
+      const match = provList.find((p: any) => p.name.toLowerCase() === providerKey.toLowerCase());
+      if (!match) {
+        throw new Error(`Provider ${providerKey} not found in DB`);
+      }
+      const res = await apiClient.get(`/ai/providers/${match.id}/health`);
+      return res.data;
     },
   });
 
@@ -522,6 +527,142 @@ export function useProviderLogs(providerId: string) {
     stats,
     isLoading,
     refetch,
+  };
+}
+
+export interface IncidentLog {
+  id: string;
+  provider: string;
+  timestamp: string;
+  type: string;
+  message: string;
+  resolved: boolean;
+}
+
+export function useIncidents() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery<IncidentLog[]>({
+    queryKey: ['ai-incidents'],
+    queryFn: async () => {
+      const res = await apiClient.get('/ai/providers/health/incidents');
+      return res.data || [];
+    },
+  });
+
+  const resolveIncident = useMutation({
+    mutationFn: async (incidentId: string) => {
+      const res = await apiClient.post(`/ai/providers/health/incidents/${incidentId}/resolve`);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-incidents'] });
+    },
+  });
+
+  return {
+    incidents: query.data || [],
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+    resolveIncident,
+  };
+}
+
+export interface OrgLimitBackend {
+  organization_id: string;
+  credit_limit: number;
+  credit_used: number;
+  rpm_limit: number;
+  tpm_limit: number;
+}
+
+export interface ProviderKeyBackend {
+  id: string;
+  provider_id: string;
+  provider_name: string;
+  is_active: boolean;
+  masked_key: string;
+  created_at: string;
+}
+
+export function useAdminConsoleLimits() {
+  const queryClient = useQueryClient();
+
+  const orgLimitsQuery = useQuery<OrgLimitBackend[]>({
+    queryKey: ['ai-org-limits'],
+    queryFn: async () => {
+      const res = await apiClient.get('/ai/providers/limits/orgs');
+      return res.data || [];
+    },
+  });
+
+  const providerKeysQuery = useQuery<ProviderKeyBackend[]>({
+    queryKey: ['ai-provider-keys'],
+    queryFn: async () => {
+      const res = await apiClient.get('/ai/providers/keys/');
+      return res.data || [];
+    },
+  });
+
+  const addCredits = useMutation({
+    mutationFn: async ({ orgId, amount }: { orgId: string; amount: number }) => {
+      const res = await apiClient.post(`/ai/providers/limits/${orgId}/credits`, { amount });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-org-limits'] });
+    },
+  });
+
+  const updateLimits = useMutation({
+    mutationFn: async ({ orgId, rpmLimit, tpmLimit }: { orgId: string; rpmLimit: number; tpmLimit: number }) => {
+      const res = await apiClient.post(`/ai/providers/limits/${orgId}/limits`, {
+        rpm_limit: rpmLimit,
+        tpm_limit: tpmLimit,
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-org-limits'] });
+    },
+  });
+
+  const rotateKey = useMutation({
+    mutationFn: async ({ providerName, api_key }: { providerName: string; api_key: string }) => {
+      const provsRes = await apiClient.get('/ai/providers/');
+      const provList = provsRes.data || [];
+      const matchProv = provList.find((p: any) => p.name.toLowerCase() === providerName.toLowerCase());
+      if (!matchProv) {
+        throw new Error(`Provider ${providerName} not found`);
+      }
+
+      const keysRes = await apiClient.get('/ai/providers/keys/');
+      const existing = (keysRes.data || []).find((k: any) => k.provider_id === matchProv.id);
+      
+      if (existing) {
+        const res = await apiClient.post(`/ai/providers/keys/${existing.id}/rotate`, { api_key });
+        return res.data;
+      } else {
+        const res = await apiClient.post('/ai/providers/keys/', { provider_id: matchProv.id, api_key });
+        return res.data;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-provider-keys'] });
+    },
+  });
+
+  return {
+    orgLimits: orgLimitsQuery.data || [],
+    providerKeys: providerKeysQuery.data || [],
+    isLoading: orgLimitsQuery.isLoading || providerKeysQuery.isLoading,
+    refetch: () => {
+      orgLimitsQuery.refetch();
+      providerKeysQuery.refetch();
+    },
+    addCredits,
+    updateLimits,
+    rotateKey,
   };
 }
 
