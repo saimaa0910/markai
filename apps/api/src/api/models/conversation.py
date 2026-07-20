@@ -25,6 +25,7 @@ class Conversation(Base):
 
     is_archived: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
     is_favorite: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    is_pinned: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
     temperature: Mapped[Optional[float]] = mapped_column(Numeric(4, 2), nullable=True)
     system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     model_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

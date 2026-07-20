@@ -11,7 +11,7 @@ import uuid
 from typing import Optional, List, TYPE_CHECKING
 from sqlalchemy import (
     ForeignKey, String, Text, Boolean, Integer,
-    Enum, Index, JSON
+    Enum, Index, JSON, Float
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -28,6 +28,8 @@ class AgentType(str, enum.Enum):
     SEO = "SEO"
     WORKFLOW = "WORKFLOW"
     CUSTOM = "CUSTOM"
+    SALES = "SALES"
+    SUPPORT = "SUPPORT"
 
 
 class AgentStatus(str, enum.Enum):
@@ -74,12 +76,17 @@ class AgentDefinition(Base):
     allowed_tools: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # LLM configuration overrides (uses AI Gateway defaults if null)
+    preferred_provider: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     preferred_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     temperature: Mapped[float] = mapped_column(
-        # Using mapped_column with nullable=False needs a default
         nullable=False, default=0.7
     )
+    top_p: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     max_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Execution modes
+    reasoning_mode: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    execution_mode: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Memory settings
     memory_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -88,7 +95,13 @@ class AgentDefinition(Base):
     # Execution limits
     max_iterations: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
 
+    # Governance & Aesthetics
+    avatar: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    avatar_color: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    welcome_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

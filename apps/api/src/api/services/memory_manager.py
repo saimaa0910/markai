@@ -198,7 +198,7 @@ class MemoryManager:
         if existing:
             existing.value = value
             if metadata:
-                existing.metadata = metadata
+                existing.meta_data = metadata
             db.commit()
             db.refresh(existing)
             return existing
@@ -208,7 +208,7 @@ class MemoryManager:
             category=category,
             key=key,
             value=value,
-            metadata=metadata,
+            meta_data=metadata,
         )
         db.add(entry)
         db.commit()

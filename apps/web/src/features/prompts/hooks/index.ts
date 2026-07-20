@@ -170,36 +170,30 @@ export function usePromptTemplates() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hook: usePromptAnalytics
-// ─────────────────────────────────────────────────────────────────────────────
 export function usePromptAnalytics() {
-  const { prompts } = usePrompts();
+  const { activeOrg } = useAuthStore();
 
-  const stats = React.useMemo(() => {
-    const totalPrompts = prompts.length;
-    const categoryCounts: Record<string, number> = {};
-    
-    prompts.forEach((p) => {
-      const cat = p.category || 'General';
-      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-    });
+  const query = useQuery({
+    queryKey: ['prompt-dashboard-stats', activeOrg?.id],
+    queryFn: async () => {
+      const res = await apiClient.get('/ai/prompts/dashboard/stats');
+      return res.data;
+    },
+    enabled: !!activeOrg,
+  });
 
-    const categoriesBreakdown = Object.entries(categoryCounts).map(([name, count]) => ({
-      name,
-      value: count,
-    }));
-
-    return {
-      totalPrompts,
-      avgCostUsd: 0.00045,
-      avgLatencyMs: 240,
-      successRate: 98.8,
-      categoriesBreakdown,
-    };
-  }, [prompts]);
+  const defaultStats = {
+    totalPrompts: 0,
+    totalExecutions: 0,
+    avgLatencyMs: 0,
+    avgCostUsd: 0.00045,
+    successRate: 100.0,
+    categoriesBreakdown: [],
+  };
 
   return {
-    stats,
+    stats: query.data || defaultStats,
+    isLoading: query.isLoading,
   };
 }
 export type { PromptTestingResult };

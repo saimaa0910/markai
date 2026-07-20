@@ -8,6 +8,7 @@ from api.database.session import get_db
 from api.core.deps import RoleChecker
 from api.models.membership import UserOrganization, UserRole
 from api.models.memory import OrganizationMemory, AgentMemory, MemoryType
+from api.models.agent import AgentSession, AgentDefinition
 from api.schemas.memory import (
     OrganizationMemoryCreate,
     OrganizationMemoryUpdate,
@@ -37,7 +38,7 @@ def create_organization_memory(
         category=entry_in.category,
         key=entry_in.key,
         value=entry_in.value,
-        metadata=entry_in.metadata,
+        metadata=entry_in.meta_data,
     )
 
 
@@ -141,3 +142,140 @@ def clear_session_memory(
         db=db, session_id=session_id, organization_id=membership.organization_id
     )
     return {"success": True, "cleared_items": cleared_count}
+
+
+# --- AGENT & SESSION MEMORY RETRIEVAL ENDPOINTS ---
+
+@router.get("/sessions/{session_id}", response_model=List[AgentMemoryResponse])
+def get_session_memories(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """List short term memories for a session."""
+    session = db.query(AgentSession).filter(
+        AgentSession.id == session_id,
+        AgentSession.organization_id == membership.organization_id,
+        AgentSession.deleted_at.is_(None)
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+        
+    return MemoryManager.read_memory(
+        db=db,
+        agent_id=session.agent_id,
+        organization_id=membership.organization_id,
+        session_id=session_id,
+        memory_type=MemoryType.SHORT_TERM,
+    )
+
+
+@router.post("/sessions/{session_id}", response_model=AgentMemoryResponse, status_code=status.HTTP_201_CREATED)
+def write_session_memory(
+    session_id: uuid.UUID,
+    key: str = Query(...),
+    value: str = Query(...),
+    importance: float = Query(0.5),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Upsert short term memory for a session."""
+    session = db.query(AgentSession).filter(
+        AgentSession.id == session_id,
+        AgentSession.organization_id == membership.organization_id,
+        AgentSession.deleted_at.is_(None)
+    ).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Agent session not found")
+        
+    return MemoryManager.write_memory(
+        db=db,
+        agent_id=session.agent_id,
+        organization_id=membership.organization_id,
+        key=key,
+        value=value,
+        memory_type=MemoryType.SHORT_TERM,
+        session_id=session_id,
+        importance=importance,
+    )
+
+
+@router.get("/agents/{agent_id}", response_model=List[AgentMemoryResponse])
+def get_agent_long_term_memories(
+    agent_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """List long term memories for an agent."""
+    agent = db.query(AgentDefinition).filter(
+        AgentDefinition.id == agent_id,
+        AgentDefinition.organization_id == membership.organization_id,
+        AgentDefinition.deleted_at.is_(None)
+    ).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+        
+    return MemoryManager.read_memory(
+        db=db,
+        agent_id=agent_id,
+        organization_id=membership.organization_id,
+        memory_type=MemoryType.LONG_TERM,
+    )
+
+
+@router.post("/agents/{agent_id}", response_model=AgentMemoryResponse, status_code=status.HTTP_201_CREATED)
+def write_agent_long_term_memory(
+    agent_id: uuid.UUID,
+    key: str = Query(...),
+    value: str = Query(...),
+    importance: float = Query(0.5),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Upsert long term memory for an agent."""
+    agent = db.query(AgentDefinition).filter(
+        AgentDefinition.id == agent_id,
+        AgentDefinition.organization_id == membership.organization_id,
+        AgentDefinition.deleted_at.is_(None)
+    ).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+        
+    return MemoryManager.write_memory(
+        db=db,
+        agent_id=agent_id,
+        organization_id=membership.organization_id,
+        key=key,
+        value=value,
+        memory_type=MemoryType.LONG_TERM,
+        importance=importance,
+    )
+
+
+@router.delete("/agents/{agent_id}/clear", status_code=status.HTTP_200_OK)
+def clear_agent_long_term_memory(
+    agent_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Clear all long term memories for an agent."""
+    agent = db.query(AgentDefinition).filter(
+        AgentDefinition.id == agent_id,
+        AgentDefinition.organization_id == membership.organization_id,
+        AgentDefinition.deleted_at.is_(None)
+    ).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+        
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    items = db.query(AgentMemory).filter(
+        AgentMemory.agent_id == agent_id,
+        AgentMemory.organization_id == membership.organization_id,
+        AgentMemory.memory_type == MemoryType.LONG_TERM,
+        AgentMemory.deleted_at.is_(None)
+    ).all()
+    for item in items:
+        item.deleted_at = now
+    db.commit()
+    return {"success": True, "cleared_items": len(items)}

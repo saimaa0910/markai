@@ -99,13 +99,23 @@ class AgentExecutorService:
                     metadata={"tool_name": tool_name, "tool_params": tool_params},
                 )
 
-                # Execute Tool
-                res = tool_executor.execute(
-                    tool_name=tool_name,
-                    params=tool_params,
-                    organization_id=str(session.organization_id),
-                    user_id=str(session.user_id),
-                )
+                # Check tool permissions
+                allowed_list = agent.allowed_tools or []
+                if tool_name not in allowed_list:
+                    from api.ai.tools import ToolResult
+                    res = ToolResult(
+                        success=False,
+                        tool_name=tool_name,
+                        error=f"Permission Denied: Agent is not allowed to use tool '{tool_name}'."
+                    )
+                else:
+                    # Execute Tool
+                    res = tool_executor.execute(
+                        tool_name=tool_name,
+                        params=tool_params,
+                        organization_id=str(session.organization_id),
+                        user_id=str(session.user_id),
+                    )
 
                 tool_outputs.append({
                     "step_id": step_id,
@@ -245,7 +255,7 @@ class AgentExecutorService:
             level=level,
             step_type=step_type,
             content=content,
-            metadata=metadata,
+            meta_data=metadata,
         )
         db.add(log)
         db.commit()

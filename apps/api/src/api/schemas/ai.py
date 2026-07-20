@@ -24,14 +24,120 @@ class PromptUpdate(BaseModel):
     category: Optional[str] = None
     tags: Optional[str] = None
     is_shared: Optional[bool] = None
+    status: Optional[str] = None
+    change_log: Optional[str] = None
 
 
 class PromptResponse(PromptBase):
     id: uuid.UUID
     organization_id: uuid.UUID
+    is_archived: Optional[bool] = False
+    is_favorite: Optional[bool] = False
+    is_pinned: Optional[bool] = False
+    status: Optional[str] = "approved"
+    change_log: Optional[str] = None
+    folder_id: Optional[uuid.UUID] = None
+    collection_id: Optional[uuid.UUID] = None
 
     class Config:
         from_attributes = True
+
+
+class PromptCollectionCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    parent_id: Optional[uuid.UUID] = None
+    visibility: Optional[str] = "ORGANIZATION"
+
+
+class PromptCollectionResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: Optional[str] = None
+    parent_id: Optional[uuid.UUID] = None
+    is_archived: bool
+    is_favorite: bool
+    is_pinned: bool
+    visibility: str
+    organization_id: uuid.UUID
+
+    class Config:
+        from_attributes = True
+
+
+class PromptFolderCreate(BaseModel):
+    name: str
+    collection_id: uuid.UUID
+    parent_id: Optional[uuid.UUID] = None
+
+
+class PromptFolderResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    collection_id: uuid.UUID
+    parent_id: Optional[uuid.UUID] = None
+    organization_id: uuid.UUID
+
+    class Config:
+        from_attributes = True
+
+
+class PromptTestCaseCreate(BaseModel):
+    name: str
+    inputs: dict
+    expected_output: Optional[str] = None
+
+
+class PromptTestCaseResponse(BaseModel):
+    id: uuid.UUID
+    prompt_id: Optional[uuid.UUID] = None
+    name: str
+    inputs: dict
+    expected_output: Optional[str] = None
+    organization_id: uuid.UUID
+
+    class Config:
+        from_attributes = True
+
+
+class PromptEvaluationResponse(BaseModel):
+    id: uuid.UUID
+    prompt_id: uuid.UUID
+    test_case_id: uuid.UUID
+    model_name: str
+    actual_output: Optional[str] = None
+    correctness_score: Optional[float] = None
+    grounding_score: Optional[float] = None
+    relevance_score: Optional[float] = None
+    consistency_score: Optional[float] = None
+    safety_score: Optional[float] = None
+    hallucination_risk: Optional[float] = None
+    overall_score: Optional[float] = None
+    status: str
+    latency_ms: int
+    cost_usd: float
+    tokens_used: int
+
+    class Config:
+        from_attributes = True
+
+
+class PromptExecuteRequest(BaseModel):
+    variables: dict
+    version: Optional[int] = None
+    model_name: Optional[str] = None
+    system_prompt: Optional[str] = None
+    rag_enabled: Optional[bool] = False
+    temperature: Optional[float] = 0.7
+
+
+class PromptOptimizeRequest(BaseModel):
+    content: str
+
+
+class PromptImportRequest(BaseModel):
+    file_content: str
+    format_type: str
 
 
 # --- CONVERSATION SCHEMAS ---

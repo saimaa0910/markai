@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useUpload } from '../../hooks';
+import { useUpload, useQueueJobs } from '../../hooks';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,13 +7,15 @@ import { Card } from '@eaimos/ui';
 import { useDropzone } from 'react-dropzone';
 import { 
   UploadCloud, FileText, CheckCircle2, Clock, 
-  AlertTriangle, Trash2, ArrowLeft, RefreshCw, XCircle 
+  AlertTriangle, Trash2, ArrowLeft, RefreshCw, XCircle,
+  Play, Shield, FileSearch, Layers, Database
 } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function UploadPage() {
   const { uploadQueue, clearQueue, uploadBatch, isPending } = useUpload();
+  const { jobs, cancelJob, retryJob } = useQueueJobs();
 
   const onDrop = React.useCallback(
     async (acceptedFiles: File[]) => {
@@ -36,6 +38,18 @@ export function UploadPage() {
     },
     maxSize: 15 * 1024 * 1024, // 15MB max file limits
   });
+
+  const getStepIcon = (step: string) => {
+    switch (step) {
+      case 'VIRUS_SCAN': return <Shield className="w-3.5 h-3.5 text-blue-400" />;
+      case 'OCR':
+      case 'EXTRACT_TEXT': return <FileSearch className="w-3.5 h-3.5 text-amber-400" />;
+      case 'CHUNK': return <Layers className="w-3.5 h-3.5 text-pink-400" />;
+      case 'EMBEDDING':
+      case 'VECTOR_STORE': return <Database className="w-3.5 h-3.5 text-violet-400" />;
+      default: return <FileText className="w-3.5 h-3.5" />;
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6 max-w-[1400px] mx-auto pb-12">
@@ -85,16 +99,89 @@ export function UploadPage() {
             </Button>
           </div>
 
-          {/* Quick upload instructions */}
-          <Card className="p-4 bg-neutral-950/10 flex flex-col gap-2.5 text-xs leading-relaxed text-neutral-400">
-            <span className="font-bold text-white flex items-center gap-1.5">
-              💡 RAG Ingestion Pipeline Checklist:
-            </span>
-            <ul className="list-disc pl-5 flex flex-col gap-1">
-              <li>Text documents (txt, md) will have full structural semantic embeddings extracted.</li>
-              <li>CSV and JSON matrices will automatically slice row-records context.</li>
-              <li>PDF copy inputs will run OCR processing check passes before chunk vectorizing.</li>
-            </ul>
+          {/* Active Backend Celery Ingestion Jobs */}
+          <Card className="flex flex-col gap-4">
+            <div>
+              <h4 className="font-bold text-white text-sm">Background Workers Ingestion Queue (Celery Cluster)</h4>
+              <p className="text-[11px] text-neutral-500 mt-0.5 font-medium">
+                Distributed job steps: scanning, parsing, OCR extracting, indexing.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {jobs.map((job) => {
+                const isRunning = job.status === 'RUNNING';
+                const isFailed = job.status === 'FAILED';
+                const isCompleted = job.status === 'COMPLETED';
+
+                return (
+                  <div key={job.id} className="p-4 rounded-xl border border-white/5 bg-neutral-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5 min-w-[200px]">
+                      <div className="p-2.5 rounded-lg bg-neutral-950 border border-white/5 shrink-0">
+                        {getStepIcon(job.step)}
+                      </div>
+                      <div className="flex flex-col gap-0.5 text-xs truncate">
+                        <span className="font-bold text-white truncate">Job #{job.id.slice(0, 8)}</span>
+                        <span className="text-[10px] text-neutral-500 font-mono">Stage: {job.step}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 flex flex-col gap-1.5 max-w-[250px]">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-neutral-500">
+                        <span>Progress</span>
+                        <span>{Math.round(job.progress)}%</span>
+                      </div>
+                      <div className="w-full bg-neutral-950 border border-white/5 h-2 rounded-full overflow-hidden">
+                        <motion.div 
+                          className={`h-full ${isFailed ? 'bg-rose-500' : isCompleted ? 'bg-emerald-500' : 'bg-violet-600'}`}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${job.progress}%` }}
+                          transition={{ duration: 0.3 }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Badge variant={isCompleted ? 'emerald' : isFailed ? 'rose' : isRunning ? 'violet' : 'amber'} className="font-mono text-[9px] uppercase">
+                        {job.status}
+                      </Badge>
+
+                      {isRunning && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => cancelJob.mutate(job.id)}
+                          className="h-7 text-[10px] border-white/5 hover:text-rose-400"
+                        >
+                          Cancel
+                        </Button>
+                      )}
+
+                      {isFailed && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => retryJob.mutate(job.id)}
+                          className="h-7 text-[10px] border-white/5 hover:text-violet-400"
+                        >
+                          Retry
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {jobs.length === 0 && (
+                <div className="py-12 flex flex-col items-center justify-center text-center text-neutral-600 border border-dashed border-white/5 rounded-xl">
+                  <Clock className="w-6 h-6 mb-2 text-neutral-700" />
+                  <span className="text-[11px] font-semibold">No active background celery jobs</span>
+                  <p className="text-[9px] text-neutral-500 mt-0.5">
+                    Newly uploaded files will spawn distributed workers tasks here.
+                  </p>
+                </div>
+              )}
+            </div>
           </Card>
         </div>
 
@@ -181,3 +268,4 @@ export function UploadPage() {
   );
 }
 export { useDropzone };
+

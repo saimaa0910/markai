@@ -308,6 +308,54 @@ def quota_reset_worker_task(self) -> Dict[str, Any]:
         return {"success": True, "message": "Quotas reset completed successfully"}
 
 
+@celery_app.task(name="worker.tasks.process_document_pipeline_task", bind=True)
+def process_document_pipeline_task(
+    self,
+    document_id_str: str,
+    file_path: str,
+    organization_id_str: str,
+    user_id_str: str,
+    chunk_size: int = 500,
+    chunk_overlap: int = 100,
+    strategy: str = "recursive",
+    embedding_model: str = "text-embedding-3-small",
+) -> Dict[str, Any]:
+    """Asynchronous background task to process document scans, parsing, and vector indexing."""
+    args_repr = f"{document_id_str}, {file_path}, {strategy}, {embedding_model}"
+    with track_task_execution("process_document_pipeline_task", self.request.id, args_str=args_repr[:900]) as db:
+        from api.services.document_processing import DocumentProcessingService
+        from api.models.knowledge import KnowledgeProcessingJob
+        import uuid
+
+        doc_id = uuid.UUID(document_id_str)
+        org_id = uuid.UUID(organization_id_str)
+        usr_id = uuid.UUID(user_id_str)
+
+        # Update job task ID for tracking/cancellations
+        job = db.query(KnowledgeProcessingJob).filter(KnowledgeProcessingJob.document_id == doc_id).first()
+        if job:
+            job.task_id = self.request.id
+            db.commit()
+
+        doc = DocumentProcessingService.run_ingestion_pipeline(
+            db=db,
+            document_id=doc_id,
+            file_path=file_path,
+            organization_id=org_id,
+            user_id=usr_id,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            strategy=strategy,
+            embedding_model=embedding_model,
+        )
+        return {
+            "success": True,
+            "document_id": str(doc.id),
+            "title": doc.title,
+            "status": doc.status,
+        }
+
+
 # Celery Beat scheduler configuration
 celery_app.conf.beat_schedule = {
     "provider-health-check-every-minute": {

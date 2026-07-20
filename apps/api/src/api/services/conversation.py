@@ -7,6 +7,9 @@ from sqlalchemy import select
 from api.models.conversation import Conversation
 from api.models.message import Message
 from api.models.ai_platform import AIModel
+from api.models.chat_participant import ChatParticipant
+from api.models.file_asset import FileAsset
+from api.models.chat_attachment import ChatAttachment
 from api.ai.gateway.coordinator import AIGateway
 from api.repositories.conversation import conversation_repo, message_repo
 
@@ -34,10 +37,21 @@ class ConversationService:
             provider_name=provider_name or "groq",
             is_archived=False,
             is_favorite=False,
+            is_pinned=False,
         )
         db.add(conv)
         db.commit()
         db.refresh(conv)
+
+        # Add creator as owner participant
+        owner_participant = ChatParticipant(
+            conversation_id=conv.id,
+            user_id=user_id,
+            role="owner"
+        )
+        db.add(owner_participant)
+        db.commit()
+
         return conv
 
     @staticmethod
@@ -51,6 +65,7 @@ class ConversationService:
         prompt_id: Optional[uuid.UUID] = None,
         system_prompt: Optional[str] = None,
         rag_enabled: bool = False,
+        attachment_ids: Optional[List[uuid.UUID]] = None,
         **kwargs: Any,
     ) -> Message:
         """Submit a user prompt, run gateway completion, and record assistant response."""
@@ -63,6 +78,21 @@ class ConversationService:
         )
         db.add(user_msg)
         db.commit()
+
+        # Link attachments
+        if attachment_ids:
+            for fa_id in attachment_ids:
+                file_asset = db.query(FileAsset).filter(FileAsset.id == fa_id).first()
+                if file_asset:
+                    attachment = ChatAttachment(
+                        message_id=user_msg.id,
+                        filename=file_asset.filename,
+                        file_type=file_asset.file_type,
+                        file_size=file_asset.file_size,
+                        storage_url=file_asset.storage_url
+                    )
+                    db.add(attachment)
+            db.commit()
 
         # 2. Compile system instruction override
         system_instruction = system_prompt
@@ -123,6 +153,7 @@ class ConversationService:
         prompt_id: Optional[uuid.UUID] = None,
         system_prompt: Optional[str] = None,
         rag_enabled: bool = False,
+        attachment_ids: Optional[List[uuid.UUID]] = None,
         **kwargs: Any,
     ) -> Generator[str, None, None]:
         """Submit a user prompt and stream back Server-Sent Events (SSE) data chunks, logging metrics upon completion."""
@@ -135,6 +166,21 @@ class ConversationService:
         )
         db.add(user_msg)
         db.commit()
+
+        # Link attachments
+        if attachment_ids:
+            for fa_id in attachment_ids:
+                file_asset = db.query(FileAsset).filter(FileAsset.id == fa_id).first()
+                if file_asset:
+                    attachment = ChatAttachment(
+                        message_id=user_msg.id,
+                        filename=file_asset.filename,
+                        file_type=file_asset.file_type,
+                        file_size=file_asset.file_size,
+                        storage_url=file_asset.storage_url
+                    )
+                    db.add(attachment)
+            db.commit()
 
         # 2. Compile system instruction override
         system_instruction = system_prompt

@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { FadeUp, GradientHeading, SectionLabel } from '@/components/landing/primitives';
+import { apiClient } from '@/services/api-client';
 import { Bot, Sparkles, Megaphone, Search, Users, Cpu, ArrowRight } from 'lucide-react';
 
 interface Template {
@@ -19,32 +19,32 @@ interface Template {
 
 const TEMPLATES: Template[] = [
   {
-    id: 'lead-profiler',
-    name: 'Lead Profiler Agent',
-    desc: 'Automatically enriches sales contacts by scraping details and looking up corporate structures.',
-    agentType: 'CRM',
-    tools: ['crm', 'search'],
-    systemPrompt: 'You are an advanced B2B lead enrichment agent. Scrape website profiles and identify corporate parameters.',
-    icon: Users,
+    id: 'content-agent',
+    name: 'Content Agent',
+    desc: 'Generates high-converting marketing collateral, blogs, landing pages, emails, social posts, ads, brand voice alignment, and video scripts.',
+    agentType: 'CONTENT',
+    tools: ['knowledge_tool', 'prompt_tool'],
+    systemPrompt: 'You are the Viptant Content Agent. You specialize in creating high-quality, SEO-optimized, brand-aligned marketing collateral including blogs, landing pages, email copy, and social posts. Always maintain the organization\'s brand voice and tone guidelines.',
+    icon: Bot,
     color: 'from-orange-600/30 to-amber-600/30 border-orange-500/20 text-orange-400',
   },
   {
-    id: 'seo-optimizer',
-    name: 'SEO Optimizer Assistant',
-    desc: 'Audits blog drafts semantically and injects active keyword tags to boost search indexing.',
-    agentType: 'RESEARCH',
-    tools: ['search', 'http'],
-    systemPrompt: 'You are an expert SEO auditor. Analyze blog drafts, cross-reference competitor structures, and suggest keyword insertions.',
+    id: 'seo-agent',
+    name: 'SEO Agent',
+    desc: 'Performs keyword research, SERP analysis, topic clustering, SEO audits, meta tag generation, and content optimization recommendations.',
+    agentType: 'SEO',
+    tools: ['web_search_tool', 'knowledge_tool'],
+    systemPrompt: 'You are the Viptant SEO Agent. Your goal is to maximize organic search visibility. Audit the user\'s content, perform search query research, identify SERP trends, compile topic clusters, and draft high-performance meta tags.',
     icon: Search,
     color: 'from-blue-600/30 to-indigo-600/30 border-blue-500/20 text-blue-400',
   },
   {
-    id: 'outreach-writer',
-    name: 'Campaign Outreach Writer',
-    desc: 'Drafts brand-aligned marketing emails and generates Google Ads copy variations autonomously.',
-    agentType: 'CONTENT',
-    tools: ['email', 'campaigns'],
-    systemPrompt: 'You are a conversion-focused copywriting agent. Draft email sequences matching our brand voice guidelines.',
+    id: 'campaign-agent',
+    name: 'Campaign Agent',
+    desc: 'Orchestrates end-to-end multi-channel marketing campaigns, design A/B testing, and campaign copy variations across channels.',
+    agentType: 'CAMPAIGN',
+    tools: ['campaign_tool', 'web_search_tool'],
+    systemPrompt: 'You are the Viptant Campaign Agent. You analyze performance data, coordinate multichannels, design A/B tests, recommend budget allocations, and automate promotional messaging.',
     icon: Megaphone,
     color: 'from-emerald-600/30 to-teal-600/30 border-emerald-500/20 text-emerald-400',
   },
@@ -52,6 +52,34 @@ const TEMPLATES: Template[] = [
 
 export default function AgentTemplatesPage() {
   const router = useRouter();
+  const [apiTemplates, setApiTemplates] = React.useState<Template[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    apiClient.get('/agents/templates')
+      .then((res) => {
+        if (Array.isArray(res.data)) {
+          const mapped = res.data.map((item: any) => {
+            const base = TEMPLATES.find((t) => t.name.toLowerCase() === item.name.toLowerCase());
+            return {
+              id: item.name.toLowerCase().replace(/ /g, '-'),
+              name: item.name,
+              desc: item.description,
+              agentType: item.agent_type,
+              tools: item.allowed_tools || [],
+              systemPrompt: item.system_prompt || '',
+              icon: base?.icon || Bot,
+              color: base?.color || 'from-violet-600/30 to-fuchsia-600/30 border-violet-500/20 text-violet-400',
+            };
+          });
+          setApiTemplates(mapped);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const displayTemplates = apiTemplates.length > 0 ? apiTemplates : TEMPLATES;
 
   const handleUseTemplate = (template: Template) => {
     // Route to wizard passing details in query parameter
@@ -74,7 +102,7 @@ export default function AgentTemplatesPage() {
 
       {/* Templates List */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {TEMPLATES.map((tmpl, idx) => {
+        {displayTemplates.map((tmpl, idx) => {
           const Icon = tmpl.icon;
           return (
             <div 

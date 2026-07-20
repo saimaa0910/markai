@@ -8,6 +8,7 @@ from api.ai.tools import BaseTool, ToolInput, ToolResult
 from api.ai.tools.crm_tool import CRMTool
 from api.ai.tools.knowledge_tool import KnowledgeTool, PromptTool, CampaignTool
 from api.ai.tools.web_search_tool import WebSearchTool
+from api.ai.tools.workflow_tool import WorkflowTool
 
 
 class ToolRegistry:
@@ -30,6 +31,7 @@ class ToolRegistry:
             PromptTool(),
             CampaignTool(),
             WebSearchTool(),
+            WorkflowTool(),
         ]
         for tool in tools:
             cls._registry[tool.name] = tool

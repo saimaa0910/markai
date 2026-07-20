@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/auth';
 import { KnowledgeAPI } from '../services/knowledge';
 import { useKnowledgeStore } from '../store/knowledge';
-import { KnowledgeDocument, Collection, DocumentChunk } from '../types';
+import { KnowledgeDocument, Collection, Folder, DocumentChunk, RAGResponse, QueueJob, DashboardStats } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook: Documents
@@ -19,9 +19,9 @@ export function useDocuments() {
       const docs = await KnowledgeAPI.listDocuments();
       return docs.map((doc) => ({
         ...doc,
-        is_favorite: favorites.includes(doc.id),
-        is_archived: archived.includes(doc.id),
-        is_trash: trash.includes(doc.id),
+        is_favorite: doc.is_favorite || favorites.includes(doc.id),
+        is_archived: doc.is_archived || archived.includes(doc.id),
+        is_trash: doc.is_trash || trash.includes(doc.id),
       }));
     },
     enabled: !!activeOrg,
@@ -33,6 +33,25 @@ export function useDocuments() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-dashboard-stats'] });
+    },
+  });
+
+  const toggleFavorite = useMutation({
+    mutationFn: async (id: string) => {
+      return await KnowledgeAPI.favoriteDocument(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+    },
+  });
+
+  const toggleArchive = useMutation({
+    mutationFn: async (id: string) => {
+      return await KnowledgeAPI.archiveDocument(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
     },
   });
 
@@ -41,6 +60,8 @@ export function useDocuments() {
     isLoading: query.isLoading,
     refetch: query.refetch,
     deleteDoc,
+    toggleFavorite,
+    toggleArchive,
   };
 }
 
@@ -48,15 +69,45 @@ export function useDocuments() {
 // Hook: Single Document details
 // ─────────────────────────────────────────────────────────────────────────────
 export function useDocument(id: string | null) {
-  const { documents } = useDocuments();
+  const { activeOrg } = useAuthStore();
+  const queryClient = useQueryClient();
 
-  const document = React.useMemo(() => {
-    if (!id) return null;
-    return documents.find((doc) => doc.id === id) || null;
-  }, [documents, id]);
+  const query = useQuery<KnowledgeDocument | null>({
+    queryKey: ['knowledge-document', id],
+    queryFn: async () => {
+      if (!id) return null;
+      return await KnowledgeAPI.getDocument(id);
+    },
+    enabled: !!id && !!activeOrg,
+  });
+
+  const versionsQuery = useQuery<any[]>({
+    queryKey: ['knowledge-document-versions', id],
+    queryFn: async () => {
+      if (!id) return [];
+      return await KnowledgeAPI.getDocumentVersions(id);
+    },
+    enabled: !!id && !!activeOrg,
+  });
+
+  const restoreVersion = useMutation({
+    mutationFn: async (version: number) => {
+      if (!id) return;
+      return await KnowledgeAPI.restoreDocumentVersion(id, version);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-document', id] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-document-versions', id] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+    },
+  });
 
   return {
-    document,
+    document: query.data || null,
+    isLoading: query.isLoading,
+    versions: versionsQuery.data || [],
+    isLoadingVersions: versionsQuery.isLoading,
+    restoreVersion,
   };
 }
 
@@ -65,47 +116,143 @@ export function useDocument(id: string | null) {
 // ─────────────────────────────────────────────────────────────────────────────
 export function useCollections() {
   const { activeOrg } = useAuthStore();
-  const store = useKnowledgeStore();
+  const queryClient = useQueryClient();
 
-  const collections = React.useMemo(() => {
-    return store.localCollections.map((col) => ({
-      ...col,
-      organization_id: activeOrg?.id || '',
-    }));
-  }, [store.localCollections, activeOrg]);
+  const query = useQuery<Collection[]>({
+    queryKey: ['knowledge-collections', activeOrg?.id],
+    queryFn: async () => {
+      const [cols, docs] = await Promise.all([
+        KnowledgeAPI.listCollections(),
+        KnowledgeAPI.listDocuments(),
+      ]);
+      return cols.map((col) => ({
+        ...col,
+        document_ids: docs
+          .filter((d) => d.collection_id === col.id)
+          .map((d) => d.id),
+      }));
+    },
+    enabled: !!activeOrg,
+  });
+
+  const createCollectionMutation = useMutation({
+    mutationFn: async ({ name, description, parentId, visibility }: { name: string; description?: string; parentId?: string; visibility?: string }) => {
+      return await KnowledgeAPI.createCollection(name, description, parentId, visibility);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-collections'] });
+    },
+  });
+
+  const deleteCollectionMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await KnowledgeAPI.deleteCollection(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-collections'] });
+    },
+  });
+
+  const addDocMutation = useMutation({
+    mutationFn: async ({ collectionId, docId }: { collectionId: string; docId: string }) => {
+      return await KnowledgeAPI.updateDocument(docId, { collection_id: collectionId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-collections'] });
+    },
+  });
+
+  const removeDocMutation = useMutation({
+    mutationFn: async ({ docId }: { docId: string }) => {
+      return await KnowledgeAPI.updateDocument(docId, { collection_id: null });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-collections'] });
+    },
+  });
 
   return {
-    collections,
-    createCollection: store.createCollection,
-    deleteCollection: store.deleteCollection,
-    addDoc: store.addDocToCollection,
-    removeDoc: store.removeDocFromCollection,
+    collections: query.data || [],
+    isLoading: query.isLoading,
+    createCollection: async (name: string, description?: string) => {
+      await createCollectionMutation.mutateAsync({ name, description });
+    },
+    deleteCollection: async (id: string) => {
+      await deleteCollectionMutation.mutateAsync(id);
+    },
+    addDoc: async (collectionId: string, docId: string) => {
+      await addDocMutation.mutateAsync({ collectionId, docId });
+    },
+    removeDoc: async (collectionId: string, docId: string) => {
+      await removeDocMutation.mutateAsync({ docId });
+    },
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Hook: Upload Center
+// Hook: Folders
+// ─────────────────────────────────────────────────────────────────────────────
+export function useFolders() {
+  const { activeOrg } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  const query = useQuery<Folder[]>({
+    queryKey: ['knowledge-folders', activeOrg?.id],
+    queryFn: async () => {
+      return await KnowledgeAPI.listFolders();
+    },
+    enabled: !!activeOrg,
+  });
+
+  const createFolderMutation = useMutation({
+    mutationFn: async ({ name, collectionId, parentId }: { name: string; collectionId: string; parentId?: string }) => {
+      return await KnowledgeAPI.createFolder(name, collectionId, parentId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-folders'] });
+    },
+  });
+
+  return {
+    folders: query.data || [],
+    isLoading: query.isLoading,
+    createFolder: async (name: string, collectionId: string, parentId?: string) => {
+      await createFolderMutation.mutateAsync({ name, collectionId, parentId });
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hook: Upload Center & Queue
 // ─────────────────────────────────────────────────────────────────────────────
 export function useUpload() {
   const queryClient = useQueryClient();
   const store = useKnowledgeStore();
 
   const uploadFileMutation = useMutation({
-    mutationFn: async ({ file, uploadId }: { file: File; uploadId: string }) => {
-      return await KnowledgeAPI.uploadAndIndex(file, (progress) => {
-        store.updateUploadProgress(uploadId, progress, 'uploading');
-      });
+    mutationFn: async ({ file, uploadId, options }: { file: File; uploadId: string; options?: any }) => {
+      return await KnowledgeAPI.uploadAndIndex(
+        file,
+        (progress) => {
+          store.updateUploadProgress(uploadId, progress, 'uploading');
+        },
+        options
+      );
     },
     onSuccess: (doc, variables) => {
       store.updateUploadProgress(variables.uploadId, 100, 'completed');
       queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-dashboard-stats'] });
     },
     onError: (err, variables) => {
       store.updateUploadProgress(variables.uploadId, 0, 'failed');
     },
   });
 
-  const uploadBatch = async (files: File[]) => {
+  const uploadBatch = async (files: File[], options?: any) => {
     const queueItems = files.map((f) => {
       const uploadId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       return { id: uploadId, name: f.name, size: f.size, file: f };
@@ -115,7 +262,7 @@ export function useUpload() {
 
     for (const item of queueItems) {
       try {
-        await uploadFileMutation.mutateAsync({ file: item.file, uploadId: item.id });
+        await uploadFileMutation.mutateAsync({ file: item.file, uploadId: item.id, options });
       } catch (e) {
         console.error('Failed upload of:', item.name);
       }
@@ -130,15 +277,56 @@ export function useUpload() {
   };
 }
 
+export function useQueueJobs() {
+  const { activeOrg } = useAuthStore();
+  const queryClient = useQueryClient();
+
+  const query = useQuery<QueueJob[]>({
+    queryKey: ['knowledge-queue', activeOrg?.id],
+    queryFn: async () => {
+      return await KnowledgeAPI.listQueueJobs();
+    },
+    enabled: !!activeOrg,
+    refetchInterval: 3000, // Poll every 3s during active builds
+  });
+
+  const cancelJob = useMutation({
+    mutationFn: async (id: string) => {
+      await KnowledgeAPI.cancelQueueJob(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+    },
+  });
+
+  const retryJob = useMutation({
+    mutationFn: async (id: string) => {
+      await KnowledgeAPI.retryQueueJob(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-queue'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-documents'] });
+    },
+  });
+
+  return {
+    jobs: query.data || [],
+    isLoading: query.isLoading,
+    cancelJob,
+    retryJob,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Hook: Vector similarity search
+// Hook: Vector similarity search & RAG
 // ─────────────────────────────────────────────────────────────────────────────
 export function useKnowledgeSearch() {
   const queryClient = useQueryClient();
 
   const searchMutation = useMutation({
-    mutationFn: async ({ queryText, limit }: { queryText: string; limit?: number }) => {
-      return await KnowledgeAPI.querySimilarChunks(queryText, limit);
+    mutationFn: async ({ queryText, limit, searchType, filters }: { queryText: string; limit?: number; searchType?: string; filters?: any }) => {
+      return await KnowledgeAPI.querySimilarChunks(queryText, limit, searchType, filters);
     },
   });
 
@@ -149,9 +337,51 @@ export function useKnowledgeSearch() {
   };
 }
 
+export function useRAG() {
+  const queryClient = useQueryClient();
+
+  const ragMutation = useMutation({
+    mutationFn: async ({ queryText, conversationId, limit, searchType, filters }: { queryText: string; conversationId?: string; limit?: number; searchType?: string; filters?: any }) => {
+      return await KnowledgeAPI.queryRAG(queryText, conversationId, limit, searchType, filters);
+    },
+  });
+
+  return {
+    answer: ragMutation.data?.answer || '',
+    citations: ragMutation.data?.citations || [],
+    confidenceScore: ragMutation.data?.confidence_score || 0.0,
+    similarityScore: ragMutation.data?.similarity_score || 0.0,
+    contextTokens: ragMutation.data?.context_tokens || 0,
+    promptTokens: ragMutation.data?.prompt_tokens || 0,
+    completion_tokens: ragMutation.data?.completion_tokens || 0,
+    hallucinationRisk: ragMutation.data?.hallucination_risk || 'LOW',
+    latency: ragMutation.data?.latency,
+    isQuerying: ragMutation.isPending,
+    query: ragMutation.mutateAsync,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Hook: Embeddings dashboard
+// Hook: Dashboard Stats & Analytics
 // ─────────────────────────────────────────────────────────────────────────────
+export function useDashboardStats() {
+  const { activeOrg } = useAuthStore();
+
+  const query = useQuery<DashboardStats>({
+    queryKey: ['knowledge-dashboard-stats', activeOrg?.id],
+    queryFn: async () => {
+      return await KnowledgeAPI.getDashboardStats();
+    },
+    enabled: !!activeOrg,
+  });
+
+  return {
+    dashboardData: query.data || null,
+    isLoading: query.isLoading,
+    refetch: query.refetch,
+  };
+}
+
 export function useEmbeddings() {
   const { documents } = useDocuments();
 
@@ -163,10 +393,9 @@ export function useEmbeddings() {
 
   const stats = React.useMemo(() => {
     const totalDocs = documents.length;
-    const indexedDocs = documents.filter((d) => d.status === 'indexed').length;
-    const embeddingDocs = documents.filter((d) => d.status === 'embedding').length;
+    const indexedDocs = documents.filter((d) => d.status === 'completed').length;
+    const embeddingDocs = documents.filter((d) => d.status === 'processing').length;
     const progressPercent = totalDocs ? Math.round((indexedDocs / totalDocs) * 100) : 100;
-    
     const chunkCount = documents.reduce((sum, d) => sum + (d.chunk_count || 1), 0);
 
     return {
@@ -186,9 +415,6 @@ export function useEmbeddings() {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Hook: Analytics
-// ─────────────────────────────────────────────────────────────────────────────
 export function useAnalytics() {
   const { documents } = useDocuments();
   const { collections } = useCollections();
@@ -198,7 +424,6 @@ export function useAnalytics() {
     const totalStorage = documents.reduce((sum, d) => sum + (d.file_size || 0), 0);
     const chunkCount = documents.reduce((sum, d) => sum + (d.chunk_count || 1), 0);
 
-    // Group uploads by date
     const dailyUploads: Record<string, number> = {};
     for (const doc of documents) {
       const dateStr = new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -224,3 +449,4 @@ export function useAnalytics() {
     stats,
   };
 }
+

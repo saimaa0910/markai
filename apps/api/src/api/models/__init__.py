@@ -7,11 +7,16 @@ from api.models.company import Company
 from api.models.contact import Contact
 from api.models.lead import Lead, LeadStatus
 from api.models.activity import Activity, ActivityType
-from api.models.prompt import Prompt
+from api.models.prompt import (
+    Prompt, PromptCollection, PromptFolder, PromptComment,
+    PromptTestCase, PromptEvaluation, PromptExecution
+)
 from api.models.conversation import Conversation
 from api.models.message import Message
 from api.models.chat_attachment import ChatAttachment
 from api.models.chat_participant import ChatParticipant
+from api.models.conversation_bookmark import ConversationBookmark
+from api.models.conversation_share import ConversationShare
 from api.models.content_generator import GeneratedContent
 from api.models.content_variant import ContentVariant
 from api.models.campaign import Campaign, CampaignTemplate, CampaignAnalytics, CampaignStatus, CampaignChannel
@@ -22,7 +27,11 @@ from api.models.ai_platform import (
     AIRequest, AIUsage, AICost, AIPlaygroundSession, AIPlaygroundMessage,
     AIOrgLimit
 )
-from api.models.knowledge import KnowledgeDocument, DocumentChunk
+from api.models.knowledge import (
+    KnowledgeDocument, DocumentChunk, KnowledgeCollection, KnowledgeFolder,
+    KnowledgeDocumentVersion, KnowledgeProcessingJob, KnowledgeSearchHistory,
+    KnowledgeSavedSearch, KnowledgePermission
+)
 from api.models.file_asset import FileAsset
 # Phase 2 — AI Agent Platform
 from api.models.agent import (
@@ -70,13 +79,18 @@ __all__ = [
     # CRM
     "Company", "Contact", "Lead", "LeadStatus", "Activity", "ActivityType",
     # AI Platform
-    "Prompt", "Conversation", "Message", "ChatAttachment", "ChatParticipant",
+    "Prompt", "PromptCollection", "PromptFolder", "PromptComment",
+    "PromptTestCase", "PromptEvaluation", "PromptExecution",
+    "Conversation", "Message", "ChatAttachment", "ChatParticipant",
+    "ConversationBookmark", "ConversationShare",
     "GeneratedContent", "ContentVariant",
     "AIModelRegistry", "AIRoutingRule", "AITokenUsage",
     "AIProvider", "AIModel", "AIProviderKey", "AIProviderHealth",
     "AIRequest", "AIUsage", "AICost", "AIPlaygroundSession", "AIPlaygroundMessage",
     "AIOrgLimit",
-    "KnowledgeDocument", "DocumentChunk",
+    "KnowledgeDocument", "DocumentChunk", "KnowledgeCollection", "KnowledgeFolder",
+    "KnowledgeDocumentVersion", "KnowledgeProcessingJob", "KnowledgeSearchHistory",
+    "KnowledgeSavedSearch", "KnowledgePermission",
     # Campaigns
     "Campaign", "CampaignTemplate", "CampaignAnalytics",
     "CampaignStatus", "CampaignChannel",
