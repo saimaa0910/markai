@@ -3,7 +3,9 @@ import uuid
 import shutil
 import datetime
 from typing import List, Optional, Any, Dict
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Body, Response
+from fastapi.responses import StreamingResponse
+from api.services.storage_service import MinIOService
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, desc, func, text
 
@@ -500,22 +502,32 @@ def upload_and_index_document(
     """
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     doc_id = uuid.uuid4()
-    ext = file.filename.split(".")[-1] if "." in file.filename else "TXT"
+    filename = file.filename or "untitled.txt"
+    ext = filename.split(".")[-1] if "." in filename else "TXT"
     local_filename = f"{doc_id}.{ext}"
     file_path = os.path.join(UPLOAD_DIR, local_filename)
 
+    file_bytes = file.file.read()
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(file_bytes)
         
-    file_size = os.path.getsize(file_path)
+    file_size = len(file_bytes)
+
+    # Upload to MinIO object storage
+    MinIOService.upload_file(
+        file_bytes=file_bytes,
+        object_name=local_filename,
+        content_type=file.content_type or "application/octet-stream"
+    )
+    storage_url = MinIOService.get_presigned_url(local_filename)
 
     # 1. Create document
     doc = KnowledgeDocument(
         id=doc_id,
-        title=file.filename,
+        title=filename,
         file_type=ext.upper(),
         file_size=file_size,
-        storage_url=f"/api/v1/files/{doc_id}/download",
+        storage_url=storage_url,
         organization_id=membership.organization_id,
         collection_id=collection_id,
         folder_id=folder_id,
@@ -532,7 +544,7 @@ def upload_and_index_document(
     ver = KnowledgeDocumentVersion(
         document_id=doc_id,
         version=1,
-        title=file.filename,
+        title=filename,
         file_type=ext.upper(),
         file_size=file_size,
         storage_url=f"/api/v1/files/{doc_id}/download",
@@ -672,7 +684,8 @@ def retry_processing_job(
     if not doc:
         raise HTTPException(status_code=404, detail="Source document not found")
         
-    ext = doc.title.split(".")[-1] if "." in doc.title else "TXT"
+    title = doc.title or ""
+    ext = title.split(".")[-1] if "." in title else "TXT"
     file_path = os.path.join(UPLOAD_DIR, f"{doc.id}.{ext}")
     
     # Dispatch again
@@ -708,6 +721,57 @@ def get_document_versions(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc.versions
+
+
+@router.get("/documents/{document_id}/content")
+@router.get("/documents/{document_id}/preview")
+def get_document_content_and_preview(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    doc = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == membership.organization_id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Retrieve content from latest version or from stored document chunks
+    latest_ver = db.query(KnowledgeDocumentVersion).filter(
+        KnowledgeDocumentVersion.document_id == document_id
+    ).order_by(desc(KnowledgeDocumentVersion.version)).first()
+
+    content = ""
+    if latest_ver and latest_ver.content:
+        content = latest_ver.content
+    else:
+        # Fallback: join chunks content if version content is empty
+        chunks = db.query(DocumentChunk).filter(
+            DocumentChunk.document_id == document_id
+        ).order_by(DocumentChunk.chunk_index).all()
+        if chunks:
+            content = "\n\n".join([c.content for c in chunks if c.content])
+        else:
+            # Check local file if raw file exists
+            ext = (doc.file_type or "txt").lower()
+            local_path = os.path.join(UPLOAD_DIR, f"{doc.id}.{ext}")
+            if os.path.exists(local_path):
+                try:
+                    with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                except Exception:
+                    content = ""
+
+    return {
+        "document_id": str(doc.id),
+        "title": doc.title,
+        "file_type": doc.file_type,
+        "file_size": doc.file_size,
+        "status": doc.status,
+        "content": content or f"No text content extractable for {doc.title}.",
+        "metadata_info": doc.metadata_info or {},
+    }
 
 
 @router.post("/documents/{document_id}/versions/{version}/restore", response_model=KnowledgeDocumentResponse)
@@ -1262,18 +1326,283 @@ def search_autocomplete_suggestions(
     # Match query term against document titles
     docs = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.organization_id == membership.organization_id,
-        KnowledgeDocument.title.ilike(f"%{q}%"),
         KnowledgeDocument.deleted_at.is_(None)
-    ).limit(8).all()
+    ).all()
     
-    suggestions = [doc.title for doc in docs]
+    q_lower = q.lower()
+    suggestions = [doc.title for doc in docs if q_lower in doc.title.lower()][:8]
     
     # Also search saved searches
     saved = db.query(KnowledgeSavedSearch).filter(
-        KnowledgeSavedSearch.organization_id == membership.organization_id,
-        KnowledgeSavedSearch.name.ilike(f"%{q}%")
-    ).limit(5).all()
-    suggestions.extend([s.name for s in saved])
+        KnowledgeSavedSearch.organization_id == membership.organization_id
+    ).all()
+    saved_matches = [s.name for s in saved if q_lower in s.name.lower()][:5]
+    suggestions.extend(saved_matches)
     
     # Return unique values
+    return list(set(suggestions))
+
+
+@router.post("/documents/{document_id}/replace", response_model=KnowledgeDocumentResponse)
+def replace_document_file(
+    document_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    doc = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == membership.organization_id,
+        KnowledgeDocument.deleted_at.is_(None)
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    file_bytes = file.file.read()
+    file_size = len(file_bytes)
+    filename = file.filename or doc.title
+    ext = filename.split(".")[-1] if "." in filename else doc.file_type.lower()
+    local_filename = f"{doc.id}.{ext}"
+    
+    file_path = os.path.join(UPLOAD_DIR, local_filename)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    with open(file_path, "wb") as buffer:
+        buffer.write(file_bytes)
+        
+    # Upload to MinIO
+    MinIOService.upload_file(
+        file_bytes=file_bytes,
+        object_name=local_filename,
+        content_type=file.content_type or "application/octet-stream"
+    )
+    storage_url = MinIOService.get_presigned_url(local_filename)
+    
+    # Versioning
+    latest_ver = db.query(KnowledgeDocumentVersion).filter(
+        KnowledgeDocumentVersion.document_id == document_id
+    ).order_by(desc(KnowledgeDocumentVersion.version)).first()
+    next_ver_num = (latest_ver.version + 1) if latest_ver else 1
+    
+    new_ver = KnowledgeDocumentVersion(
+        document_id=document_id,
+        version=next_ver_num,
+        title=filename,
+        file_type=ext.upper(),
+        file_size=file_size,
+        storage_url=storage_url,
+        change_summary=f"Replaced file version {next_ver_num}",
+    )
+    db.add(new_ver)
+    
+    # Update document metadata
+    doc.title = filename
+    doc.file_type = ext.upper()
+    doc.file_size = file_size
+    doc.storage_url = storage_url
+    doc.status = "pending"
+    doc.progress = 0.0
+    doc.updated_by = str(current_user.id)
+    
+    # Reset job status
+    job = db.query(KnowledgeProcessingJob).filter(
+        KnowledgeProcessingJob.document_id == document_id
+    ).first()
+    if job:
+        job.status = "QUEUED"
+        job.step = "VIRUS_SCAN"
+        job.progress = 5.0
+        
+    db.commit()
+    
+    task = process_document_pipeline_task.delay(
+        document_id_str=str(document_id),
+        file_path=file_path,
+        organization_id_str=str(membership.organization_id),
+        user_id_str=str(current_user.id),
+        chunk_size=500,
+        chunk_overlap=100,
+        strategy="recursive",
+        embedding_model="text-embedding-3-small",
+    )
+    if job:
+        job.task_id = task.id
+        db.commit()
+        
+    db.refresh(doc)
+    return doc
+
+
+@router.post("/documents/{document_id}/move", response_model=KnowledgeDocumentResponse)
+def move_document(
+    document_id: uuid.UUID,
+    collection_id: Optional[uuid.UUID] = Body(None, embed=True),
+    folder_id: Optional[uuid.UUID] = Body(None, embed=True),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    doc = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == membership.organization_id,
+        KnowledgeDocument.deleted_at.is_(None)
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    if collection_id is not None:
+        doc.collection_id = collection_id
+    if folder_id is not None:
+        doc.folder_id = folder_id
+        
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+@router.post("/documents/{document_id}/restore", response_model=KnowledgeDocumentResponse)
+def restore_soft_deleted_document(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    doc = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == membership.organization_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    doc.deleted_at = None
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+@router.delete("/documents/{document_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
+def purge_permanent_delete_document(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> None:
+    doc = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == membership.organization_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    ext = doc.file_type.lower()
+    local_filename = f"{doc.id}.{ext}"
+    
+    # Delete from MinIO
+    MinIOService.delete_file(local_filename)
+    
+    # Remove local file copy if present
+    file_path = os.path.join(UPLOAD_DIR, local_filename)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+            
+    # Delete associated chunks, jobs, and document record
+    db.query(DocumentChunk).filter(DocumentChunk.document_id == document_id).delete()
+    db.query(KnowledgeProcessingJob).filter(KnowledgeProcessingJob.document_id == document_id).delete()
+    db.query(KnowledgeDocumentVersion).filter(KnowledgeDocumentVersion.document_id == document_id).delete()
+    db.delete(doc)
+    db.commit()
+
+
+@router.patch("/documents/{document_id}/tags", response_model=KnowledgeDocumentResponse)
+def update_document_tags(
+    document_id: uuid.UUID,
+    tags: List[str] = Body(...),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    doc = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == membership.organization_id,
+        KnowledgeDocument.deleted_at.is_(None)
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    meta = doc.metadata_info or {}
+    meta["tags"] = tags
+    doc.metadata_info = meta
+    db.commit()
+    db.refresh(doc)
+    return doc
+
+
+@router.get("/documents/{document_id}/preview")
+def preview_document_content(
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    doc = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.id == document_id,
+        KnowledgeDocument.organization_id == membership.organization_id,
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    ext = doc.file_type.lower()
+    local_filename = f"{doc.id}.{ext}"
+    
+    # Retrieve raw bytes from MinIO or disk fallback
+    content_bytes = None
+    try:
+        content_bytes = MinIOService.download_file_bytes(local_filename)
+    except Exception:
+        file_path = os.path.join(UPLOAD_DIR, local_filename)
+        if os.path.exists(file_path):
+            with open(file_path, "rb") as f:
+                content_bytes = f.read()
+                
+    if content_bytes is None:
+        # Fallback to latest document version text content
+        latest_ver = db.query(KnowledgeDocumentVersion).filter(
+            KnowledgeDocumentVersion.document_id == document_id
+        ).order_by(desc(KnowledgeDocumentVersion.version)).first()
+        if latest_ver and latest_ver.content:
+            content_bytes = latest_ver.content.encode("utf-8")
+        else:
+            raise HTTPException(status_code=404, detail="Document storage object missing")
+            
+    if ext == "pdf":
+        return Response(content=content_bytes, media_type="application/pdf")
+    elif ext in ["png", "jpg", "jpeg", "webp", "gif", "svg"]:
+        mime = f"image/{ext}" if ext != "svg" else "image/svg+xml"
+        return Response(content=content_bytes, media_type=mime)
+    elif ext in ["csv", "json"]:
+        return Response(content=content_bytes, media_type="text/plain; charset=utf-8")
+    else:
+        return Response(content=content_bytes, media_type="text/markdown; charset=utf-8")
+
+
+@router.get("/search/autocomplete", response_model=List[str])
+def search_autocomplete_suggestions(
+    q: str,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    if not q or len(q) < 2:
+        return []
+    docs = db.query(KnowledgeDocument).filter(
+        KnowledgeDocument.organization_id == membership.organization_id,
+        KnowledgeDocument.deleted_at.is_(None)
+    ).all()
+    
+    q_lower = q.lower()
+    suggestions = [doc.title for doc in docs if q_lower in doc.title.lower()][:8]
+    
+    saved = db.query(KnowledgeSavedSearch).filter(
+        KnowledgeSavedSearch.organization_id == membership.organization_id
+    ).all()
+    saved_matches = [s.name for s in saved if q_lower in s.name.lower()][:5]
+    suggestions.extend(saved_matches)
+    
     return list(set(suggestions))

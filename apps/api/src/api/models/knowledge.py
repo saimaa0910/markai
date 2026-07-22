@@ -1,7 +1,7 @@
 import uuid
 import json
 from typing import Optional, List, Any
-from sqlalchemy import ForeignKey, String, Text, TypeDecorator, JSON, Integer, Float, Boolean, DateTime
+from sqlalchemy import ForeignKey, String, Text, TypeDecorator, JSON, Integer, Float, Boolean, DateTime, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
@@ -185,6 +185,12 @@ class KnowledgeDocumentVersion(Base):
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 
+    __table_args__ = (
+        UniqueConstraint("document_id", "content_hash", name="uq_chunk_content_hash_doc"),
+        Index("idx_doc_chunks_doc_id", "document_id"),
+        Index("idx_doc_chunks_org_id", "organization_id"),
+    )
+
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("knowledge_documents.id", ondelete="CASCADE"),
@@ -197,14 +203,84 @@ class DocumentChunk(Base):
     )
     
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(SafeVector(1536), nullable=False)
-    chunk_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    token_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    char_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    embedding_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    embedding_dimensions: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
 
     # Relationships
     document: Mapped["KnowledgeDocument"] = relationship(
         "KnowledgeDocument", back_populates="chunks"
     )
+    embeddings: Mapped[List["DocumentChunkEmbedding"]] = relationship(
+        "DocumentChunkEmbedding", back_populates="chunk", cascade="all, delete-orphan"
+    )
+
+
+class DocumentChunkEmbedding(Base):
+    __tablename__ = "document_chunk_embeddings"
+
+    __table_args__ = (
+        Index("idx_embeddings_org_model", "organization_id", "embedding_model"),
+        Index("idx_embeddings_chunk_id", "chunk_id"),
+    )
+
+    chunk_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_chunks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    embedding: Mapped[list[float]] = mapped_column(SafeVector(1536), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Relationships
+    chunk: Mapped[DocumentChunk] = relationship("DocumentChunk", back_populates="embeddings")
+
+
+class KnowledgeRetrievalLog(Base):
+    """
+    Audit log of RAG retrievals for tracking accuracy and AI quality.
+    """
+    __tablename__ = "knowledge_retrieval_logs"
+
+    __table_args__ = (
+        Index("idx_knowledge_retrieval_org", "organization_id", "created_at"),
+        Index("idx_knowledge_retrieval_user", "user_id"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    query_embedding_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    collection_ids: Mapped[Optional[list[uuid.UUID]]] = mapped_column(JSON, nullable=True)
+    results_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    top_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    search_type: Mapped[str] = mapped_column(String(20), default="semantic", nullable=False)
+    filters_applied: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    chunk_ids_returned: Mapped[Optional[list[uuid.UUID]]] = mapped_column(JSON, nullable=True)
 
 
 class KnowledgeProcessingJob(Base):

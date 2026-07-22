@@ -57,6 +57,11 @@ export const KnowledgeAPI = {
     return res.data;
   },
 
+  getDocumentPreview: async (id: string): Promise<any> => {
+    const res = await apiClient.get(`/ai/knowledge/documents/${id}/preview`);
+    return res.data;
+  },
+
   // --- COLLECTIONS ---
   listCollections: async (): Promise<Collection[]> => {
     const res = await apiClient.get('/ai/knowledge/collections');

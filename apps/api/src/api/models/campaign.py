@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import ForeignKey, String, Text, Numeric, Enum, DateTime, Integer
+from sqlalchemy import ForeignKey, String, Text, Numeric, Enum, DateTime, Integer, Index, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
@@ -24,6 +24,11 @@ class CampaignChannel(str, enum.Enum):
 
 class Campaign(Base):
     __tablename__ = "campaigns"
+    __table_args__ = (
+        Index("idx_campaigns_org_status", "organization_id", "status"),
+        Index("idx_campaigns_org_channel", "organization_id", "channel"),
+        Index("idx_campaigns_org_scheduled", "organization_id", "scheduled_for"),
+    )
 
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -33,12 +38,33 @@ class Campaign(Base):
     scheduled_for: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     budget: Mapped[float] = mapped_column(
-        Numeric(10, 2), default=0.00, nullable=False
+        Numeric(12, 4), default=0.0000, nullable=False
+    )
+    spent_budget: Mapped[float] = mapped_column(
+        Numeric(12, 4), default=0.0000, nullable=False
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3), default="USD", nullable=False
     )
     channel: Mapped[CampaignChannel] = mapped_column(
         Enum(CampaignChannel), nullable=False
     )
+    goal: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    target_audience_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+    owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    team_ids: Mapped[Optional[list[uuid.UUID]]] = mapped_column(JSON, nullable=True)
+    tags: Mapped[Optional[list[str]]] = mapped_column(JSON, nullable=True)
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

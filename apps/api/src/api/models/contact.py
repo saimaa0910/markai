@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Optional, TYPE_CHECKING
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
@@ -9,15 +9,29 @@ if TYPE_CHECKING:
     from api.models.company import Company
     from api.models.lead import Lead
     from api.models.activity import Activity
+    from api.models.deals import Deal
 
 
 class Contact(Base):
     __tablename__ = "contacts"
 
+    __table_args__ = (
+        # Remove global unique on email, replace with org-scoped unique constraint for active contacts
+        Index(
+            "uq_contacts_email_org",
+            "organization_id",
+            "email",
+            unique=True,
+            postgresql_where="deleted_at IS NULL",
+        ),
+        Index("idx_contacts_org_id", "organization_id"),
+        Index("idx_contacts_email", "email"),
+    )
+
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(
-        String(255), unique=True, index=True, nullable=False
+        String(255), index=True, nullable=False
     )
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     job_title: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -38,6 +52,7 @@ class Contact(Base):
         "Company", back_populates="contacts"
     )
     leads: Mapped[List["Lead"]] = relationship("Lead", back_populates="contact")
+    deals: Mapped[List["Deal"]] = relationship("Deal", back_populates="contact")
     activities: Mapped[List["Activity"]] = relationship(
         "Activity", back_populates="contact", cascade="all, delete-orphan"
     )

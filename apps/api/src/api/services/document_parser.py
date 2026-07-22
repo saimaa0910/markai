@@ -205,15 +205,31 @@ class DocumentParser:
         try:
             import docx
             doc = docx.Document(file_path)
-            paragraphs = [p.text for p in doc.paragraphs if p.text]
+            paragraphs = []
+            for p in doc.paragraphs:
+                if not p.text:
+                    continue
+                style_name = p.style.name if p.style else ""
+                if style_name.startswith("Heading"):
+                    lvl = style_name.replace("Heading", "").strip()
+                    prefix = "#" * int(lvl) if lvl.isdigit() else "###"
+                    paragraphs.append(f"{prefix} {p.text}")
+                else:
+                    paragraphs.append(p.text)
+                    
             for table in doc.tables:
-                for row in table.rows:
-                    row_txt = [cell.text for cell in row.cells]
-                    paragraphs.append(" | ".join(row_txt))
+                table_rows = []
+                for row_idx, row in enumerate(table.rows):
+                    row_txt = [cell.text.replace("\n", " ").strip() for cell in row.cells]
+                    table_rows.append("| " + " | ".join(row_txt) + " |")
+                    if row_idx == 0:
+                        table_rows.append("| " + " | ".join(["---"] * len(row_txt)) + " |")
+                if table_rows:
+                    paragraphs.append("\n" + "\n".join(table_rows) + "\n")
+                    
             return "\n".join(paragraphs)
         except ImportError:
             logger.warning("python-docx is not installed. Falling back to zipfile extraction.")
-            # DOCX is a zip file containing word/document.xml
             try:
                 import zipfile
                 with zipfile.ZipFile(file_path) as z:
@@ -222,6 +238,30 @@ class DocumentParser:
                     return re.sub(r"\s+", " ", clean_text).strip()
             except Exception:
                 return cls._parse_txt(file_path)
+
+    @classmethod
+    def _parse_zip(cls, file_path: str, db: Session, organization_id: uuid.UUID, user_id: uuid.UUID) -> str:
+        import zipfile
+        import tempfile
+        extracted_texts = []
+        try:
+            with zipfile.ZipFile(file_path, "r") as zip_ref:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    zip_ref.extractall(tmp_dir)
+                    for root, _, files in os.walk(tmp_dir):
+                        for filename in files:
+                            sub_path = os.path.join(root, filename)
+                            sub_ext = filename.split(".")[-1].lower() if "." in filename else ""
+                            if sub_ext in ["txt", "md", "csv", "json", "docx", "pdf", "html"]:
+                                try:
+                                    sub_res = cls.parse_file(sub_path, sub_ext, db, organization_id, user_id)
+                                    extracted_texts.append(f"--- Archive File: {filename} ---\n{sub_res['content']}")
+                                except Exception as e:
+                                    logger.warning(f"Could not parse archive file {filename}: {e}")
+            return "\n\n".join(extracted_texts) if extracted_texts else "ZIP archive contains no readable text files."
+        except Exception as e:
+            logger.error(f"Failed parsing ZIP archive {file_path}: {e}")
+            return f"[ZIP archive error: {e}]"
 
     @classmethod
     def _parse_pptx(cls, file_path: str) -> str:
@@ -266,22 +306,8 @@ class DocumentParser:
         user_id: uuid.UUID,
     ) -> str:
         """
-        Uses AI Gateway Vision model for OCR, or a mock fallback in non-production.
+        Uses AI Gateway Vision model for image OCR.
         """
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            logger.info("Non-production environment: returning mock OCR text.")
-            return (
-                f"[Simulated OCR Extracted Text for image: {os.path.basename(file_path)}]\n"
-                f"Invoice Number: INV-2026-9908\n"
-                f"Date: 2026-07-15\n"
-                f"Items:\n"
-                f"1. AI Gateway Custom License - $500.00\n"
-                f"2. Priority Enterprise Support - $250.00\n"
-                f"Total: $750.00\n"
-                f"Handwritten Notes: Approved by CFO Saimaa on 2026-07-16."
-            )
-
         try:
             from api.ai.gateway.coordinator import AIGateway
             gateway = AIGateway()
@@ -322,7 +348,7 @@ class DocumentParser:
         user_id: uuid.UUID,
     ) -> str:
         """
-        Check if PDF has text. If not, treat as Scanned PDF and run OCR.
+        Check if PDF has text. If not, treat as Scanned PDF and run OCR using AI Gateway.
         """
         text_content = []
         has_text = False
@@ -341,23 +367,10 @@ class DocumentParser:
         if has_text:
             return "\n\n--- Page Break ---\n\n".join(text_content)
             
-        # PDF is scanned (no extractable text) - run simulated or real OCR
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            logger.info("Non-production environment: returning mock scanned PDF OCR text.")
-            return (
-                f"[Simulated Scanned PDF OCR text for: {os.path.basename(file_path)}]\n"
-                f"Page 1: Project Plan - Phase 3 Completion.\n"
-                f"Architectural guidelines: Reuse Provider registry, Model registry and AI Gateway.\n"
-                f"Page 2: Vector Search Database options: pgvector, Pinecone, Qdrant, Milvus.\n"
-                f"Implementation contains dynamic OCR, hybrid search, citations, and re-ranking."
-            )
-            
-        # For production OCR on PDFs, convert pages to images and run OCR using AI Gateway Vision.
-        # Requires pdf2image or similar package. If not present, we will do dynamic vision OCR simulation.
+        # PDF is scanned (no extractable text) - run OCR using AI Gateway Vision.
         try:
             import pdf2image
-            images = pdf2image.convert_from_path(file_path, first_page=1, last_page=5) # Limit to first 5 pages for cost control
+            images = pdf2image.convert_from_path(file_path, first_page=1, last_page=5)
             ocr_pages = []
             
             from api.ai.gateway.coordinator import AIGateway
@@ -382,8 +395,5 @@ class DocumentParser:
                 
             return "\n\n--- Page Break ---\n\n".join(ocr_pages)
         except Exception as e:
-            logger.error(f"Scanned PDF OCR failed, calling mock fallback: {e}")
-            return (
-                f"[Scanned PDF OCR Fallback for {os.path.basename(file_path)}]\n"
-                f"Verification: Ingestion pipeline parsed this document as a scanned image-only PDF."
-            )
+            logger.error(f"Scanned PDF OCR failed: {e}")
+            raise RuntimeError(f"Scanned PDF processing failed: {str(e)}")

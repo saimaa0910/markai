@@ -308,7 +308,7 @@ def quota_reset_worker_task(self) -> Dict[str, Any]:
         return {"success": True, "message": "Quotas reset completed successfully"}
 
 
-@celery_app.task(name="worker.tasks.process_document_pipeline_task", bind=True)
+@celery_app.task(name="worker.tasks.process_document_pipeline_task", bind=True, max_retries=3, default_retry_delay=5)
 def process_document_pipeline_task(
     self,
     document_id_str: str,

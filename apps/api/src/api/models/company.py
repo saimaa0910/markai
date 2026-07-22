@@ -8,6 +8,7 @@ from api.database.base import Base
 if TYPE_CHECKING:
     from api.models.contact import Contact
     from api.models.lead import Lead
+    from api.models.deals import Deal
 
 
 class Company(Base):
@@ -29,3 +30,4 @@ class Company(Base):
         "Contact", back_populates="company", cascade="all, delete-orphan"
     )
     leads: Mapped[List["Lead"]] = relationship("Lead", back_populates="company")
+    deals: Mapped[List["Deal"]] = relationship("Deal", back_populates="company")

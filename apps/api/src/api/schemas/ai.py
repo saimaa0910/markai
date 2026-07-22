@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional, List
+from typing import Optional, List, Union, Dict, Any
 from pydantic import BaseModel
 
 
@@ -11,7 +11,10 @@ class PromptBase(BaseModel):
     content: str
     version: Optional[int] = 1
     category: Optional[str] = None
-    tags: Optional[str] = None
+    tags: Optional[Union[str, List[str]]] = None
+    description: Optional[str] = None
+    folder_id: Optional[uuid.UUID] = None
+    collection_id: Optional[uuid.UUID] = None
     is_shared: Optional[bool] = True
 
 
@@ -20,16 +23,27 @@ class PromptCreate(PromptBase):
 
 
 class PromptUpdate(BaseModel):
+    name: Optional[str] = None
     content: Optional[str] = None
     category: Optional[str] = None
-    tags: Optional[str] = None
+    tags: Optional[Union[str, List[str]]] = None
+    description: Optional[str] = None
+    folder_id: Optional[uuid.UUID] = None
+    collection_id: Optional[uuid.UUID] = None
     is_shared: Optional[bool] = None
     status: Optional[str] = None
     change_log: Optional[str] = None
 
 
-class PromptResponse(PromptBase):
+class PromptResponse(BaseModel):
     id: uuid.UUID
+    name: str
+    content: str
+    version: Optional[int] = 1
+    category: Optional[str] = None
+    tags: Optional[str] = None
+    description: Optional[str] = None
+    is_shared: Optional[bool] = True
     organization_id: uuid.UUID
     is_archived: Optional[bool] = False
     is_favorite: Optional[bool] = False
@@ -413,5 +427,34 @@ class RouterSettingsUpdate(BaseModel):
     fallback_provider: Optional[str] = None
     is_active: Optional[bool] = None
 
+# --- PROMPT PLATFORM EXTENDED SCHEMAS ---
+
+class PromptShareRequest(BaseModel):
+    visibility: str = "organization"  # private, organization, public
+    expires_in_days: Optional[int] = None
+    is_editable: Optional[bool] = False
 
 
+class PromptShareResponse(BaseModel):
+    share_token: str
+    share_url: str
+    visibility: str
+    expires_at: Optional[str] = None
+    is_editable: bool
+
+
+class PromptBulkActionRequest(BaseModel):
+    action: str  # archive, restore, delete, permanent_delete, tag
+    prompt_names: List[str]
+    payload: Optional[Dict[str, Any]] = None
+
+
+class PromptSearchRequest(BaseModel):
+    query: Optional[str] = None
+    category: Optional[str] = None
+    tag: Optional[str] = None
+    folder_id: Optional[uuid.UUID] = None
+    collection_id: Optional[uuid.UUID] = None
+    is_archived: Optional[bool] = False
+    is_favorite: Optional[bool] = None
+    is_pinned: Optional[bool] = None

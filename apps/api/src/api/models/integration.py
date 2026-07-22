@@ -9,9 +9,10 @@ NotificationPreference — User notification preferences per channel
 """
 import enum
 import uuid
+from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import (
-    ForeignKey, String, Text, Boolean, Integer, Enum, Index, JSON
+    ForeignKey, String, Text, Boolean, Integer, Enum, Index, JSON, DateTime
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -160,12 +161,13 @@ class NotificationPriority(str, enum.Enum):
 class Notification(Base):
     """
     An in-platform notification delivered to a user.
+    Partitioned monthly. Purged after 90 days.
     """
     __tablename__ = "notifications"
     __table_args__ = (
-        Index("ix_notifications_user_id", "user_id"),
-        Index("ix_notifications_org_id", "organization_id"),
-        Index("ix_notifications_is_read", "is_read"),
+        Index("ix_notifications_user_unread", "user_id", "is_read", postgresql_where="is_read = FALSE"),
+        Index("ix_notifications_org_user", "organization_id", "user_id", "created_at"),
+        Index("ix_notifications_expires_at", "expires_at", postgresql_where="expires_at IS NOT NULL"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -188,11 +190,24 @@ class Notification(Base):
         Enum(NotificationPriority), default=NotificationPriority.MEDIUM, nullable=False
     )
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Event type for categorization ("agent_completed", "campaign_launched", etc.)
-    event_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    # Deep-link action URL
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    dismissed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    icon: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    group_key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
+    source_module: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    source_entity_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    template_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notification_templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # deep link
     action_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    # Extra metadata
     meta_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 

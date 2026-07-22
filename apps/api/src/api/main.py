@@ -6,7 +6,7 @@ from api.core.config import settings
 from api.routes import (
     auth, users, organizations, crm, ai, generator, campaigns, files,
     agents, memory, workflows, integrations, notifications, analytics,
-    infrastructure, router, security, observability
+    infrastructure, router, security, observability, prompts
 )
 from api.routes.chat import chat_router
 from api.middleware.logging import LoggingMiddleware
@@ -19,8 +19,17 @@ app = FastAPI(
     redoc_url=f"{settings.API_V1_STR}/redoc",
 )
 
-# Set CORS origins
-allowed_origins = ["*"] if settings.ENVIRONMENT == "development" else settings.cors_origins_list
+# Set CORS origins cleanly for credentialed requests
+dev_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+configured_origins = [o for o in settings.cors_origins_list if o != "*"]
+allowed_origins = list(set(dev_origins + configured_origins))
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,6 +50,7 @@ app.include_router(crm.companies_router, prefix=settings.API_V1_STR)
 app.include_router(crm.contacts_router, prefix=settings.API_V1_STR)
 app.include_router(crm.leads_router, prefix=settings.API_V1_STR)
 app.include_router(crm.activities_router, prefix=settings.API_V1_STR)
+app.include_router(prompts.router, prefix=settings.API_V1_STR)
 app.include_router(ai.prompts_router, prefix=settings.API_V1_STR)
 app.include_router(ai.conversations_router, prefix=settings.API_V1_STR)
 app.include_router(ai.knowledge_router, prefix=settings.API_V1_STR)

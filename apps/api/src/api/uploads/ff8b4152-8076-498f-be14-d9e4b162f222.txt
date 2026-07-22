@@ -1,0 +1,1 @@
+Viptant is an Enterprise AI Marketing Operating System. It was founded in the year 2026. The core technologies utilized on the backend include Python, FastAPI, SQLAlchemy, and PostgreSQL. The frontend is built using Next.js, React 19, and Tailwind CSS. Viptant enables automated multi-channel campaign generation, CRM integration, and auditing.

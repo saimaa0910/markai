@@ -11,9 +11,23 @@ os.environ["OPENROUTER_API_KEY"] = ""
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.dialects.postgresql import JSONB, ARRAY, UUID as PG_UUID
 from api.database.session import get_db
 from api.models import Base
 from api.main import app
+
+@compiles(JSONB, "sqlite")
+def compile_jsonb_sqlite(type_, compiler, **kw):
+    return "JSON"
+
+@compiles(ARRAY, "sqlite")
+def compile_array_sqlite(type_, compiler, **kw):
+    return "JSON"
+
+@compiles(PG_UUID, "sqlite")
+def compile_pg_uuid_sqlite(type_, compiler, **kw):
+    return "CHAR(36)"
 
 # Use SQLite in-memory shared cache for test isolation
 SQLALCHEMY_DATABASE_URL = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
@@ -28,6 +42,7 @@ def register_sqlite_now(dbapi_connection, connection_record):
     dbapi_connection.create_function("now", 0, lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
     # Enable WAL mode for concurrent readers & writer
     cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.close()
@@ -52,17 +67,11 @@ def create_test_db():
 @pytest.fixture(scope="function")
 def db_session():
     """
-    Transaction-based database session rollback for test isolation.
+    Function-scoped database session for test isolation.
     """
-    connection = engine.connect()
-    transaction = connection.begin()
-    session = TestingSessionLocal(bind=connection)
-    
+    session = TestingSessionLocal()
     yield session
-    
     session.close()
-    transaction.rollback()
-    connection.close()
 
 
 @pytest.fixture(scope="function", autouse=True)

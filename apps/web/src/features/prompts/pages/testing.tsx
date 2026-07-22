@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { usePrompts, usePromptTesting } from '../hooks';
+import { usePrompts, usePromptTesting, usePromptProviders } from '../hooks';
 import { usePromptsStore } from '../store/prompts';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -17,9 +17,41 @@ export function TestingPage() {
   const { prompts } = usePrompts();
   const { test, isTesting, testResult } = usePromptTesting();
   const store = usePromptsStore();
+  const { providers, models } = usePromptProviders(store.testProvider);
 
   const [activePromptName, setActivePromptName] = React.useState<string>('');
   const [typedOutput, setTypedOutput] = React.useState('');
+
+  const providerSelectOptions = React.useMemo(() => {
+    return providers.map((p: any) => ({
+      label: `${p.name.toUpperCase()} AI Gateway`,
+      value: p.name.toLowerCase(),
+    }));
+  }, [providers]);
+
+  const modelSelectOptions = React.useMemo(() => {
+    if (models.length > 0) {
+      return models.map((m: any) => ({
+        label: m.model_name,
+        value: m.model_name,
+      }));
+    }
+    // Dynamic fallbacks per provider
+    if (store.testProvider === 'groq') {
+      return [
+        { label: 'llama-3.3-70b-versatile', value: 'llama-3.3-70b-versatile' },
+        { label: 'llama-3.1-70b-versatile', value: 'llama-3.1-70b-versatile' },
+        { label: 'llama-3.1-8b-instant', value: 'llama-3.1-8b-instant' },
+        { label: 'deepseek-r1-distill-llama-70b', value: 'deepseek-r1-distill-llama-70b' },
+        { label: 'qwen-qwq-32b', value: 'qwen-qwq-32b' },
+      ];
+    }
+    return [
+      { label: 'gpt-4o-mini', value: 'gpt-4o-mini' },
+      { label: 'claude-3-5-sonnet-20240620', value: 'claude-3-5-sonnet-20240620' },
+      { label: 'gemini-1.5-flash', value: 'gemini-1.5-flash' },
+    ];
+  }, [models, store.testProvider]);
 
   // Find the selected prompt template
   const activePrompt = React.useMemo(() => {
@@ -128,11 +160,7 @@ export function TestingPage() {
                   value={store.testProvider}
                   onChange={(e) => store.setTestProvider(e.target.value)}
                   className="bg-neutral-900 border-white/5 h-8 text-[11px]"
-                  options={[
-                    { label: 'OpenAI API Gateway', value: 'openai' },
-                    { label: 'Anthropic Claude', value: 'anthropic' },
-                    { label: 'Google Gemini', value: 'google' },
-                  ]}
+                  options={providerSelectOptions}
                 />
               </div>
 
@@ -142,12 +170,7 @@ export function TestingPage() {
                   value={store.testModel}
                   onChange={(e) => store.setTestModel(e.target.value)}
                   className="bg-neutral-900 border-white/5 h-8 text-[11px]"
-                  options={[
-                    { label: 'gpt-4o', value: 'gpt-4o' },
-                    { label: 'gpt-3.5-turbo', value: 'gpt-3.5-turbo' },
-                    { label: 'claude-3-sonnet', value: 'claude-3-sonnet' },
-                    { label: 'gemini-1.5-pro', value: 'gemini-1.5-pro' },
-                  ]}
+                  options={modelSelectOptions}
                 />
               </div>
             </div>

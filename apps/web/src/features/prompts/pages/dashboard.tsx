@@ -1,4 +1,6 @@
+'use client';
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 import { usePrompts, usePromptAnalytics, usePromptTemplates } from '../hooks';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -7,29 +9,27 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@eaimos/ui';
 import { 
   BookOpen, Plus, Sparkles, TrendingUp, Cpu, 
-  Clock, DollarSign, Activity, Settings2, BarChart2, Library 
+  Clock, DollarSign, Activity, Settings2, BarChart2, Library, SlidersHorizontal 
 } from 'lucide-react';
 import { 
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend 
 } from 'recharts';
 
 export function DashboardPage() {
+  const router = useRouter();
   const { prompts, isLoading } = usePrompts();
   const { stats } = usePromptAnalytics();
   const { templates } = usePromptTemplates();
 
-  // Simulated metrics data
+  // Dynamic metrics telemetry data from backend stats
   const chartsData = React.useMemo(() => {
+    if (stats.dailyExecutions && stats.dailyExecutions.length > 0) {
+      return stats.dailyExecutions;
+    }
     return [
-      { date: 'Jul 08', executions: 140, latency: 220 },
-      { date: 'Jul 09', executions: 180, latency: 260 },
-      { date: 'Jul 10', executions: 220, latency: 210 },
-      { date: 'Jul 11', executions: 190, latency: 230 },
-      { date: 'Jul 12', executions: 260, latency: 245 },
-      { date: 'Jul 13', executions: 310, latency: 250 },
-      { date: 'Jul 14', executions: 340, latency: 240 },
+      { date: 'Today', executions: stats.totalExecutions || 0, latency: stats.avgLatencyMs || 0 }
     ];
-  }, []);
+  }, [stats]);
 
   return (
     <div className="flex flex-col gap-6 max-w-[1400px] mx-auto pb-12">
@@ -42,13 +42,19 @@ export function DashboardPage() {
         actions={
           <div className="flex items-center gap-2">
             <a href="/dashboard/prompts/testing">
-              <Button variant="outline" size="sm" className="h-8 text-[11px] border-white/5 bg-neutral-900">
+              <Button variant="outline" size="sm" className="h-8 text-[11px] border-white/5 bg-neutral-900" onClick={(e) => {
+      e.preventDefault();
+      router.push('/dashboard/prompts/testing');
+    }}>
                 <SlidersHorizontal className="w-3.5 h-3.5 mr-1" />
                 Testing Lab
               </Button>
             </a>
             <a href="/dashboard/prompts/editor">
-              <Button variant="violet" size="sm" className="h-8 text-[11px]">
+              <Button variant="violet" size="sm" className="h-8 text-[11px]" onClick={(e) => {
+      e.preventDefault();
+      router.push('/dashboard/prompts/editor');
+    }}>
                 <Plus className="w-3.5 h-3.5 mr-1" />
                 Create Prompt
               </Button>
@@ -200,9 +206,4 @@ export function DashboardPage() {
       </div>
     </div>
   );
-}
-
-// SlidersHorizontal mock placeholder
-function SlidersHorizontal({ className }: { className?: string }) {
-  return <Settings2 className={className} />;
 }

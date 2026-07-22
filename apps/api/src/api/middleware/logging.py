@@ -75,9 +75,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 response.headers["x-trace-id"] = trace_id
 
             logger.info(
-                "Request processed successfully",
-                status_code=response.status_code,
-                latency_ms=process_time,
+                f"Request processed successfully: status_code={response.status_code}, latency_ms={process_time}"
             )
 
             # 5. Write log details to the DB table ai_logs
@@ -111,9 +109,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             process_time = int((time.perf_counter() - start_time) * 1000)
             logger.error(
-                "Request processing raised unhandled exception",
-                error=str(e),
-                latency_ms=process_time,
+                f"Request processing raised unhandled exception: {e} (latency_ms={process_time})"
             )
 
             trace_id, span_id = get_current_trace_and_span_ids()

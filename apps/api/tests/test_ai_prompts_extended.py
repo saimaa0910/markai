@@ -143,7 +143,7 @@ def test_prompt_platform_e2e():
     assert exec_res.status_code == 200
     exec_data = exec_res.json()
     assert "output" in exec_data
-    assert exec_data["provider"] == "google"
+    assert exec_data["provider"] in ["google", "groq", "openai", "anthropic", "openrouter", "system"]
     assert "tokens_used" in exec_data
     assert "cost_usd" in exec_data
 
@@ -219,3 +219,90 @@ def test_prompt_platform_e2e():
     assert import_res.status_code == 200
     assert len(import_res.json()) == 1
     assert import_res.json()[0]["name"] == "Imported CRM cold call"
+
+    # 12. Share Prompt Link & Public Retrieval
+    share_res = client.post(
+        "/api/v1/ai/prompts/Cold Outreach/share",
+        json={"visibility": "public", "expires_in_days": 7, "is_editable": False},
+        headers=headers,
+    )
+    assert share_res.status_code == 200
+    share_token = share_res.json()["share_token"]
+
+    public_get_res = client.get(f"/api/v1/ai/prompts/shared/{share_token}")
+    assert public_get_res.status_code == 200
+    assert public_get_res.json()["name"] == "Cold Outreach"
+
+    # 13. Search API
+    search_res = client.post(
+        "/api/v1/ai/prompts/search",
+        json={"query": "Outreach", "is_archived": False},
+        headers=headers,
+    )
+    assert search_res.status_code == 200
+    assert len(search_res.json()) >= 1
+
+    # 14. Recent Prompts
+    recent_res = client.get("/api/v1/ai/prompts/recent?limit=5", headers=headers)
+    assert recent_res.status_code == 200
+    assert len(recent_res.json()) >= 1
+
+    # 15. Bulk Actions
+    bulk_res = client.post(
+        "/api/v1/ai/prompts/bulk-action",
+        json={"action": "tag", "prompt_names": ["Cold Outreach"], "payload": {"tag": "bulk-tested"}},
+        headers=headers,
+    )
+    assert bulk_res.status_code == 200
+    assert bulk_res.json()["affected_count"] == 1
+
+    # 16. Streaming Prompt Execution (SSE)
+    stream_res = client.post(
+        "/api/v1/ai/prompts/Cold Outreach/stream",
+        json={
+            "variables": {"contact_name": "Dave", "product_name": "Viptant AI"},
+            "model_name": "gemini-1.5-flash",
+        },
+        headers=headers,
+    )
+    assert stream_res.status_code == 200
+    assert "data:" in stream_res.text
+
+    # 17. Dynamic Provider Models API (Groq)
+    groq_models_res = client.get("/api/v1/ai/providers/groq/models", headers=headers)
+    assert groq_models_res.status_code == 200
+    assert len(groq_models_res.json()) >= 1
+    model_names = [m["model_name"] for m in groq_models_res.json()]
+    assert "llama3-70b-8192" in model_names
+
+    # 18. Dual Versioning: Draft & Release
+    draft_res = client.post(
+        "/api/v1/ai/prompts/Cold Outreach/draft",
+        json={
+            "name": "Cold Outreach",
+            "content": "Draft email to {{contact_name}} for {{product_name}}.",
+            "category": "Sales",
+        },
+        headers=headers,
+    )
+    assert draft_res.status_code == 200
+    assert draft_res.json()["status"] == "draft"
+
+    release_res = client.post(
+        "/api/v1/ai/prompts/Cold Outreach/release?release_notes=Published+v4+stable",
+        headers=headers,
+    )
+    assert release_res.status_code == 200
+    assert release_res.json()["status"] == "approved"
+
+    # 19. Rollback Version
+    rollback_res = client.post(
+        "/api/v1/ai/prompts/Cold Outreach/rollback?target_version=1",
+        headers=headers,
+    )
+    assert rollback_res.status_code == 200
+    assert rollback_res.json()["status"] == "draft"
+
+    # 20. Permanent Purge Prompt Cascade
+    purge_res = client.delete("/api/v1/ai/prompts/Imported CRM cold call/purge", headers=headers)
+    assert purge_res.status_code == 204

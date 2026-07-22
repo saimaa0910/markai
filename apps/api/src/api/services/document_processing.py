@@ -84,7 +84,7 @@ class DocumentProcessingService:
             file_name = doc.title
             file_size = doc.file_size or os.path.getsize(file_path)
             
-            logger.info("Ingestion virus scan completed successfully", file_name=file_name, file_size=file_size, scanned_by="Viptant Virus Shield v1.2")
+            logger.info(f"Ingestion virus scan completed successfully for {file_name} ({file_size} bytes) via Viptant Virus Shield v1.2")
 
             # Trigger a security policy checks bypass alert if extension is dangerous
             ext = os.path.splitext(file_name)[1].lower().strip(".")

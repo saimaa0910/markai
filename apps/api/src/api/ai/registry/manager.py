@@ -163,6 +163,18 @@ class ModelRegistryManager:
         return list(db.scalars(query).all())
 
     @staticmethod
+    def list_models_by_provider(db: Session, provider_name: str) -> List[AIModelRegistry]:
+        """
+        Query database to return all models associated with a provider sorted by priority.
+        """
+        from sqlalchemy import func
+        ModelRegistryManager.seed_default_models(db)
+        query = select(AIModelRegistry).where(
+            func.lower(AIModelRegistry.provider) == provider_name.lower()
+        ).order_by(AIModelRegistry.priority.desc())
+        return list(db.scalars(query).all())
+
+    @staticmethod
     def update_model_health(db: Session, model_name: str, is_healthy: bool) -> None:
         """
         Update the health status of a model in the registry database.

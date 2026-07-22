@@ -1,6 +1,7 @@
 import uuid
 from typing import Any, List, Optional, Dict
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import Session
 
@@ -15,9 +16,11 @@ from api.models.prompt import (
 from api.models.conversation import Conversation
 from api.models.message import Message
 from api.services.llm import LLMGateway
+from api.repositories.prompt import PromptRepository, CollectionRepository, FolderRepository
 from api.services.prompt import (
     PromptService, VariableEngine, ExecutionService,
-    EvaluationService, OptimizationService, ImportExportService
+    EvaluationService, OptimizationService, ImportExportService,
+    AnalyticsService, ShareService, FavoriteService
 )
 from api.services.knowledge import KnowledgeService
 from api.schemas.ai import (
@@ -34,6 +37,10 @@ from api.schemas.ai import (
     PromptExecuteRequest,
     PromptOptimizeRequest,
     PromptImportRequest,
+    PromptShareRequest,
+    PromptShareResponse,
+    PromptBulkActionRequest,
+    PromptSearchRequest,
     ConversationCreate,
     ConversationResponse,
     MessageCreate,
@@ -48,12 +55,37 @@ from api.schemas.ai import (
 
 prompts_router = APIRouter(prefix="/ai/prompts", tags=["ai-prompts"])
 conversations_router = APIRouter(prefix="/ai/conversations", tags=["ai-conversations"])
+knowledge_router = APIRouter(prefix="/ai/knowledge", tags=["ai-knowledge"])
+models_router = APIRouter(prefix="/ai/models", tags=["ai-models"])
+routing_rules_router = APIRouter(prefix="/ai/routing-rules", tags=["ai-routing-rules"])
+usage_router = APIRouter(prefix="/ai/usage", tags=["ai-usage"])
+providers_router = APIRouter(prefix="/ai/providers", tags=["ai-providers"])
+playground_router = APIRouter(prefix="/ai/playground", tags=["ai-playground"])
+compare_router = APIRouter(prefix="/ai/compare", tags=["ai-compare"])
+analytics_router = APIRouter(prefix="/ai/analytics", tags=["ai-analytics"])
 
-active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
+active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.GUEST])
+
+
+@providers_router.get("/{provider_name}/models")
+def list_provider_models(
+    provider_name: str,
+    membership: UserOrganization = Depends(active_member)
+):
+    models = [
+        {"model_name": "llama3-70b-8192", "provider": "groq", "supports_streaming": True},
+        {"model_name": "llama3-8b-8192", "provider": "groq", "supports_streaming": True},
+        {"model_name": "mixtral-8x7b-32768", "provider": "groq", "supports_streaming": True},
+        {"model_name": "gemini-1.5-flash", "provider": "google", "supports_streaming": True},
+        {"model_name": "gemini-1.5-pro", "provider": "google", "supports_streaming": True},
+        {"model_name": "gpt-4o", "provider": "openai", "supports_streaming": True},
+    ]
+    filtered = [m for m in models if m["provider"].lower() == provider_name.lower()]
+    return filtered or models
 
 
 # ==========================================
-# PROMPT LIBRARY ENDPOINTS
+# PROMPT LIBRARY ENDPOINTS (BACKWARD COMPATIBILITY)
 # ==========================================
 
 
@@ -65,15 +97,13 @@ def create_prompt(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    try:
-        return PromptService.create_prompt_version(
-            db=db, prompt_in=prompt_in, organization_id=membership.organization_id
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+    return PromptService.create_prompt_version(
+        db=db,
+        prompt_in=prompt_in,
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        user_role=str(membership.role)
+    )
 
 
 @prompts_router.post(
@@ -85,15 +115,14 @@ def update_prompt(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    try:
-        return PromptService.update_prompt_version(
-            db=db, name=name, prompt_in=prompt_in, organization_id=membership.organization_id
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+    return PromptService.update_prompt_version(
+        db=db,
+        name=name,
+        prompt_in=prompt_in,
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        user_role=str(membership.role)
+    )
 
 
 @prompts_router.get("/", response_model=List[PromptResponse])
@@ -104,11 +133,6 @@ def list_prompts(
     return PromptService.list_latest_prompts(
         db=db, organization_id=membership.organization_id
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STATIC PROMPT PLATFORM ROUTE ENDPOINTS
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @prompts_router.post("/collections", response_model=PromptCollectionResponse)
@@ -123,7 +147,8 @@ def create_collection(
         description=col_in.description,
         organization_id=membership.organization_id,
         parent_id=col_in.parent_id,
-        visibility=col_in.visibility
+        visibility=col_in.visibility or "ORGANIZATION",
+        owner_id=membership.user_id
     )
 
 
@@ -146,7 +171,8 @@ def create_folder(
         name=folder_in.name,
         collection_id=folder_in.collection_id,
         organization_id=membership.organization_id,
-        parent_id=folder_in.parent_id
+        parent_id=folder_in.parent_id,
+        owner_id=membership.user_id
     )
 
 
@@ -176,36 +202,7 @@ def get_dashboard_stats(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ):
-    total_prompts = db.query(func.count(func.distinct(Prompt.name))).filter(
-        Prompt.organization_id == membership.organization_id
-    ).scalar() or 0
-    
-    total_executions = db.query(func.count(PromptExecution.id)).filter(
-        PromptExecution.organization_id == membership.organization_id
-    ).scalar() or 0
-    
-    avg_latency = db.query(func.avg(PromptExecution.latency_ms)).filter(
-        PromptExecution.organization_id == membership.organization_id
-    ).scalar() or 0
-    
-    avg_cost = db.query(func.avg(PromptExecution.cost_usd)).filter(
-        PromptExecution.organization_id == membership.organization_id
-    ).scalar() or 0
-    
-    categories = db.query(Prompt.category, func.count(func.distinct(Prompt.name))).filter(
-        Prompt.organization_id == membership.organization_id
-    ).group_by(Prompt.category).all()
-    
-    breakdown = [{"name": c[0] or "General", "value": c[1]} for c in categories]
-    
-    return {
-        "totalPrompts": total_prompts,
-        "totalExecutions": total_executions,
-        "avgLatencyMs": round(float(avg_latency or 0), 1),
-        "avgCostUsd": round(float(avg_cost or 0.00045), 5),
-        "successRate": 99.2,
-        "categoriesBreakdown": breakdown
-    }
+    return AnalyticsService.get_dashboard_stats(db=db, organization_id=membership.organization_id)
 
 
 @prompts_router.post("/import", response_model=List[PromptResponse])
@@ -214,15 +211,13 @@ def import_prompts(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ):
-    try:
-        return ImportExportService.import_prompts(
-            db=db,
-            file_content=imp_in.file_content,
-            format_type=imp_in.format_type,
-            organization_id=membership.organization_id
-        )
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Import failed: {str(e)}")
+    return ImportExportService.import_prompts(
+        db=db,
+        file_content=imp_in.file_content,
+        format_type=imp_in.format_type,
+        organization_id=membership.organization_id,
+        user_id=membership.user_id
+    )
 
 
 @prompts_router.get("/export")
@@ -231,9 +226,74 @@ def export_prompts(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ):
-    prompts = PromptService.list_latest_prompts(db=db, organization_id=membership.organization_id)
-    exported_str = ImportExportService.export_prompts(prompts=prompts, format_type=format_type)
-    return {"file_content": exported_str, "format_type": format_type}
+    return ImportExportService.export_prompts(
+        db=db, format_type=format_type, organization_id=membership.organization_id
+    )
+
+
+@prompts_router.get("/recent", response_model=List[PromptResponse])
+def list_recent_prompts(
+    limit: Optional[int] = 10,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    prompts, _ = PromptRepository.list_by_organization(
+        db=db, organization_id=membership.organization_id, limit=limit or 10
+    )
+    return prompts
+
+
+@prompts_router.post("/bulk-action")
+def perform_bulk_action(
+    req: PromptBulkActionRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    results = []
+    for name in req.prompt_names:
+        if req.action in ["archive", "delete"]:
+            PromptService.soft_delete(db, name, membership.organization_id, user_id=membership.user_id)
+            results.append({"name": name, "status": "archived"})
+        elif req.action == "restore":
+            PromptService.restore(db, name, membership.organization_id, user_id=membership.user_id)
+            results.append({"name": name, "status": "restored"})
+        elif req.action in ["purge", "permanent_delete"]:
+            PromptService.permanent_delete(db, name, membership.organization_id, user_id=membership.user_id)
+            results.append({"name": name, "status": "purged"})
+        else:
+            results.append({"name": name, "status": "processed"})
+    return {"action": req.action, "results": results, "affected_count": len(results)}
+
+
+@prompts_router.post("/search", response_model=List[PromptResponse])
+def search_prompts(
+    req: PromptSearchRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    prompts, _ = PromptRepository.search(
+        db=db,
+        organization_id=membership.organization_id,
+        query=getattr(req, "query", None),
+        category=getattr(req, "category", None),
+        tag=getattr(req, "tag", None),
+        folder_id=getattr(req, "folder_id", None),
+        collection_id=getattr(req, "collection_id", None),
+        status=getattr(req, "status", None),
+        owner_id=getattr(req, "owner_id", None),
+        is_archived=getattr(req, "is_archived", False) or False,
+        skip=getattr(req, "skip", 0) or 0,
+        limit=getattr(req, "limit", 50) or 50
+    )
+    return prompts
+
+
+@prompts_router.get("/shared/{token}", response_model=PromptResponse)
+def get_shared_prompt(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    return ShareService.get_shared_prompt(db=db, token=token)
 
 
 @prompts_router.get("/{name}", response_model=PromptResponse)
@@ -242,14 +302,27 @@ def get_prompt(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    prompt = PromptService.get_latest_prompt(
+    return PromptService.get_latest_prompt(
         db=db, name=name, organization_id=membership.organization_id
     )
-    if not prompt:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Prompt template not found"
-        )
-    return prompt
+
+
+@prompts_router.post("/{name}", response_model=PromptResponse)
+@prompts_router.put("/{name}", response_model=PromptResponse)
+def update_prompt(
+    name: str,
+    prompt_in: PromptUpdate,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    return PromptService.update_prompt_version(
+        db=db,
+        name=name,
+        prompt_in=prompt_in,
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        user_role=str(membership.role)
+    )
 
 
 @prompts_router.get("/{name}/history", response_model=List[PromptResponse])
@@ -263,74 +336,144 @@ def get_prompt_history(
     )
 
 
-@prompts_router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
+@prompts_router.delete("/{name}/purge", status_code=status.HTTP_204_NO_CONTENT)
+def purge_prompt(
+    name: str,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    PromptService.permanent_delete(
+        db=db, name=name, organization_id=membership.organization_id, user_id=membership.user_id, user_role=str(membership.role)
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@prompts_router.delete("/{name}", status_code=status.HTTP_200_OK)
 def delete_prompt(
     name: str,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-) -> None:
-    PromptService.delete_prompt_family(
-        db=db, name=name, organization_id=membership.organization_id
+) -> Any:
+    PromptService.soft_delete(
+        db=db, name=name, organization_id=membership.organization_id, user_id=membership.user_id, user_role=str(membership.role)
     )
+    return {"success": True}
 
 
-@prompts_router.post("/test", response_model=PlaygroundRunResponse)
-def test_prompt(
-    test_in: PlaygroundRunRequest,
+@prompts_router.delete("/{name}/permanent", status_code=status.HTTP_200_OK)
+@prompts_router.delete("/{name}/purge", status_code=status.HTTP_200_OK)
+def purge_prompt(
+    name: str,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    # 1. Build messages
-    messages = []
-    if test_in.system_prompt:
-        messages.append({"role": "system", "content": test_in.system_prompt})
-    messages.append({"role": "user", "content": test_in.user_prompt})
+    PromptService.permanent_delete(
+        db=db, name=name, organization_id=membership.organization_id, user_id=membership.user_id, user_role=str(membership.role)
+    )
+    return {"success": True}
 
-    # 2. Call gateway
-    from api.ai.gateway.coordinator import AIGateway
-    gateway = AIGateway()
-    
-    res = gateway.chat(
+
+@prompts_router.post("/{name}/rollback", response_model=PromptResponse)
+def rollback_prompt(
+    name: str,
+    version: Optional[int] = Query(1, alias="target_version"),
+    version_query: Optional[int] = Query(None, alias="version"),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    target = version_query or version or 1
+    return PromptService.rollback_version(
         db=db,
-        messages=messages,
+        name=name,
+        target_version=target,
         organization_id=membership.organization_id,
         user_id=membership.user_id,
-        model_name=test_in.model_name,
+        user_role=str(membership.role)
     )
 
-    # 3. Log Token Usage to DB
-    from api.models.ai_usage import AITokenUsage
-    usage = AITokenUsage(
+
+@prompts_router.post("/{name}/restore", response_model=PromptResponse)
+def restore_prompt(
+    name: str,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    return PromptService.restore(
+        db=db, name=name, organization_id=membership.organization_id, user_id=membership.user_id, user_role=str(membership.role)
+    )
+
+
+@prompts_router.post("/{name}/draft", response_model=PromptResponse)
+def save_prompt_draft(
+    name: str,
+    prompt_in: PromptCreate,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    return PromptService.save_draft(
+        db=db, name=name, prompt_in=prompt_in, organization_id=membership.organization_id, user_id=membership.user_id, user_role=str(membership.role)
+    )
+
+
+@prompts_router.post("/{name}/release", response_model=PromptResponse)
+def release_prompt_version(
+    name: str,
+    release_notes: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    return PromptService.release_version(
+        db=db, name=name, release_notes=release_notes, organization_id=membership.organization_id, user_id=membership.user_id, user_role=str(membership.role)
+    )
+
+
+
+
+@prompts_router.post("/{name}/duplicate", response_model=PromptResponse)
+@prompts_router.post("/{name}/clone", response_model=PromptResponse)
+def clone_prompt(
+    name: str,
+    new_name: str = Query(...),
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    return PromptService.duplicate_prompt(
+        db=db,
+        name=name,
+        new_name=new_name,
         organization_id=membership.organization_id,
         user_id=membership.user_id,
-        provider=res.get("provider", "unknown"),
-        model_name=res.get("model", test_in.model_name),
-        prompt_tokens=res.get("prompt_tokens", 0),
-        completion_tokens=res.get("completion_tokens", 0),
-        total_tokens=res.get("prompt_tokens", 0) + res.get("completion_tokens", 0),
-        cost_usd=res.get("cost_usd", 0.0),
-        latency_ms=res.get("latency_ms", 0),
-        status="success",
+        user_role=str(membership.role)
     )
-    db.add(usage)
-    db.commit()
-
-    return {
-        "output": res["content"],
-        "provider": res.get("provider", "unknown"),
-        "model": res.get("model", test_in.model_name),
-        "tokens_used": res.get("prompt_tokens", 0) + res.get("completion_tokens", 0),
-        "cost_usd": float(res.get("cost_usd", 0.0)),
-        "latency_ms": res.get("latency_ms", 0),
-    }
 
 
+@prompts_router.post("/{name}/share", response_model=PromptShareResponse)
+def share_prompt(
+    name: str,
+    req: PromptShareRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    return ShareService.share_prompt(
+        db=db,
+        prompt_name=name,
+        share_in=req,
+        organization_id=membership.organization_id,
+        user_id=membership.user_id
+    )
 
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PROMPT EXECUTION & SANDBOX ENDPOINTS
-# ─────────────────────────────────────────────────────────────────────────────
+@prompts_router.get("/{name}/diff")
+def get_unified_diff(
+    name: str,
+    version_a: int = 1,
+    version_b: int = 2,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    return PromptService.compute_diff(
+        db=db, name=name, version_a=version_a, version_b=version_b, organization_id=membership.organization_id
+    )
 
 
 @prompts_router.post("/{name}/execute")
@@ -340,135 +483,46 @@ def execute_prompt(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ):
-    try:
-        return ExecutionService.execute(
+    return ExecutionService.execute_prompt_template(
+        db=db,
+        prompt_name=name,
+        variables=exec_in.variables or {},
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        version=exec_in.version,
+        model_name=exec_in.model_name,
+        system_prompt=exec_in.system_prompt,
+        rag_enabled=exec_in.rag_enabled or False,
+        temperature=exec_in.temperature or 0.7
+    )
+
+
+@prompts_router.post("/{name}/stream")
+def stream_prompt(
+    name: str,
+    exec_in: PromptExecuteRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+):
+    def event_generator():
+        res = ExecutionService.execute_prompt_template(
             db=db,
-            name=name,
-            variables=exec_in.variables,
+            prompt_name=name,
+            variables=exec_in.variables or {},
             organization_id=membership.organization_id,
             user_id=membership.user_id,
             version=exec_in.version,
             model_name=exec_in.model_name,
             system_prompt=exec_in.system_prompt,
-            rag_enabled=exec_in.rag_enabled,
-            temperature=exec_in.temperature
+            rag_enabled=exec_in.rag_enabled or False,
+            temperature=exec_in.temperature or 0.7
         )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        output_text = res.get("output", "")
+        for chunk in output_text.split(" "):
+            yield f"data: {json.dumps({'content': chunk + ' '})}\n\n"
+        yield "data: [DONE]\n\n"
 
-
-
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PROMPT COMPLIANCE, VERSIONING & DIFFS ENDPOINTS
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@prompts_router.post("/{name}", response_model=PromptResponse)
-def update_prompt_alternative(
-    name: str,
-    prompt_in: PromptUpdate,
-    db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
-    """Backwards compatible endpoint matching POST /ai/prompts/{name}"""
-    try:
-        return PromptService.update_prompt_version(
-            db=db, name=name, prompt_in=prompt_in, organization_id=membership.organization_id
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-
-@prompts_router.post("/{name}/favorite", response_model=PromptResponse)
-def toggle_favorite(
-    name: str,
-    db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
-    res = PromptService.toggle_favorite(db=db, name=name, organization_id=membership.organization_id)
-    if not res:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found")
-    return res
-
-
-@prompts_router.post("/{name}/pin", response_model=PromptResponse)
-def toggle_pin(
-    name: str,
-    db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
-    res = PromptService.toggle_pin(db=db, name=name, organization_id=membership.organization_id)
-    if not res:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found")
-    return res
-
-
-@prompts_router.post("/{name}/archive", response_model=PromptResponse)
-def archive_prompt(
-    name: str,
-    db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
-    res = PromptService.archive_prompt(db=db, name=name, organization_id=membership.organization_id)
-    if not res:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt not found")
-    return res
-
-
-@prompts_router.post("/{name}/rollback", response_model=PromptResponse)
-def rollback_prompt_version(
-    name: str,
-    version: int,
-    db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
-    try:
-        return PromptService.rollback_prompt_version(
-            db=db, name=name, rollback_version=version, organization_id=membership.organization_id
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@prompts_router.get("/{name}/diff")
-def get_unified_diff(
-    name: str,
-    version_a: int,
-    version_b: int,
-    db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
-    try:
-        diff_str = PromptService.get_unified_diff(
-            db=db, name=name, version_a=version_a, version_b=version_b, organization_id=membership.organization_id
-        )
-        return {"diff": diff_str}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@prompts_router.post("/{name}/duplicate", response_model=PromptResponse)
-def duplicate_prompt(
-    name: str,
-    new_name: str,
-    db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
-    try:
-        return PromptService.duplicate_prompt(
-            db=db, name=name, new_name=new_name, organization_id=membership.organization_id
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PROMPT TESTING & EVALUATION LAB ENDPOINTS
-# ─────────────────────────────────────────────────────────────────────────────
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @prompts_router.post("/{name}/testcases", response_model=PromptTestCaseResponse)
@@ -1158,6 +1212,16 @@ def get_providers(
 ) -> Any:
     sync_providers_and_models(db)
     return db.query(AIProvider).order_by(AIProvider.priority.desc()).all()
+
+
+@providers_router.get("/{provider_name}/models", response_model=List[ModelRegistryResponse])
+def get_provider_models(
+    provider_name: str,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    from api.ai.registry.manager import ModelRegistryManager
+    return ModelRegistryManager.list_models_by_provider(db=db, provider_name=provider_name)
 
 
 @providers_router.post("/", response_model=ProviderResponse, status_code=status.HTTP_201_CREATED)

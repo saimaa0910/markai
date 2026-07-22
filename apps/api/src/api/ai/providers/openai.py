@@ -20,29 +20,15 @@ class OpenAIProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            system_instructions = [m["content"] for m in messages if m["role"] == "system"]
-            user_prompts = [m["content"] for m in messages if m["role"] == "user"]
-            instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
-            prompt_content = user_prompts[-1] if user_prompts else ""
-
-            return {
-                "content": f"{instruction_prefix}[Simulated OpenAI Router ({model})]: Simulated response to prompt: '{prompt_content}'",
-                "prompt_tokens": 15,
-                "completion_tokens": 25,
-                "latency_ms": 50,
-                "provider": "openai",
-                "model": model,
-            }
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
             raise RuntimeError("OpenAI API key is not configured.")
 
         start_time = time.perf_counter()
         response = self.client.post(
             f"{self.base_url}/chat/completions",
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
@@ -72,25 +58,15 @@ class OpenAIProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            mock_text = f"[Simulated OpenAI Stream ({model})]: Streamed response."
-            for word in mock_text.split(" "):
-                time.sleep(0.02)
-                yield {
-                    "content": word + " ",
-                    "prompt_tokens": 10,
-                    "completion_tokens": 20,
-                }
-            return
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
             raise RuntimeError("OpenAI API key is not configured.")
 
         with self.client.stream(
             "POST",
             f"{self.base_url}/chat/completions",
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
@@ -121,17 +97,17 @@ class OpenAIProvider(BaseLLMProvider):
                         pass
 
     def embeddings(self, text: str, model: str) -> List[float]:
+        api_key = self.api_key or os.getenv("OPENAI_API_KEY")
         from api.core.config import settings
         if settings.ENVIRONMENT != "production":
-            # Return standard mock embedding vector (1536 dimension)
             return [0.01] * 1536
-        elif not self.api_key:
+        elif not api_key:
             raise RuntimeError("OpenAI API key is not configured.")
 
         response = self.client.post(
             f"{self.base_url}/embeddings",
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={"input": text, "model": model},

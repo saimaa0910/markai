@@ -47,22 +47,8 @@ class ClaudeProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            system_instructions = [m["content"] for m in messages if m["role"] == "system"]
-            user_prompts = [m["content"] for m in messages if m["role"] == "user"]
-            instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
-            prompt_content = user_prompts[-1] if user_prompts else ""
-
-            return {
-                "content": f"{instruction_prefix}[Simulated Claude Router ({model})]: Simulated response to prompt: '{prompt_content}'",
-                "prompt_tokens": 14,
-                "completion_tokens": 22,
-                "latency_ms": 120,
-                "provider": "anthropic",
-                "model": model,
-            }
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
             raise RuntimeError("Claude API key is not configured.")
 
         payload = self._prepare_payload(messages, model, temperature, **kwargs)
@@ -70,7 +56,7 @@ class ClaudeProvider(BaseLLMProvider):
         response = self.client.post(
             "https://api.anthropic.com/v1/messages",
             headers={
-                "x-api-key": self.api_key,
+                "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
@@ -96,18 +82,8 @@ class ClaudeProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            mock_text = f"[Simulated Claude Stream ({model})]: Stream content."
-            for word in mock_text.split(" "):
-                time.sleep(0.02)
-                yield {
-                    "content": word + " ",
-                    "prompt_tokens": 10,
-                    "completion_tokens": 15,
-                }
-            return
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
             raise RuntimeError("Claude API key is not configured.")
 
         payload = self._prepare_payload(messages, model, temperature, stream=True, **kwargs)
@@ -115,7 +91,7 @@ class ClaudeProvider(BaseLLMProvider):
             "POST",
             "https://api.anthropic.com/v1/messages",
             headers={
-                "x-api-key": self.api_key,
+                "x-api-key": api_key,
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },

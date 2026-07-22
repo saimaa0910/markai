@@ -1,5 +1,7 @@
 import * as React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useDocument, useCollections } from '../../hooks';
+import { KnowledgeAPI } from '../../services/knowledge';
 import { useKnowledgeStore } from '../../store/knowledge';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -25,30 +27,22 @@ export function DocumentDetailsPage({ id }: DocumentDetailsPageProps) {
   const [zoomLevel, setZoomLevel] = React.useState(100);
   const [previewSearchQuery, setPreviewSearchQuery] = React.useState('');
 
-  if (!document) {
-    return (
-      <div className="py-20 text-center flex flex-col items-center justify-center gap-3">
-        <FileText className="w-10 h-10 text-neutral-600" />
-        <h4 className="font-bold text-white text-sm">Document Not Found</h4>
-        <a href="/dashboard/knowledge/documents">
-          <Button variant="outline" size="sm" className="border-white/5">
-            Back to Documents
-          </Button>
-        </a>
-      </div>
-    );
-  }
+  // Fetch real extracted document content from backend
+  const { data: previewData, isLoading: isPreviewLoading } = useQuery({
+    queryKey: ['document-preview', id],
+    queryFn: () => KnowledgeAPI.getDocumentPreview(id),
+    enabled: !!id,
+  });
 
-  // Simulated raw content text
   const docRawText = React.useMemo(() => {
-    if (document.file_type === 'CSV') {
-      return `Name,Role,Email\nJohn Doe,Developer,john@viptant.com\nJane Smith,Marketing,jane@viptant.com\nAlice Johnson,Owner,alice@viptant.com`;
+    if (previewData && previewData.content) {
+      return previewData.content;
     }
-    if (document.file_type === 'MD') {
-      return `# ${document.title}\n\nThis is a premium markdown preview for active ingestion files. It supports heading hierarchies, bolding highlights, lists, and inline tags.`;
+    if (document) {
+      return `Document Content for ${document.title}.\nStatus: ${document.status}.\nSize: ${document.file_size} bytes.`;
     }
-    return `Physical document copy: ${document.title}.\nThis file was successfully uploaded to Viptant Storage systems.\nProcessing chunk index passes generated ${document.chunk_count} active text records.\nVector embeddings dimensions are 1536 (OpenAI text-embedding-3-small gateway).`;
-  }, [document]);
+    return 'Loading document content...';
+  }, [previewData, document]);
 
   // Generate chunks client-side for chunk preview tab
   const computedChunks = React.useMemo(() => {
@@ -80,6 +74,20 @@ export function DocumentDetailsPage({ id }: DocumentDetailsPageProps) {
       ) : part
     );
   };
+
+  if (!document) {
+    return (
+      <div className="py-20 text-center flex flex-col items-center justify-center gap-3">
+        <FileText className="w-10 h-10 text-neutral-600" />
+        <h4 className="font-bold text-white text-sm">Document Not Found</h4>
+        <a href="/dashboard/knowledge/documents">
+          <Button variant="outline" size="sm" className="border-white/5">
+            Back to Documents
+          </Button>
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 max-w-[1400px] mx-auto pb-12">
@@ -268,15 +276,15 @@ export function DocumentDetailsPage({ id }: DocumentDetailsPageProps) {
                     <table className="w-full text-left text-[11px] font-sans">
                       <thead>
                         <tr className="border-b border-white/10 text-neutral-400 uppercase tracking-wider font-semibold text-[10px]">
-                          {docRawText.split('\n')[0].split(',').map((header, i) => (
+                          {docRawText.split('\n')[0].split(',').map((header: string, i: number) => (
                             <th key={i} className="pb-2 pr-4">{header}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
-                        {docRawText.split('\n').slice(1).map((row, idx) => (
+                        {docRawText.split('\n').slice(1).map((row: string, idx: number) => (
                           <tr key={idx} className="text-neutral-300">
-                            {row.split(',').map((cell, i) => (
+                            {row.split(',').map((cell: string, i: number) => (
                               <td key={i} className="py-2 pr-4">{handleHighlight(cell)}</td>
                             ))}
                           </tr>

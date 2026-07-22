@@ -1,4 +1,7 @@
+'use client';
+
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 import { useDocuments, useCollections, useEmbeddings, useAnalytics } from '../hooks';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +16,7 @@ import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip 
 } from 'recharts';
 import { motion } from 'framer-motion';
+
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -31,6 +35,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export function DashboardPage() {
+  const router = useRouter();
   const { documents, isLoading: loadingDocs } = useDocuments();
   const { collections } = useCollections();
   const { stats: embedStats } = useEmbeddings();
@@ -70,12 +75,15 @@ export function DashboardPage() {
                 Query Workspace
               </Button>
             </a>
-            <a href="/dashboard/knowledge/upload">
-              <Button variant="violet" size="sm" className="h-8 text-[11px]">
+            
+              <Button variant="violet" size="sm" className="h-8 text-[11px]" onClick={(e) => {
+      e.preventDefault();
+      router.push('/dashboard/knowledge/upload');
+    }} >
                 <Upload className="w-3.5 h-3.5 mr-1" />
                 Upload Document
               </Button>
-            </a>
+            
           </div>
         }
       />

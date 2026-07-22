@@ -1,8 +1,6 @@
-import os
 import uuid
-import shutil
 from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Response
 from sqlalchemy.orm import Session
 
 from api.database.session import get_db
@@ -10,12 +8,11 @@ from api.core.deps import RoleChecker
 from api.models.membership import UserOrganization, UserRole
 from api.models.file_asset import FileAsset
 from api.schemas.file_asset import FileAssetResponse
+from api.services.storage_service import MinIOService
 
 router = APIRouter(prefix="/files", tags=["files"])
 
 active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
-
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
 
 
 @router.post("/", response_model=FileAssetResponse, status_code=status.HTTP_201_CREATED)
@@ -24,29 +21,32 @@ async def upload_file(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    # Ensure upload directory exists
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    
-    # Save the file locally
     file_id = uuid.uuid4()
-    extension = file.filename.split(".")[-1] if "." in file.filename else ""
+    original_filename = file.filename or "file"
+    extension = original_filename.split(".")[-1] if "." in original_filename else ""
     local_filename = f"{file_id}.{extension}" if extension else f"{file_id}"
-    file_path = os.path.join(UPLOAD_DIR, local_filename)
     
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
-    # Get file stats
-    file_size = os.path.getsize(file_path)
+    file_bytes = await file.read()
+    file_size = len(file_bytes)
+    
+    # Upload directly to MinIO
+    MinIOService.upload_file(
+        file_bytes=file_bytes,
+        object_name=local_filename,
+        content_type=file.content_type or "application/octet-stream"
+    )
+    
+    # Generate presigned access URL
+    storage_url = MinIOService.get_presigned_url(local_filename)
     
     # Create DB entry
     file_asset = FileAsset(
         id=file_id,
-        filename=file.filename,
+        filename=original_filename,
         file_type=extension.upper() or "BINARY",
-        mime_type=file.content_type,
+        mime_type=file.content_type or "application/octet-stream",
         file_size=file_size,
-        storage_url=f"/api/v1/files/{file_id}/download",
+        storage_url=storage_url,
         organization_id=membership.organization_id,
     )
     
@@ -87,12 +87,12 @@ def delete_file(
             status_code=status.HTTP_404_NOT_FOUND, detail="File asset not found"
         )
         
-    # Delete local file if it exists
-    extension = file_asset.filename.split(".")[-1] if "." in file_asset.filename else ""
+    asset_name = file_asset.filename or ""
+    extension = asset_name.split(".")[-1] if "." in asset_name else ""
     local_filename = f"{file_id}.{extension}" if extension else f"{file_id}"
-    file_path = os.path.join(UPLOAD_DIR, local_filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    
+    # Remove from MinIO storage
+    MinIOService.delete_file(local_filename)
         
     db.delete(file_asset)
     db.commit()
@@ -104,7 +104,6 @@ def download_file(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ):
-    from fastapi.responses import FileResponse
     file_asset = (
         db.query(FileAsset)
         .filter(
@@ -120,15 +119,15 @@ def download_file(
         
     extension = file_asset.filename.split(".")[-1] if "." in file_asset.filename else ""
     local_filename = f"{file_id}.{extension}" if extension else f"{file_id}"
-    file_path = os.path.join(UPLOAD_DIR, local_filename)
     
-    if not os.path.exists(file_path):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="File physical copy missing"
+    try:
+        content_bytes = MinIOService.download_file_bytes(local_filename)
+        return Response(
+            content=content_bytes,
+            media_type=file_asset.mime_type or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{file_asset.filename}"'}
         )
-        
-    return FileResponse(
-        path=file_path,
-        filename=file_asset.filename,
-        media_type=file_asset.mime_type,
-    )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"File physical copy missing in MinIO: {e}"
+        )

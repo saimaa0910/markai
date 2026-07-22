@@ -159,9 +159,22 @@ export function usePromptTesting() {
 // ─────────────────────────────────────────────────────────────────────────────
 export function usePromptTemplates() {
   const templates = [
-    { name: 'SaaS Email Welcome', content: 'Design a warm onboarding message welcome template targeting {{product_name}} conversion goals for {{customer}}.', category: 'Marketing', tags: ['email', 'onboarding'] },
-    { name: 'Google Ads Variant Generator', content: 'Create comparative headline copies variants with concise emotional hooks for {{target_audience}}.', category: 'Ads', tags: ['adwords', 'headlines'] },
-    { name: 'CRM Pipeline Followup', content: 'Draft a polite transaction callback follow up reminder to client {{contact_name}} relative to deal value {{deal_value}}.', category: 'CRM', tags: ['sales', 'followup'] },
+    { name: 'SaaS Email Welcome', content: 'Design a warm onboarding email message template for {{product_name}} targeting {{customer_name}} in the {{industry}} domain.', category: 'Email', tags: ['email', 'onboarding', 'marketing'] },
+    { name: 'SEO Content Outliner', content: 'Generate a top-ranking SEO article outline with H1, H2, H3 tags, targeted keyword clusters for "{{target_keyword}}", and search intent for {{target_audience}}.', category: 'SEO', tags: ['seo', 'content', 'keywords'] },
+    { name: 'Sales Cold Outreach', content: 'Draft a personalized, high-converting B2B cold email to {{contact_name}} at {{company}} highlighting how {{product}} solves {{pain_point}}.', category: 'Sales', tags: ['sales', 'outreach', 'b2b'] },
+    { name: 'Customer Support Escalation', content: 'Formulate a professional and empathetic customer support resolution letter addressing issue {{ticket_issue}} for user {{user_name}}.', category: 'Customer Support', tags: ['support', 'resolution', 'tickets'] },
+    { name: 'Social Media Viral Thread', content: 'Create a 5-part engage-focused social media thread discussing {{topic}} with punchy hooks, call-to-actions, and relevant hashtags.', category: 'Social Media', tags: ['social', 'twitter', 'linkedin'] },
+    { name: 'Long-form Blog Generator', content: 'Write an authoritative 1000-word blog post section on {{topic}} using a {{tone}} tone of voice and clear markdown formatting.', category: 'Blog', tags: ['blog', 'writing', 'content'] },
+    { name: 'Product Description Copywriter', content: 'Generate a compelling, benefit-focused product description for {{product_name}} highlighting key features {{feature_list}} for target market {{audience}}.', category: 'Product Description', tags: ['ecommerce', 'copywriting', 'product'] },
+    { name: 'Meeting Executive Summary', content: 'Summarize the following meeting transcript notes for meeting {{meeting_title}}: extract key decisions, action items with assignees, and deadlines:\n\n{{transcript}}', category: 'Meeting Summary', tags: ['summary', 'productivity', 'meeting'] },
+    { name: 'Multi-Language Translator', content: 'Accurately translate the following text from {{source_language}} to {{target_language}} preserving contextual nuances, technical vocabulary, and tone:\n\n{{input_text}}', category: 'Translation', tags: ['translation', 'localization', 'i18n'] },
+    { name: 'Clean Code Generator', content: 'Write production-grade, well-commented {{language}} code implementing {{functionality}} following clean architecture, error handling, and type safety principles.', category: 'Code Generation', tags: ['code', 'programming', 'software'] },
+    { name: 'SQL Query Architect', content: 'Formulate an optimized SQL query for database engine {{db_engine}} that joins tables {{table_list}} to solve requirement: {{query_requirement}}.', category: 'SQL', tags: ['sql', 'database', 'queries'] },
+    { name: 'RAG Knowledge Synthesis', content: 'Synthesize a precise response to user query "{{query}}" strictly using the provided vector search context background:\n\nContext:\n{{knowledge}}\n\nIf answer is unavailable in context, politely decline.', category: 'RAG', tags: ['rag', 'vector', 'retrieval'] },
+    { name: 'Enterprise Knowledge QA', content: 'Act as an enterprise AI policy bot. Answer user question "{{question}}" according to organization policy document context:\n\n{{policy_context}}', category: 'Knowledge QA', tags: ['qa', 'enterprise', 'policy'] },
+    { name: 'Autonomous Agent System Prompt', content: 'You are an autonomous AI Agent specializing in {{specialty}}. Your goal is {{agent_goal}}. Execute step-by-step reasoning, plan tool invocations, and ensure validation.', category: 'Agent Prompt', tags: ['agent', 'system_prompt', 'autonomous'] },
+    { name: 'Workflow Step Automation', content: 'Act as an execution node step in workflow {{workflow_name}}. Process input payload {{input_payload}} and format output JSON matching target schema {{output_schema}}.', category: 'Workflow Prompt', tags: ['workflow', 'automation', 'json'] },
+    { name: 'Ad Campaign Copywriting', content: 'Generate 3 high-converting ad copy headline & description variants for {{product_name}} with emotional appeal tailored for {{audience}}.', category: 'Marketing', tags: ['ads', 'copywriting', 'conversion'] },
   ];
 
   return {
@@ -194,6 +207,38 @@ export function usePromptAnalytics() {
   return {
     stats: query.data || defaultStats,
     isLoading: query.isLoading,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hook: usePromptProviders
+// ─────────────────────────────────────────────────────────────────────────────
+export function usePromptProviders(selectedProvider: string = 'groq') {
+  const { activeOrg } = useAuthStore();
+
+  const providersQuery = useQuery({
+    queryKey: ['ai-providers', activeOrg?.id],
+    queryFn: () => PromptsAPI.fetchProviders(),
+    enabled: !!activeOrg,
+  });
+
+  const modelsQuery = useQuery({
+    queryKey: ['ai-provider-models', selectedProvider, activeOrg?.id],
+    queryFn: () => PromptsAPI.fetchProviderModels(selectedProvider),
+    enabled: !!activeOrg && !!selectedProvider,
+  });
+
+  return {
+    providers: providersQuery.data || [
+      { name: 'groq', is_active: true },
+      { name: 'openai', is_active: true },
+      { name: 'google', is_active: true },
+      { name: 'anthropic', is_active: true },
+      { name: 'openrouter', is_active: true },
+    ],
+    models: modelsQuery.data || [],
+    isLoadingProviders: providersQuery.isLoading,
+    isLoadingModels: modelsQuery.isLoading,
   };
 }
 export type { PromptTestingResult };

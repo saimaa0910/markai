@@ -49,28 +49,14 @@ class GeminiProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            system_instructions = [m["content"] for m in messages if m["role"] == "system"]
-            user_prompts = [m["content"] for m in messages if m["role"] == "user"]
-            instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
-            prompt_content = user_prompts[-1] if user_prompts else ""
-
-            return {
-                "content": f"{instruction_prefix}[Simulated Gemini Router ({model})]: Simulated response to prompt: '{prompt_content}'",
-                "prompt_tokens": 16,
-                "completion_tokens": 20,
-                "latency_ms": 90,
-                "provider": "google",
-                "model": model,
-            }
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("GEMINI_API_KEY")
+        if not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         payload = self._prepare_payload(messages, temperature)
         start_time = time.perf_counter()
         response = self.client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
             headers={"Content-Type": "application/json"},
             json=payload,
         )
@@ -98,24 +84,14 @@ class GeminiProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            mock_text = f"[Simulated Gemini Stream ({model})]: Streamed response."
-            for word in mock_text.split(" "):
-                time.sleep(0.02)
-                yield {
-                    "content": word + " ",
-                    "prompt_tokens": 10,
-                    "completion_tokens": 15,
-                }
-            return
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("GEMINI_API_KEY")
+        if not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         payload = self._prepare_payload(messages, temperature)
         with self.client.stream(
             "POST",
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={self.api_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={api_key}",
             headers={"Content-Type": "application/json"},
             json=payload,
         ) as response:
@@ -123,11 +99,7 @@ class GeminiProvider(BaseLLMProvider):
             for line in response.iter_lines():
                 if not line:
                     continue
-                # Gemini returns JSON chunks (sometimes structured as SSE or array segments)
-                # Parse lines to extract candidates contents
                 try:
-                    # In streamGenerateContent, chunks can be formatted as individual JSON lines
-                    # Clean brackets/commas if streamed as JSON Array
                     clean_line = line.strip().lstrip("[").rstrip(",").rstrip("]")
                     if not clean_line:
                         continue
@@ -144,14 +116,15 @@ class GeminiProvider(BaseLLMProvider):
                     pass
 
     def embeddings(self, text: str, model: str) -> List[float]:
+        api_key = self.api_key or os.getenv("GEMINI_API_KEY")
         from api.core.config import settings
         if settings.ENVIRONMENT != "production":
             return [0.02] * 1536
-        elif not self.api_key:
+        elif not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         response = self.client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent?key={self.api_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent?key={api_key}",
             headers={"Content-Type": "application/json"},
             json={
                 "model": f"models/{model}",
@@ -165,7 +138,6 @@ class GeminiProvider(BaseLLMProvider):
     def vision(
         self, prompt: str, image_url: str, model: str
     ) -> Dict[str, Any]:
-        # Handle vision by passing text and image data parameters (can fetch via http first)
         messages = [
             {
                 "role": "user",
@@ -177,8 +149,8 @@ class GeminiProvider(BaseLLMProvider):
     def json_output(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any], model: str
     ) -> Dict[str, Any]:
+        api_key = self.api_key or os.getenv("GEMINI_API_KEY")
         payload = self._prepare_payload(messages, 0.2)
-        # Enforce json response mime type
         payload["generationConfig"]["responseMimeType"] = "application/json"
         
         from api.core.config import settings
@@ -191,11 +163,11 @@ class GeminiProvider(BaseLLMProvider):
                 "provider": "google",
                 "model": model,
             }
-        elif not self.api_key:
+        elif not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         response = self.client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
             headers={"Content-Type": "application/json"},
             json=payload,
         )

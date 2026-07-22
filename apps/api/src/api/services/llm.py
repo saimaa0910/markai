@@ -4,8 +4,8 @@ from typing import Optional
 
 class LLMGateway:
     """
-    Modular Gateway for interfacing with multiple LLM providers.
-    Supports OpenAI, Gemini, and Claude model routing.
+    Modular Gateway for interfacing with LLM providers.
+    Routes execution to Groq / active AI Gateway provider.
     """
 
     @staticmethod
@@ -15,54 +15,18 @@ class LLMGateway:
         system_instruction: Optional[str] = None,
     ) -> str:
         """
-        Routes the prompt to the specified model provider, falling back to
-        simulated replies in local dev context if credentials aren't set.
+        Routes prompt to Groq or configured LLM provider.
         """
-        normalized_model = model_name.lower()
-        instruction_prefix = (
-            f"System Context: {system_instruction}\n" if system_instruction else ""
-        )
+        from api.ai.providers.groq import GroqProvider
+        provider = GroqProvider()
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt_content})
 
-        # 1. OpenAI Routing
-        if "gpt" in normalized_model:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if api_key:
-                # Real OpenAI integrations could go here
-                pass
-            return (
-                f"{instruction_prefix}"
-                f"[LLM Gateway -> OpenAI Router ({model_name})]: "
-                f"Simulated response to prompt: '{prompt_content}'"
-            )
-
-        # 2. Gemini Routing
-        elif "gemini" in normalized_model:
-            api_key = os.getenv("GEMINI_API_KEY")
-            if api_key:
-                # Real Gemini integrations could go here
-                pass
-            return (
-                f"{instruction_prefix}"
-                f"[LLM Gateway -> Gemini Router ({model_name})]: "
-                f"Simulated response to prompt: '{prompt_content}'"
-            )
-
-        # 3. Claude Routing
-        elif "claude" in normalized_model:
-            api_key = os.getenv("ANTHROPIC_API_KEY")
-            if api_key:
-                # Real Anthropic integrations could go here
-                pass
-            return (
-                f"{instruction_prefix}"
-                f"[LLM Gateway -> Claude Router ({model_name})]: "
-                f"Simulated response to prompt: '{prompt_content}'"
-            )
-
-        # 4. Default Fallback Router
-        else:
-            return (
-                f"{instruction_prefix}"
-                f"[LLM Gateway -> Default Router ({model_name})]: "
-                f"Simulated response to prompt: '{prompt_content}'"
-            )
+        try:
+            res = provider.chat(messages=messages, model=model_name or "llama-3.3-70b-versatile")
+            return res.get("content", "")
+        except Exception as e:
+            # Re-raise runtime error if execution failed
+            raise RuntimeError(f"LLM execution failed: {str(e)}")

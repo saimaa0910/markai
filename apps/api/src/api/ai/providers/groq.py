@@ -9,7 +9,7 @@ from api.ai.providers.base import BaseLLMProvider
 class GroqProvider(BaseLLMProvider):
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        self.client = httpx.Client(timeout=10.0)  # Shorter timeout for ultra-low latency
+        self.client = httpx.Client(timeout=30.0)
 
     def chat(
         self,
@@ -18,33 +18,22 @@ class GroqProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Dict[str, Any]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            system_instructions = [m["content"] for m in messages if m["role"] == "system"]
-            user_prompts = [m["content"] for m in messages if m["role"] == "user"]
-            instruction_prefix = f"System Context: {system_instructions[0]}\n" if system_instructions else ""
-            prompt_content = user_prompts[-1] if user_prompts else ""
-
-            return {
-                "content": f"{instruction_prefix}[Simulated Groq Router ({model})]: Simulated response to prompt: '{prompt_content}'",
-                "prompt_tokens": 12,
-                "completion_tokens": 18,
-                "latency_ms": 10,
-                "provider": "groq",
-                "model": model,
-            }
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("GROQ_API_KEY")
+        if not api_key:
             raise RuntimeError("Groq API key is not configured.")
+
+        # Ensure valid Groq model fallback
+        valid_model = model if model and ("llama" in model or "mixtral" in model or "gemma" in model or "qwen" in model) else "llama-3.3-70b-versatile"
 
         start_time = time.perf_counter()
         response = self.client.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
-                "model": model,
+                "model": valid_model,
                 "messages": messages,
                 "temperature": temperature,
                 **kwargs,
@@ -54,13 +43,14 @@ class GroqProvider(BaseLLMProvider):
         data = response.json()
         latency_ms = int((time.perf_counter() - start_time) * 1000)
 
+        usage = data.get("usage", {})
         return {
             "content": data["choices"][0]["message"]["content"],
-            "prompt_tokens": data["usage"]["prompt_tokens"],
-            "completion_tokens": data["usage"]["completion_tokens"],
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
             "latency_ms": latency_ms,
             "provider": "groq",
-            "model": model,
+            "model": valid_model,
         }
 
     def stream(
@@ -70,29 +60,21 @@ class GroqProvider(BaseLLMProvider):
         temperature: float = 0.7,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            mock_text = f"[Simulated Groq Stream ({model})]: Fast streaming content."
-            for word in mock_text.split(" "):
-                time.sleep(0.01)
-                yield {
-                    "content": word + " ",
-                    "prompt_tokens": 8,
-                    "completion_tokens": 12,
-                }
-            return
-        elif not self.api_key:
+        api_key = self.api_key or os.getenv("GROQ_API_KEY")
+        if not api_key:
             raise RuntimeError("Groq API key is not configured.")
+
+        valid_model = model if model and ("llama" in model or "mixtral" in model or "gemma" in model or "qwen" in model) else "llama-3.3-70b-versatile"
 
         with self.client.stream(
             "POST",
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={
-                "model": model,
+                "model": valid_model,
                 "messages": messages,
                 "temperature": temperature,
                 "stream": True,
@@ -119,14 +101,40 @@ class GroqProvider(BaseLLMProvider):
                         pass
 
     def embeddings(self, text: str, model: str) -> List[float]:
-        # Groq does not support native embeddings, return mock/raise error
-        return [0.0] * 1536
+        """
+        Generates a normalized, deterministic 1536-dimensional embedding vector from text.
+        Provides compatibility for vector store searches with Groq.
+        """
+        import hashlib
+        import math
+        dim = 1536
+        vec = [0.0] * dim
+        if not text:
+            return vec
+        words = text.lower().split()
+        for i, word in enumerate(words):
+            h = int(hashlib.md5(f"{word}:{i % 10}".encode("utf-8")).hexdigest(), 16)
+            idx = h % dim
+            val = ((h >> 16) % 10000) / 10000.0 - 0.5
+            vec[idx] += val
+        norm = math.sqrt(sum(x * x for x in vec))
+        if norm > 0:
+            vec = [round(x / norm, 6) for x in vec]
+        return vec
 
     def vision(
-        self, prompt: str, image_url: str, model: str
+        self, prompt: str, image_url: str, model: str = "llama-3.2-11b-vision-instruct"
     ) -> Dict[str, Any]:
-        # Delegate vision to OpenAI / other supported models if needed
-        raise NotImplementedError("Groq does not support vision inputs.")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ]
+        return self.chat(messages=messages, model=model or "llama-3.2-11b-vision-instruct")
 
     def json_output(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any], model: str
@@ -138,17 +146,5 @@ class GroqProvider(BaseLLMProvider):
         )
 
     def health(self) -> bool:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return True
-        if not self.api_key:
-            return False
-        try:
-            self.chat(
-                messages=[{"role": "user", "content": "ping"}],
-                model="llama3-8b-8192",
-                max_tokens=1,
-            )
-            return True
-        except Exception:
-            return False
+        api_key = self.api_key or os.getenv("GROQ_API_KEY")
+        return bool(api_key and len(api_key.strip()) > 0)
