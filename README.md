@@ -1,6 +1,6 @@
-# Viptant - Enterprise AI Marketing Operating System
+# Viptant - Enterprise AI Marketing System platform
 
-Viptant (MarkAI) is a multi-tenant Enterprise AI Platform and Marketing Operating System. It enables organizations to coordinate campaign channels, generate copywriting variant drafts, swap and monitor LLM providers, override dynamic model routing paths, track token consumption rates, and control credit budgets.
+Viptant (MarkAI) is a multi-tenant Enterprise AI Platform and Marketing System Platform. It enables organizations to coordinate campaign channels, generate copywriting variant drafts, swap and monitor LLM providers, override dynamic model routing paths, track token consumption rates, and control credit budgets.
 
 ## Documentation
 
