@@ -75,8 +75,9 @@ def test_phase2_organization_management_and_invitations(db_session) -> None:
     # 2. Invite a new member
     invite_email = "invited@example.com"
     invite_res = client.post(
-        f"/api/v1/organizations/{org_id}/invitations/?email={invite_email}&role=MEMBER",
-        headers=headers
+        f"/api/v1/organizations/{org_id}/invitations/",
+        headers=headers,
+        json={"email": invite_email, "role": "MEMBER"},
     )
     assert invite_res.status_code == 200
     assert invite_res.json()["email"] == invite_email

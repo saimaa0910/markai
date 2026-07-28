@@ -107,6 +107,7 @@ class OAuthTokenRequest(BaseModel):
     provider: str
     access_token: str
     id_token: Optional[str] = None
+    invitation_token: Optional[str] = None
 
 
 class InvitationActionRequest(BaseModel):
@@ -1043,6 +1044,21 @@ def oauth_token_exchange(
     # Find or create user
     user = db.query(User).filter(User.email == provider_email).first()
     if not user:
+        # Check if invitation token is provided
+        invitation = None
+        if body.invitation_token:
+            from api.models.membership import OrganizationInvitation
+            invitation = (
+                db.query(OrganizationInvitation)
+                .filter(
+                    OrganizationInvitation.token == body.invitation_token,
+                    OrganizationInvitation.is_accepted == False,
+                    OrganizationInvitation.is_rejected == False,
+                    OrganizationInvitation.expires_at > datetime.now(timezone.utc)
+                )
+                .first()
+            )
+
         # Auto-provision user from OAuth
         user = User(
             email=provider_email,
@@ -1055,28 +1071,42 @@ def oauth_token_exchange(
         db.add(user)
         db.flush()
 
-        # Create default org
-        org_name = f"{provider_name or provider_email}'s Organization"
-        base_slug = slugify(org_name)
-        slug = base_slug
-        counter = 1
-        while db.query(Organization).filter(Organization.slug == slug).first():
-            slug = f"{base_slug}-{counter}"
-            counter += 1
+        if invitation:
+            # Bind user to the invitation's organization
+            membership = UserOrganization(
+                user_id=user.id,
+                organization_id=invitation.organization_id,
+                role=invitation.role,
+                joined_at=datetime.now(timezone.utc),
+            )
+            db.add(membership)
+            invitation.is_accepted = True
+            db.add(invitation)
+            db.commit()
+            log_audit(db, user.id, f"OAUTH_USER_PROVISIONED_INVITATION_{provider.upper()}", request)
+        else:
+            # Create default org
+            org_name = f"{provider_name or provider_email}'s Organization"
+            base_slug = slugify(org_name)
+            slug = base_slug
+            counter = 1
+            while db.query(Organization).filter(Organization.slug == slug).first():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
 
-        org = Organization(name=org_name, slug=slug)
-        db.add(org)
-        db.flush()
+            org = Organization(name=org_name, slug=slug)
+            db.add(org)
+            db.flush()
 
-        membership = UserOrganization(
-            user_id=user.id,
-            organization_id=org.id,
-            role=UserRole.OWNER,
-            joined_at=datetime.now(timezone.utc),
-        )
-        db.add(membership)
-        db.commit()
-        log_audit(db, user.id, f"OAUTH_USER_PROVISIONED_{provider.upper()}", request)
+            membership = UserOrganization(
+                user_id=user.id,
+                organization_id=org.id,
+                role=UserRole.OWNER,
+                joined_at=datetime.now(timezone.utc),
+            )
+            db.add(membership)
+            db.commit()
+            log_audit(db, user.id, f"OAUTH_USER_PROVISIONED_{provider.upper()}", request)
 
     # Store OAuth account link
     from api.models.iam import OAuthAccount
