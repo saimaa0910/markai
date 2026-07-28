@@ -220,6 +220,35 @@ class DocumentChunk(Base):
         "DocumentChunkEmbedding", back_populates="chunk", cascade="all, delete-orphan"
     )
 
+    def __init__(self, **kwargs):
+        if "content" in kwargs and "content_hash" not in kwargs:
+            import hashlib
+            kwargs["content_hash"] = hashlib.sha256(kwargs["content"].encode("utf-8")).hexdigest()
+        if "chunk_index" not in kwargs:
+            kwargs["chunk_index"] = 0
+        
+        # Pull embedding out if passed
+        embedding_val = kwargs.pop("embedding", None)
+        super().__init__(**kwargs)
+        if embedding_val is not None:
+            self.embedding = embedding_val
+
+    @property
+    def embedding(self) -> Optional[list[float]]:
+        if self.embeddings:
+            return self.embeddings[0].embedding
+        return None
+
+    @embedding.setter
+    def embedding(self, val: list[float]) -> None:
+        self.embeddings = [
+            DocumentChunkEmbedding(
+                embedding=val,
+                embedding_model=self.embedding_model or "openai:text-embedding-3-small",
+                organization_id=self.organization_id,
+            )
+        ]
+
 
 class DocumentChunkEmbedding(Base):
     __tablename__ = "document_chunk_embeddings"

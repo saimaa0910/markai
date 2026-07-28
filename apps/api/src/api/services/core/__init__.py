@@ -23,19 +23,28 @@ from api.services.core.system_config_service import (
 )
 from api.services.core.user_service import CreateUserDTO, UpdateUserDTO, UserService
 
+from api.services.core.dependencies import (
+    get_organization_service,
+    get_user_service,
+    get_user_organization_service,
+)
+
 __all__ = [
     # Organization Service
     "OrganizationService",
     "CreateOrganizationDTO",
     "UpdateOrganizationDTO",
+    "get_organization_service",
     # User Service
     "UserService",
     "CreateUserDTO",
     "UpdateUserDTO",
+    "get_user_service",
     # Membership Service
     "UserOrganizationService",
     "CreateMembershipDTO",
     "UpdateMembershipDTO",
+    "get_user_organization_service",
     # System Config Service
     "SystemConfigService",
     "CreateConfigDTO",

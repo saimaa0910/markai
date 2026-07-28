@@ -29,7 +29,7 @@ class AIProviderRepository(BaseRepository[AIProvider]):
         super().__init__(AIProvider)
 
     async def get_by_code(self, session: Any, code: str) -> Optional[AIProvider]:
-        filters = [FilterParam(field="code", operator=FilterOperator.EQ, value=code)]
+        filters = [FilterParam(field="name", operator=FilterOperator.EQ, value=code)]
         return await self.find_one(session=session, filters=filters)
 
 

@@ -1,5 +1,6 @@
 import uuid
-from typing import Optional, List
+import datetime
+from typing import Optional, List, Any
 from sqlalchemy.orm import Session
 from api.repositories.base import BaseRepository
 from api.models.agent import AgentDefinition, AgentSession, AgentRun, AgentLog, AgentStatus
@@ -37,6 +38,66 @@ class AgentDefinitionRepository(BaseRepository[AgentDefinition]):
             .all()
         )
 
+    def create(
+        self,
+        db: Session,
+        obj_in: dict,
+        organization_id: uuid.UUID,
+        created_by: str,
+    ) -> AgentDefinition:
+        data = dict(obj_in)
+        data["organization_id"] = organization_id
+        data["created_by"] = created_by
+        data["updated_by"] = created_by
+        db_obj = self.model(**data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def list_by_org(
+        self, db: Session, organization_id: uuid.UUID, skip: int = 0, limit: int = 50
+    ) -> List[AgentDefinition]:
+        return (
+            db.query(self.model)
+            .filter(
+                self.model.organization_id == organization_id,
+                self.model.deleted_at.is_(None)
+            )
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    def count_by_org(self, db: Session, organization_id: uuid.UUID) -> int:
+        return (
+            db.query(self.model)
+            .filter(
+                self.model.organization_id == organization_id,
+                self.model.deleted_at.is_(None)
+            )
+            .count()
+        )
+
+    def update(
+        self, db: Session, db_obj: AgentDefinition, obj_in: dict, updated_by: str
+    ) -> AgentDefinition:
+        for field, value in obj_in.items():
+            setattr(db_obj, field, value)
+        db_obj.updated_by = updated_by
+        if hasattr(db_obj, "version") and db_obj.version is not None:
+            db_obj.version += 1
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def soft_delete(self, db: Session, db_obj: AgentDefinition, deleted_by: str) -> None:
+        db_obj.deleted_at = datetime.datetime.utcnow()
+        db_obj.updated_by = deleted_by
+        db.add(db_obj)
+        db.commit()
+
 
 class AgentSessionRepository(BaseRepository[AgentSession]):
     def __init__(self) -> None:
@@ -70,6 +131,42 @@ class AgentSessionRepository(BaseRepository[AgentSession]):
             .limit(limit)
             .all()
         )
+
+    def create(
+        self,
+        db: Session,
+        obj_in: dict,
+        organization_id: uuid.UUID,
+        created_by: str,
+    ) -> AgentSession:
+        data = dict(obj_in)
+        data["organization_id"] = organization_id
+        data["created_by"] = created_by
+        data["updated_by"] = created_by
+        db_obj = self.model(**data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def update(
+        self, db: Session, db_obj: AgentSession, obj_in: dict, updated_by: str
+    ) -> AgentSession:
+        for field, value in obj_in.items():
+            setattr(db_obj, field, value)
+        db_obj.updated_by = updated_by
+        if hasattr(db_obj, "version") and db_obj.version is not None:
+            db_obj.version += 1
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def soft_delete(self, db: Session, db_obj: AgentSession, deleted_by: str) -> None:
+        db_obj.deleted_at = datetime.datetime.utcnow()
+        db_obj.updated_by = deleted_by
+        db.add(db_obj)
+        db.commit()
 
 
 class AgentRunRepository(BaseRepository[AgentRun]):

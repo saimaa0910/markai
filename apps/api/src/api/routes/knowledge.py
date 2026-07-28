@@ -1528,7 +1528,8 @@ def update_document_tags(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
         
-    meta = doc.metadata_info or {}
+    doc.tags = tags
+    meta = dict(doc.metadata_info) if doc.metadata_info else {}
     meta["tags"] = tags
     doc.metadata_info = meta
     db.commit()

@@ -17,7 +17,7 @@ Design Rules:
 - Settings are namespaced (e.g. namespace='ai', key='default_model')
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 from sqlalchemy import (
     Boolean, DateTime, Enum, ForeignKey, Index, String, Text,
@@ -96,6 +96,8 @@ class UserOrganization(Base):
     )
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default="CURRENT_TIMESTAMP",
         comment="Timestamp when membership became active",
     )
     invited_by: Mapped[Optional[uuid.UUID]] = mapped_column(

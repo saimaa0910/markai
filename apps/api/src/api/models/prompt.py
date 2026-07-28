@@ -236,6 +236,70 @@ class Prompt(Base):
         "PromptTestCase", back_populates="prompt", cascade="all, delete-orphan"
     )
 
+    @property
+    def title(self) -> str:
+        return self.name
+
+    @title.setter
+    def title(self, value: str) -> None:
+        self.name = value
+
+    @property
+    def template(self) -> str:
+        return self.content
+
+    @template.setter
+    def template(self, value: str) -> None:
+        self.content = value
+
+    @property
+    def default_model(self) -> Optional[str]:
+        return getattr(self, "_default_model", None)
+
+    @default_model.setter
+    def default_model(self, value: Optional[str]) -> None:
+        self._default_model = value
+
+    @property
+    def default_provider(self) -> Optional[str]:
+        return getattr(self, "_default_provider", None)
+
+    @default_provider.setter
+    def default_provider(self, value: Optional[str]) -> None:
+        self._default_provider = value
+
+    @property
+    def temperature(self) -> float:
+        return getattr(self, "_temperature", 0.7)
+
+    @temperature.setter
+    def temperature(self, value: float) -> None:
+        self._temperature = value
+
+    @property
+    def top_p(self) -> float:
+        return getattr(self, "_top_p", 1.0)
+
+    @top_p.setter
+    def top_p(self, value: float) -> None:
+        self._top_p = value
+
+    @property
+    def max_tokens(self) -> Optional[int]:
+        return getattr(self, "_max_tokens", None)
+
+    @max_tokens.setter
+    def max_tokens(self, value: Optional[int]) -> None:
+        self._max_tokens = value
+
+    @property
+    def is_active(self) -> bool:
+        return getattr(self, "_is_active", True)
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:
+        self._is_active = value
+
 
 class PromptVersion(Base):
     __tablename__ = "prompt_versions"

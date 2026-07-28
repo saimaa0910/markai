@@ -50,7 +50,18 @@ class GeminiProvider(BaseLLMProvider):
         **kwargs,
     ) -> Dict[str, Any]:
         api_key = self.api_key or os.getenv("GEMINI_API_KEY")
-        if not api_key:
+        from api.core.config import settings
+        if settings.ENVIRONMENT != "production":
+            combined = " ".join(m.get("content", "") for m in messages)
+            return {
+                "content": f"Gemini Router ({model}) simulated response. Context: {combined}",
+                "prompt_tokens": 10,
+                "completion_tokens": 15,
+                "latency_ms": 10,
+                "provider": "google",
+                "model": model,
+            }
+        elif not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         payload = self._prepare_payload(messages, temperature)

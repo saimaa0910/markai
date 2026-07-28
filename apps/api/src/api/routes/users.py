@@ -1,8 +1,10 @@
 import uuid
 from typing import Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Header, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Header, UploadFile, File
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from api.core.security import verify_password
 from api.database.session import get_db
 from api.core.deps import get_current_user
 from api.models.user import User
@@ -177,6 +179,105 @@ def update_preferences(
     return resolve_user_response(current_user, db, org_uuid)
 
 
+class ChangeEmailRequest(BaseModel):
+    new_email: str
+    password: str
+
+
+class ConfirmEmailChangeRequest(BaseModel):
+    token: str
+    new_email: str
+
+
+@router.patch("/email", response_model=dict)
+def change_email(
+    body: ChangeEmailRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Request email change. Sends verification link to the new address.
+    The old email remains active until the new one is verified.
+    """
+    from datetime import timedelta
+    from api.core.security import create_access_token
+    from api.core.config import settings
+    from api.services.email_service import send_change_email_verification
+    import re
+
+    if not re.match(r'^[^@]+@[^@]+\.[^@]+$', body.new_email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email format")
+
+    if not current_user.hashed_password or not verify_password(body.password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
+
+    existing = db.query(User).filter(User.email == body.new_email).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email address is already in use")
+
+    prefs = current_user.preferences or {}
+    prefs["pending_email"] = body.new_email
+    current_user.preferences = prefs
+    db.commit()
+
+    token = create_access_token(current_user.id, expires_delta=timedelta(days=1))
+    verify_url = f"{settings.FRONTEND_URL}/auth/verify-email-change?token={token}&email={body.new_email}"
+
+    try:
+        send_change_email_verification(body.new_email, current_user.full_name, verify_url)
+    except Exception as e:
+        import logging
+        logging.getLogger("eaimos.users").error(f"Failed to send change email verification: {e}")
+
+    return {
+        "success": True,
+        "message": f"Verification email sent to {body.new_email}. Click the link to confirm your new email address.",
+    }
+
+
+@router.post("/email/confirm", response_model=dict)
+def confirm_email_change(
+    request_body: ConfirmEmailChangeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Confirm email change using the token sent to the new address.
+    """
+    from api.core.security import ALGORITHM
+    from api.core.config import settings
+    from jose import jwt, JWTError
+    import uuid
+
+    try:
+        payload = jwt.decode(request_body.token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = uuid.UUID(str(payload.get("sub")))
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    prefs = user.preferences or {}
+    pending_email = prefs.get("pending_email")
+    if not pending_email or pending_email != request_body.new_email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email change request not found or mismatch")
+
+    existing = db.query(User).filter(User.email == request_body.new_email).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email address is already taken")
+
+    user.email = request_body.new_email
+    user.is_verified = True
+    prefs.pop("pending_email", None)
+    user.preferences = prefs
+    db.commit()
+
+    return {"success": True, "message": "Email address updated successfully"}
+
+
 @router.patch("/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: uuid.UUID,
@@ -215,6 +316,42 @@ def update_user(
     return resolve_user_response(user, db, org_uuid)
 
 
+# ─── Self Account Deletion ────────────────────────────────────────────────────
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+    confirmation: str  # Must equal "DELETE"
+
+
+@router.delete("/me", status_code=status.HTTP_200_OK)
+def delete_my_account(
+    body: DeleteAccountRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Self-delete the authenticated user's account.
+    Requires password confirmation and the string 'DELETE'.
+    """
+    from pydantic import BaseModel
+    if body.confirmation != "DELETE":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation must be 'DELETE'",
+        )
+    if not current_user.hashed_password or not verify_password(body.password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect password",
+        )
+    # Soft delete: deactivate account
+    current_user.is_active = False
+    from datetime import datetime, timezone
+    current_user.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"success": True, "message": "Account has been deactivated. Contact support to restore it."}
+
+
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: uuid.UUID,
@@ -231,3 +368,110 @@ def delete_user(
         )
     db.delete(user)
     db.commit()
+
+
+
+# ─── Change Email ─────────────────────────────────────────────────────────────
+
+class ChangeEmailRequest(BaseModel):
+    new_email: str
+    password: str
+
+
+@router.patch("/email", response_model=dict)
+def change_email(
+    body: ChangeEmailRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Request email change. Sends verification link to the new address.
+    The old email remains active until the new one is verified.
+    """
+    from datetime import timedelta
+    from api.core.security import create_access_token, verify_password
+    from api.core.config import settings
+    from api.services.email_service import send_change_email_verification
+    import re
+
+    # Validate email format
+    if not re.match(r'^[^@]+@[^@]+\.[^@]+$', body.new_email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email format")
+
+    # Verify password
+    if not current_user.hashed_password or not verify_password(body.password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
+
+    # Check new email not taken
+    existing = db.query(User).filter(User.email == body.new_email).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email address is already in use")
+
+    # Store pending email in preferences
+    prefs = current_user.preferences or {}
+    prefs["pending_email"] = body.new_email
+    current_user.preferences = prefs
+    db.commit()
+
+    # Create email change token (encodes both user_id and new email)
+    import json, base64
+    payload_data = json.dumps({"user_id": str(current_user.id), "new_email": body.new_email})
+    encoded = base64.urlsafe_b64encode(payload_data.encode()).decode()
+    token = create_access_token(current_user.id, expires_delta=timedelta(days=1))
+    verify_url = f"{settings.FRONTEND_URL}/auth/verify-email-change?token={token}&email={body.new_email}"
+
+    try:
+        send_change_email_verification(body.new_email, current_user.full_name, verify_url)
+    except Exception as e:
+        import logging
+        logging.getLogger("eaimos.users").error(f"Failed to send change email verification: {e}")
+
+    return {
+        "success": True,
+        "message": f"Verification email sent to {body.new_email}. Click the link to confirm your new email address.",
+    }
+
+
+@router.post("/email/confirm", response_model=dict)
+def confirm_email_change(
+    token: str,
+    new_email: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Confirm email change using the token sent to the new address.
+    """
+    from api.core.security import ALGORITHM
+    from api.core.config import settings
+    from jose import jwt, JWTError
+    import uuid
+
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = uuid.UUID(str(payload.get("sub")))
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
+
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    prefs = user.preferences or {}
+    pending_email = prefs.get("pending_email")
+    if not pending_email or pending_email != new_email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email change request not found or mismatch")
+
+    # Check new email still available
+    existing = db.query(User).filter(User.email == new_email).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email address is already taken")
+
+    user.email = new_email
+    user.is_verified = True
+    prefs.pop("pending_email", None)
+    user.preferences = prefs
+    db.commit()
+
+    return {"success": True, "message": "Email address updated successfully"}

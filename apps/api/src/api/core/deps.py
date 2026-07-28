@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import Depends, HTTPException, Header, status
 from fastapi.security import OAuth2PasswordBearer
@@ -11,6 +12,7 @@ from api.core.security import ALGORITHM
 from api.database.session import get_db
 from api.models.user import User
 from api.models.membership import UserOrganization, UserRole
+from api.models.iam import UserSession
 
 reusable_oauth2 = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 
@@ -30,6 +32,7 @@ def get_current_user(
                 detail="Invalid token type",
             )
         user_id = payload.get("sub")
+        token_jti = payload.get("jti")
         if user_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -47,6 +50,30 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+
+    if token_jti:
+        try:
+            session_uuid = uuid.UUID(str(token_jti))
+        except ValueError:
+            session_uuid = None
+
+        if session_uuid:
+            session = db.query(UserSession).filter(
+                UserSession.id == session_uuid,
+                UserSession.user_id == user.id,
+            ).first()
+            if session:
+                expires_at = session.expires_at
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if session.is_revoked or expires_at < datetime.now(timezone.utc):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session has expired or been revoked",
+                    )
+                session.last_active_at = datetime.now(timezone.utc)
+                db.add(session)
+                db.commit()
     return user
 
 

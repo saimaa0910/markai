@@ -348,16 +348,16 @@ def purge_prompt(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@prompts_router.delete("/{name}", status_code=status.HTTP_200_OK)
+@prompts_router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 def delete_prompt(
     name: str,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-) -> Any:
+):
     PromptService.soft_delete(
         db=db, name=name, organization_id=membership.organization_id, user_id=membership.user_id, user_role=str(membership.role)
     )
-    return {"success": True}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @prompts_router.delete("/{name}/permanent", status_code=status.HTTP_200_OK)

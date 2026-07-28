@@ -6,7 +6,7 @@ from sqlalchemy import select, and_
 
 from api.models.integration import Integration, IntegrationCredential, SyncJob, IntegrationProvider, IntegrationStatus
 from api.models.knowledge import KnowledgeDocument, DocumentChunk
-from api.services.knowledge import KnowledgeService
+from api.services.knowledge_service import KnowledgeService
 from api.schemas.ai import KnowledgeUploadRequest
 
 

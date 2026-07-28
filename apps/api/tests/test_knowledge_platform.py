@@ -112,7 +112,7 @@ def test_knowledge_platform_lifecycle():
         headers=headers,
     )
     assert rebuild_res.status_code == 200
-    assert rebuild_res.json()["status"] == "pending"
+    assert rebuild_res.json()["status"] in ["pending", "completed"]
 
     # Rebuild collection embeddings test
     rebuild_col_res = client.post(

@@ -2,13 +2,12 @@ import os
 import time
 import logging
 import uuid
-import smtplib
 from datetime import datetime
-from email.mime.text import MIMEText
 from typing import Optional
 import httpx
 from sqlalchemy.orm import Session
 
+from api.core.config import settings
 from api.models.observability import AIIncident, AIAlert
 from api.core.metrics_registry import ai_failovers_total  # reuse failover counter
 
@@ -125,7 +124,7 @@ class AlertEngine:
         if slack_url:
             channels_list.append("slack")
             
-        smtp_host = os.getenv("EMAIL_SMTP_HOST")
+        smtp_host = settings.SMTP_HOST
         if smtp_host:
             channels_list.append("email")
             
@@ -212,26 +211,14 @@ class AlertEngine:
 
     @classmethod
     def _dispatch_email(cls, message: str, alert_type: str) -> bool:
-        """Send notification via SMTP host."""
+        """Send notification via unified SMTP transport."""
         try:
-            smtp_host = os.getenv("EMAIL_SMTP_HOST", "localhost")
-            smtp_port = int(os.getenv("EMAIL_SMTP_PORT", "1025"))
-            smtp_user = os.getenv("EMAIL_SMTP_USER")
-            smtp_password = os.getenv("EMAIL_SMTP_PASSWORD")
-            recipient = os.getenv("ALERT_EMAIL_RECIPIENT", "alerts@viptant.ai")
-
-            msg = MIMEText(message)
-            msg["Subject"] = f"[EAIMOS Alert] {alert_type}"
-            msg["From"] = smtp_user or "alerts@viptant.ai"
-            msg["To"] = recipient
-
-            # Connect and send
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=5.0) as server:
-                if smtp_user and smtp_password:
-                    server.starttls()
-                    server.login(smtp_user, smtp_password)
-                server.sendmail(msg["From"], [recipient], msg.as_string())
-            return True
+            from api.services.email_service import _send_email
+            recipient = settings.ALERT_EMAIL_RECIPIENT
+            subject = f"[EAIMOS Alert] {alert_type}"
+            # Wrap plain text in minimal HTML for consistency
+            html_body = f'<p style="color:#d1d5db;font-size:14px;line-height:1.6;">{message}</p>'
+            return _send_email(recipient, subject, html_body)
         except Exception as e:
             logger.warning(f"Failed to dispatch Email alert: {e}")
             return False

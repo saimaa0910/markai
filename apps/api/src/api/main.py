@@ -9,6 +9,7 @@ from api.routes import (
     infrastructure, router, security, observability, prompts
 )
 from api.routes.chat import chat_router
+from api.routes.sessions import router as sessions_router
 from api.middleware.logging import LoggingMiddleware
 from api.middleware.telemetry_middleware import TelemetryMiddleware
 
@@ -75,6 +76,7 @@ app.include_router(chat_router, prefix=settings.API_V1_STR)
 app.include_router(infrastructure.router, prefix=settings.API_V1_STR)
 app.include_router(security.router, prefix=settings.API_V1_STR)
 app.include_router(observability.router, prefix=settings.API_V1_STR)
+app.include_router(sessions_router, prefix=settings.API_V1_STR)
 
 
 @app.on_event("startup")

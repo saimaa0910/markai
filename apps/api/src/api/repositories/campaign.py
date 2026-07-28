@@ -1,4 +1,5 @@
 import uuid
+import datetime
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from api.repositories.base import BaseRepository
@@ -25,6 +26,64 @@ class CampaignRepository(BaseRepository[Campaign]):
             .first()
         )
 
+    def create(
+        self,
+        db: Session,
+        obj_in: dict,
+        organization_id: uuid.UUID,
+        created_by: Optional[str] = None,
+    ) -> Campaign:
+        data = dict(obj_in)
+        data["organization_id"] = organization_id
+        if created_by:
+            data["created_by"] = created_by
+            data["updated_by"] = created_by
+        db_obj = self.model(**data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def list_by_org(self, db: Session, organization_id: uuid.UUID) -> List[Campaign]:
+        return (
+            db.query(self.model)
+            .filter(
+                self.model.organization_id == organization_id,
+                self.model.deleted_at.is_(None)
+            )
+            .all()
+        )
+
+    def update(
+        self,
+        db: Session,
+        db_obj: Campaign,
+        obj_in: dict,
+        updated_by: Optional[str] = None,
+    ) -> Campaign:
+        for field, value in obj_in.items():
+            setattr(db_obj, field, value)
+        if updated_by:
+            db_obj.updated_by = updated_by
+        if hasattr(db_obj, "version") and db_obj.version is not None:
+            db_obj.version += 1
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def soft_delete(
+        self,
+        db: Session,
+        db_obj: Campaign,
+        deleted_by: Optional[str] = None,
+    ) -> None:
+        db_obj.deleted_at = datetime.datetime.utcnow()
+        if deleted_by:
+            db_obj.updated_by = deleted_by
+        db.add(db_obj)
+        db.commit()
+
 
 class CampaignTemplateRepository(BaseRepository[CampaignTemplate]):
     def __init__(self) -> None:
@@ -44,6 +103,24 @@ class CampaignTemplateRepository(BaseRepository[CampaignTemplate]):
             )
             .first()
         )
+
+    def create(
+        self,
+        db: Session,
+        obj_in: dict,
+        organization_id: uuid.UUID,
+        created_by: Optional[str] = None,
+    ) -> CampaignTemplate:
+        data = dict(obj_in)
+        data["organization_id"] = organization_id
+        if created_by:
+            data["created_by"] = created_by
+            data["updated_by"] = created_by
+        db_obj = self.model(**data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
 
 
 class CampaignAnalyticsRepository(BaseRepository[CampaignAnalytics]):
@@ -65,8 +142,25 @@ class CampaignAnalyticsRepository(BaseRepository[CampaignAnalytics]):
             .first()
         )
 
+    def create(
+        self,
+        db: Session,
+        obj_in: dict,
+        organization_id: uuid.UUID,
+        created_by: Optional[str] = None,
+    ) -> CampaignAnalytics:
+        data = dict(obj_in)
+        data["organization_id"] = organization_id
+        if created_by:
+            data["created_by"] = created_by
+            data["updated_by"] = created_by
+        db_obj = self.model(**data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
 
-# Instantiate singletons for dependency sharing
+
 campaign_repo = CampaignRepository()
 campaign_template_repo = CampaignTemplateRepository()
 campaign_analytics_repo = CampaignAnalyticsRepository()

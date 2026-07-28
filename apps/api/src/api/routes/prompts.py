@@ -48,19 +48,53 @@ def _resolve_prompt(db: Session, identifier: str, organization_id: uuid.UUID, in
 # PROMPTS CRUD
 # -------------------------------------------------------------------
 
+from api.services.base import ServiceContext
+from api.services.ai import PromptService as ServicePromptService, CreatePromptDTO, get_prompt_service
+
+
 @router.post("/", response_model=PromptResponse, status_code=status.HTTP_201_CREATED)
-def create_prompt(
+async def create_prompt(
     prompt_in: PromptCreate,
-    db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
+    prompt_service: ServicePromptService = Depends(get_prompt_service),
 ) -> Any:
-    return PromptService.create_prompt_version(
-        db=db,
-        prompt_in=prompt_in,
-        organization_id=membership.organization_id,
+    role_val = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
+    role_mapping = {
+        "OWNER": "super_admin",
+        "ADMIN": "organization_admin",
+        "MEMBER": "developer",
+        "GUEST": "viewer",
+    }
+    mapped_role = role_mapping.get(role_val.upper(), "viewer")
+
+    ctx = ServiceContext(
         user_id=membership.user_id,
-        user_role=str(membership.role)
+        organization_id=membership.organization_id,
+        roles=[mapped_role],
     )
+    template_str = getattr(prompt_in, "template", None) or getattr(prompt_in, "content", None) or ""
+    dto = CreatePromptDTO(
+        title=getattr(prompt_in, "title", None) or prompt_in.name,
+        template=template_str,
+        description=getattr(prompt_in, "description", None),
+    )
+    result = await prompt_service.create_prompt(ctx, org_id=membership.organization_id, dto=dto)
+    if result.is_failure:
+        raise HTTPException(status_code=result.status_code, detail=result.errors)
+
+    res = result.unwrap()
+    return {
+        "id": res.id,
+        "organization_id": res.organization_id,
+        "name": res.title,
+        "title": res.title,
+        "content": res.template,
+        "template": res.template,
+        "description": res.description,
+        "version": res.version,
+        "is_active": res.is_active,
+        "created_at": res.created_at,
+    }
 
 
 @router.get("/", response_model=dict)

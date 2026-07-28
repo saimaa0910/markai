@@ -7,7 +7,7 @@ from api.database.session import get_db
 from api.core.deps import RoleChecker, get_current_user
 from api.models.membership import UserOrganization, UserRole
 from api.models.user import User
-from api.services.campaign import CampaignService
+from api.services.campaign_service import CampaignService
 from api.schemas.campaign import (
     CampaignCreate,
     CampaignUpdate,

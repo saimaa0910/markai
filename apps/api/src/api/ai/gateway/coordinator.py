@@ -92,6 +92,13 @@ class AIGateway:
         target_env = env_key_names.get(prov_name_lower, f"{prov_name_lower.upper()}_API_KEY")
         active_key = decrypted_key or os.getenv(target_env)
 
+        provider_instance = self.providers.get(prov_name_lower)
+        if provider_instance:
+            provider_instance.api_key = active_key
+            if hasattr(provider_instance, "base_url") and base_url:
+                provider_instance.base_url = base_url
+            return provider_instance
+
         if adapter_cls == OpenAIProvider:
             return OpenAIProvider(api_key=active_key, base_url=base_url)
         return adapter_cls(api_key=active_key)
@@ -544,7 +551,7 @@ class AIGateway:
             user_msgs = [m for m in messages if m["role"] == "user"]
             if user_msgs:
                 rag_query_text = user_msgs[-1]["content"]
-                from api.services.knowledge import KnowledgeService
+                from api.services.knowledge_service import KnowledgeService
                 retrieved_chunks = KnowledgeService.query_similar_chunks(
                     db=db,
                     query_text=rag_query_text,
@@ -707,7 +714,7 @@ class AIGateway:
                     res["provider"] = provider_name
 
                     if retrieved_chunks and "content" in res and rag_query_text:
-                        from api.services.knowledge import KnowledgeService
+                        from api.services.knowledge_service import KnowledgeService
                         query_embedding = self.embeddings(
                             db=db, text=rag_query_text, organization_id=organization_id, user_id=user_id
                         )

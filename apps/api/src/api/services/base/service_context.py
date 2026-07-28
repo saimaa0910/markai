@@ -49,6 +49,17 @@ class ServiceContext:
         """Return string representation of organization_id if present."""
         return str(self.organization_id) if self.organization_id is not None else None
 
+    def get_org_id_uuid(self) -> Optional[uuid.UUID]:
+        """Return organization_id as a UUID object if available."""
+        if not self.organization_id:
+            return None
+        if isinstance(self.organization_id, uuid.UUID):
+            return self.organization_id
+        try:
+            return uuid.UUID(str(self.organization_id))
+        except (ValueError, TypeError):
+            return None
+
     def has_permission(self, permission: str) -> bool:
         """Check if context contains specified permission or if super admin."""
         if self.is_super_admin:

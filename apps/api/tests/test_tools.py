@@ -31,7 +31,28 @@ def test_tool_registry_initialization():
     assert any(s["function"]["name"] == "crm_tool" for s in schemas)
 
 
-def test_web_search_tool(db_session, mock_params):
+def test_web_search_tool(db_session, mock_params, monkeypatch):
+    import httpx
+    
+    class MockResponse:
+        status_code = 200
+        text = """
+        <div class="result__body">
+            <a class="result__title">Generative AI Tutorial</a>
+            <div class="result__snippet">Learn about Generative AI.</div>
+            <span class="result__url">https://example.com/genai</span>
+        </div>
+        <div class="result__body">
+            <a class="result__title">Generative AI Models</a>
+            <div class="result__snippet">Discover modern Generative AI models.</div>
+            <span class="result__url">https://example.com/models</span>
+        </div>
+        """
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: MockResponse())
+
     tool = WebSearchTool()
     tool_input = ToolInput(
         tool_name="web_search_tool",
@@ -46,7 +67,23 @@ def test_web_search_tool(db_session, mock_params):
     assert "title" in result.output[0]
 
 
-def test_tool_executor_dispatch(db_session, mock_params):
+def test_tool_executor_dispatch(db_session, mock_params, monkeypatch):
+    import httpx
+    
+    class MockResponse:
+        status_code = 200
+        text = """
+        <div class="result__body">
+            <a class="result__title">Generative AI Tutorial</a>
+            <div class="result__snippet">Learn about Generative AI.</div>
+            <span class="result__url">https://example.com/genai</span>
+        </div>
+        """
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: MockResponse())
+
     executor = ToolExecutor(db_session)
     # Trigger web search tool dispatch
     result = executor.execute(

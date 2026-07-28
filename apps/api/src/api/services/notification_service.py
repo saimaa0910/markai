@@ -1,11 +1,8 @@
 import uuid
-import smtplib
-from email.mime.text import MIMEText
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
 
-from api.core.config import settings
 from api.models.integration import Notification, NotificationPreference, NotificationChannel, NotificationPriority
 from api.models.user import User
 
@@ -69,27 +66,21 @@ class NotificationService:
             db.refresh(notification)
             return notification
 
-        # 3. Email Delivery (SMTP)
+        # 3. Email Delivery (SMTP) — delegates to unified email service
         elif channel == NotificationChannel.EMAIL:
             user = db.query(User).filter(User.id == user_id).first()
             if not user or not user.email:
                 return None
 
-            msg = MIMEText(body, "html")
-            msg["Subject"] = title
-            msg["From"] = settings.EMAIL_FROM
-            msg["To"] = user.email
-
-            # Dispatch SMTP if password configured, otherwise logs/simulates dispatch
-            if settings.SMTP_PASSWORD:
-                try:
-                    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-                        server.starttls()
-                        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                        server.send_message(msg)
-                except Exception as smtp_exc:
-                    # In enterprise context: log SMTP exception and fallback gracefully
-                    pass
+            try:
+                from api.services.email_service import _send_email
+                _send_email(user.email, title, body)
+            except Exception as smtp_exc:
+                import logging
+                logging.getLogger("eaimos.notifications").error(
+                    f"Failed to send notification email to {user.email}: {smtp_exc}",
+                    exc_info=True,
+                )
 
             # Still create an in-app log trace of the notification
             notification = Notification(

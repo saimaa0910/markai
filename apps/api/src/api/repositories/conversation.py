@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional, List
+from typing import Optional, List, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from api.repositories.base import BaseRepository
@@ -56,6 +56,47 @@ class ConversationRepository(BaseRepository[Conversation]):
             .all()
         )
 
+    def create(
+        self,
+        db: Session,
+        obj_in: dict,
+        organization_id: uuid.UUID,
+        created_by: str,
+    ) -> Conversation:
+        data = dict(obj_in)
+        data["organization_id"] = organization_id
+        data["created_by"] = created_by
+        data["updated_by"] = created_by
+        db_obj = self.model(**data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def update(
+        self, db: Session, db_obj: Any, obj_in: dict, updated_by: str
+    ) -> Conversation:
+        if not isinstance(db_obj, self.model):
+            db_obj = db.query(self.model).filter(self.model.id == db_obj).first()
+        for field, value in obj_in.items():
+            setattr(db_obj, field, value)
+        db_obj.updated_by = updated_by
+        if hasattr(db_obj, "version") and db_obj.version is not None:
+            db_obj.version += 1
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def soft_delete(self, db: Session, db_obj: Any, deleted_by: str) -> None:
+        import datetime
+        if not isinstance(db_obj, self.model):
+            db_obj = db.query(self.model).filter(self.model.id == db_obj).first()
+        db_obj.deleted_at = datetime.datetime.utcnow()
+        db_obj.updated_by = deleted_by
+        db.add(db_obj)
+        db.commit()
+
 
 class MessageRepository(BaseRepository[Message]):
     def __init__(self) -> None:
@@ -74,6 +115,45 @@ class MessageRepository(BaseRepository[Message]):
             .order_by(self.model.created_at.asc())
             .all()
         )
+
+    def create(
+        self,
+        db: Session,
+        obj_in: dict,
+        created_by: str,
+    ) -> Message:
+        data = dict(obj_in)
+        data["created_by"] = created_by
+        data["updated_by"] = created_by
+        db_obj = self.model(**data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def update(
+        self, db: Session, db_obj: Any, obj_in: dict, updated_by: str
+    ) -> Message:
+        if not isinstance(db_obj, self.model):
+            db_obj = db.query(self.model).filter(self.model.id == db_obj).first()
+        for field, value in obj_in.items():
+            setattr(db_obj, field, value)
+        db_obj.updated_by = updated_by
+        if hasattr(db_obj, "version") and db_obj.version is not None:
+            db_obj.version += 1
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def soft_delete(self, db: Session, db_obj: Any, deleted_by: str) -> None:
+        import datetime
+        if not isinstance(db_obj, self.model):
+            db_obj = db.query(self.model).filter(self.model.id == db_obj).first()
+        db_obj.deleted_at = datetime.datetime.utcnow()
+        db_obj.updated_by = deleted_by
+        db.add(db_obj)
+        db.commit()
 
 
 # Instantiate repository singletons

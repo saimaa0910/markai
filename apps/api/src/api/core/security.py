@@ -1,17 +1,26 @@
-import bcrypt
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Union
+import bcrypt
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from jose import jwt
 from api.core.config import settings
 
 ALGORITHM = "HS256"
+_password_hasher = PasswordHasher()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     Verify a plain password against its hashed value.
     """
+    if hashed_password.startswith("$argon2"):
+        try:
+            return _password_hasher.verify(hashed_password, plain_password)
+        except (InvalidHashError, VerificationError, VerifyMismatchError):
+            return False
+
     try:
         return bcrypt.checkpw(
             plain_password.encode("utf-8"), hashed_password.encode("utf-8")
@@ -22,14 +31,15 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def get_password_hash(password: str) -> str:
     """
-    Generate a bcrypt hash of the password.
+    Generate an Argon2id hash of the password.
     """
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+    return _password_hasher.hash(password)
 
 
 def create_access_token(
-    subject: Union[str, Any], expires_delta: Union[timedelta, None] = None
+    subject: Union[str, Any],
+    expires_delta: Union[timedelta, None] = None,
+    token_id: Union[str, uuid.UUID, None] = None,
 ) -> str:
     """
     Generate a JWT access token for the subject.
@@ -44,7 +54,7 @@ def create_access_token(
         "exp": expire,
         "sub": str(subject),
         "type": "access",
-        "jti": str(uuid.uuid4()),
+        "jti": str(token_id or uuid.uuid4()),
     }
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
     return str(encoded_jwt)

@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -13,9 +14,56 @@ from api.core.redis_manager import RedisConnectionManager
 
 client = TestClient(app)
 
+@pytest.fixture(autouse=True)
+def seed_security_test_data(db_session: Session):
+    import uuid
+    from api.models.organization import Organization
+    from api.models.user import User
+    from api.models.membership import UserOrganization, UserRole
+    from api.core.security import get_password_hash
+    
+    org_id = uuid.UUID("4638708c-9076-4749-8c68-b80c213ce6c9")
+    
+    # Check if org exists
+    org = db_session.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        org = Organization(
+            id=org_id,
+            name="Security Test Org",
+            slug="security-test-org"
+        )
+        db_session.add(org)
+        
+    user = db_session.query(User).filter(User.id == org_id).first()
+    if not user:
+        user = User(
+            id=org_id,
+            email="security_test@viptant.ai",
+            hashed_password=get_password_hash("password"),
+            full_name="Security Test User",
+            is_active=True,
+        )
+        db_session.add(user)
+        
+    db_session.flush()
+    
+    member = db_session.query(UserOrganization).filter(
+        UserOrganization.user_id == org_id,
+        UserOrganization.organization_id == org_id
+    ).first()
+    if not member:
+        member = UserOrganization(
+            user_id=org_id,
+            organization_id=org_id,
+            role=UserRole.ADMIN,
+        )
+        db_session.add(member)
+        
+    db_session.commit()
+
 def test_pii_detection_masking(db_session: Session):
     pipeline = AISecurityPipeline()
-    org_id = uuid_ref = type('UUID', (), {'hex': '4638708c-9076-4749-8c68-b80c213ce6c9'})()
+    org_id = uuid.UUID('4638708c-9076-4749-8c68-b80c213ce6c9')
     
     # Email PII redact scan
     res = pipeline.validate_input(
@@ -31,7 +79,7 @@ def test_pii_detection_masking(db_session: Session):
 
 def test_prompt_injection_detection(db_session: Session):
     pipeline = AISecurityPipeline()
-    org_id = type('UUID', (), {'hex': '4638708c-9076-4749-8c68-b80c213ce6c9'})()
+    org_id = uuid.UUID('4638708c-9076-4749-8c68-b80c213ce6c9')
     
     # Jailbreak pattern check
     res = pipeline.validate_input(
@@ -47,7 +95,7 @@ def test_prompt_injection_detection(db_session: Session):
 
 def test_secret_leaks_redaction(db_session: Session):
     pipeline = AISecurityPipeline()
-    org_id = type('UUID', (), {'hex': '4638708c-9076-4749-8c68-b80c213ce6c9'})()
+    org_id = uuid.UUID('4638708c-9076-4749-8c68-b80c213ce6c9')
     
     # OpenAI key leak prompt check
     res = pipeline.validate_input(
@@ -62,10 +110,20 @@ def test_secret_leaks_redaction(db_session: Session):
 
 def test_quota_limits(db_session: Session):
     pipeline = AISecurityPipeline()
-    org_id = type('UUID', (), {'hex': '4638708c-9076-4749-8c68-b80c213ce6c9'})()
+    org_id = uuid.UUID('4638708c-9076-4749-8c68-b80c213ce6c9')
     
     policy = pipeline._get_active_policy(db_session, org_id)
     policy.daily_request_limit = 1
+    
+    # Reset quota usage for clean state
+    quota = pipeline._get_or_create_quota(db_session, org_id, org_id)
+    quota.daily_requests = 0
+    quota.monthly_requests = 0
+    quota.daily_tokens = 0
+    quota.monthly_tokens = 0
+    quota.daily_spend = 0.0
+    quota.monthly_spend = 0.0
+    
     db_session.commit()
     
     # 1. First request

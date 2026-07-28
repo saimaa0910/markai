@@ -14,13 +14,14 @@ client = TestClient(app)
 @pytest.fixture
 def test_setup(db_session):
     # Create Organization
-    org = Organization(name="Test Org", slug="test-org")
+    suffix = uuid.uuid4().hex[:6]
+    org = Organization(name=f"Test Org {suffix}", slug=f"test-org-{suffix}")
     db_session.add(org)
     db_session.flush()
 
     # Create User
     user = User(
-        email="test_user@viptant.ai",
+        email=f"test_user_{suffix}@viptant.ai",
         hashed_password=get_password_hash("password"),
         full_name="Test User",
         is_active=True,

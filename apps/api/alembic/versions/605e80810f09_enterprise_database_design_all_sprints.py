@@ -7,7 +7,7 @@ Create Date: 2026-07-22 10:02:31.335012
 """
 from typing import Sequence, Union
 
-from alembic import op
+from alembic import op as _alembic_op
 import sqlalchemy as sa
 from sqlalchemy import Text, Date, DateTime
 from sqlalchemy.dialects import postgresql
@@ -19,6 +19,95 @@ revision: str = '605e80810f09'
 down_revision: Union[str, None] = 'e7f8910f11aa'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+
+class SafeOperations:
+    def __init__(self, original_op):
+        self._op = original_op
+        self._inspector = None
+
+    @property
+    def inspector(self):
+        if self._inspector is None:
+            bind = self._op.get_bind()
+            self._inspector = sa.inspect(bind)
+        return self._inspector
+
+    def __getattr__(self, name):
+        return getattr(self._op, name)
+
+    def create_table(self, table_name, *args, **kwargs):
+        if not self.inspector.has_table(table_name):
+            return self._op.create_table(table_name, *args, **kwargs)
+        else:
+            # Table exists, check if any columns are missing
+            existing_cols = {c['name'] for c in self.inspector.get_columns(table_name)}
+            for arg in args:
+                if isinstance(arg, sa.Column):
+                    if arg.name not in existing_cols:
+                        self._op.add_column(table_name, arg)
+
+    def add_column(self, table_name, column, **kwargs):
+        if self.inspector.has_table(table_name):
+            existing_cols = {c['name'] for c in self.inspector.get_columns(table_name)}
+            if column.name not in existing_cols:
+                return self._op.add_column(table_name, column, **kwargs)
+
+    def create_index(self, index_name, table_name, columns, **kwargs):
+        if self.inspector.has_table(table_name):
+            existing_indexes = {idx['name'] for idx in self.inspector.get_indexes(table_name)}
+            if index_name not in existing_indexes:
+                return self._op.create_index(index_name, table_name, columns, **kwargs)
+
+    def create_unique_constraint(self, name, table_name, columns, **kwargs):
+        if self.inspector.has_table(table_name):
+            existing_constraints = {c['name'] for c in self.inspector.get_unique_constraints(table_name) if c.get('name')}
+            if name not in existing_constraints:
+                return self._op.create_unique_constraint(name, table_name, columns, **kwargs)
+
+    def create_foreign_key(self, name, source_table, referent_table, local_cols, remote_cols, **kwargs):
+        if self.inspector.has_table(source_table):
+            existing_fks = {fk['name'] for fk in self.inspector.get_foreign_keys(source_table) if fk.get('name')}
+            if name not in existing_fks:
+                return self._op.create_foreign_key(name, source_table, referent_table, local_cols, remote_cols, **kwargs)
+
+    def drop_column(self, table_name, column_name, **kwargs):
+        if self.inspector.has_table(table_name):
+            columns = {c['name'] for c in self.inspector.get_columns(table_name)}
+            if column_name in columns:
+                return self._op.drop_column(table_name, column_name, **kwargs)
+
+    def alter_column(self, table_name, column_name, **kwargs):
+        if self.inspector.has_table(table_name):
+            columns = {c['name'] for c in self.inspector.get_columns(table_name)}
+            if column_name in columns:
+                return self._op.alter_column(table_name, column_name, **kwargs)
+
+    def drop_constraint(self, constraint_name, table_name, **kwargs):
+        if self.inspector.has_table(table_name):
+            fks = {fk['name'] for fk in self.inspector.get_foreign_keys(table_name) if fk.get('name')}
+            uniqs = {c['name'] for c in self.inspector.get_unique_constraints(table_name) if c.get('name')}
+            if constraint_name in fks or constraint_name in uniqs:
+                return self._op.drop_constraint(constraint_name, table_name, **kwargs)
+            else:
+                try:
+                    return self._op.drop_constraint(constraint_name, table_name, **kwargs)
+                except Exception:
+                    pass
+
+    def drop_index(self, index_name, table_name=None, **kwargs):
+        if table_name and self.inspector.has_table(table_name):
+            indexes = {idx['name'] for idx in self.inspector.get_indexes(table_name)}
+            if index_name in indexes:
+                return self._op.drop_index(index_name, table_name=table_name, **kwargs)
+        else:
+            try:
+                return self._op.drop_index(index_name, table_name=table_name, **kwargs)
+            except Exception:
+                pass
+
+
+op = SafeOperations(_alembic_op)
 
 
 def upgrade() -> None:
@@ -2038,7 +2127,7 @@ def upgrade() -> None:
     op.create_table('document_chunk_embeddings',
     sa.Column('chunk_id', sa.UUID(), nullable=False),
     sa.Column('organization_id', sa.UUID(), nullable=False),
-    sa.Column('embedding', api.models.knowledge.SafeVector(), nullable=False),
+    sa.Column('embedding', api.models.knowledge.SafeVector(1536), nullable=False),
     sa.Column('embedding_model', sa.String(length=100), nullable=False),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
@@ -2467,7 +2556,7 @@ def upgrade() -> None:
     op.add_column('audit_logs', sa.Column('actor_email', sa.String(length=255), nullable=True, comment='Denormalized — preserved even after user deletion'))
     op.add_column('audit_logs', sa.Column('actor_ip', sa.String(length=45), nullable=True, comment='IPv4 or IPv6'))
     op.add_column('audit_logs', sa.Column('actor_user_agent', sa.Text(), nullable=True))
-    op.add_column('audit_logs', sa.Column('entity_type', sa.String(length=100), nullable=False, comment='Table/entity name e.g. prompts, users, campaigns'))
+    op.add_column('audit_logs', sa.Column('entity_type', sa.String(length=100), server_default='unknown', nullable=False, comment='Table/entity name e.g. prompts, users, campaigns'))
     op.add_column('audit_logs', sa.Column('entity_id', sa.UUID(), nullable=True, comment='ID of the record that was acted upon'))
     op.add_column('audit_logs', sa.Column('description', sa.Text(), nullable=True, comment='Human-readable summary of the action'))
     op.add_column('audit_logs', sa.Column('before_state', postgresql.JSONB(astext_type=Text()), nullable=True, comment='Serialized entity state BEFORE the action'))
@@ -2527,8 +2616,8 @@ def upgrade() -> None:
                type_=sa.UUID(),
                existing_nullable=False)
     op.add_column('campaigns', sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True))
-    op.add_column('campaigns', sa.Column('spent_budget', sa.Numeric(precision=12, scale=4), nullable=False))
-    op.add_column('campaigns', sa.Column('currency', sa.String(length=3), nullable=False))
+    op.add_column('campaigns', sa.Column('spent_budget', sa.Numeric(precision=12, scale=4), server_default='0', nullable=False))
+    op.add_column('campaigns', sa.Column('currency', sa.String(length=3), server_default='USD', nullable=False))
     op.add_column('campaigns', sa.Column('goal', sa.String(length=50), nullable=True))
     op.add_column('campaigns', sa.Column('target_audience_id', sa.UUID(), nullable=True))
     op.add_column('campaigns', sa.Column('owner_id', sa.UUID(), nullable=True))
@@ -2670,7 +2759,7 @@ def upgrade() -> None:
                existing_type=sa.NUMERIC(),
                type_=sa.UUID(),
                existing_nullable=False)
-    op.add_column('document_chunks', sa.Column('content_hash', sa.String(length=64), nullable=False))
+    op.add_column('document_chunks', sa.Column('content_hash', sa.String(length=64), server_default='temp_hash', nullable=False))
     op.add_column('document_chunks', sa.Column('token_count', sa.Integer(), nullable=True))
     op.add_column('document_chunks', sa.Column('char_count', sa.Integer(), nullable=True))
     op.add_column('document_chunks', sa.Column('embedding_model', sa.String(length=100), nullable=True))
@@ -2978,9 +3067,9 @@ def upgrade() -> None:
     op.create_index('idx_organizations_is_active', 'organizations', ['is_active'], unique=False, postgresql_where='is_active = TRUE')
     op.create_index('idx_organizations_plan_tier', 'organizations', ['plan_tier'], unique=False)
     op.create_index('idx_organizations_slug_active', 'organizations', ['slug'], unique=False, postgresql_where='deleted_at IS NULL')
-    op.add_column('permissions', sa.Column('resource', sa.String(length=100), nullable=False, comment='Entity type: prompt, agent, campaign, crm, billing, ...'))
-    op.add_column('permissions', sa.Column('action', sa.String(length=50), nullable=False, comment='Operation: create | read | update | delete | execute | export | share'))
-    op.add_column('permissions', sa.Column('scope', sa.String(length=50), nullable=False, comment='Boundary: own | team | organization | global'))
+    op.add_column('permissions', sa.Column('resource', sa.String(length=100), server_default='unknown', nullable=False, comment='Entity type: prompt, agent, campaign, crm, billing, ...'))
+    op.add_column('permissions', sa.Column('action', sa.String(length=50), server_default='unknown', nullable=False, comment='Operation: create | read | update | delete | execute | export | share'))
+    op.add_column('permissions', sa.Column('scope', sa.String(length=50), server_default='organization', nullable=False, comment='Boundary: own | team | organization | global'))
     op.add_column('permissions', sa.Column('version', sa.Integer(), server_default='1', nullable=False))
     op.alter_column('permissions', 'description',
                existing_type=sa.VARCHAR(length=255),
@@ -2990,6 +3079,8 @@ def upgrade() -> None:
                existing_type=sa.NUMERIC(),
                type_=sa.UUID(),
                existing_nullable=False)
+    if 'name' in {c['name'] for c in op.inspector.get_columns('permissions')}:
+        op.execute("UPDATE permissions SET action = split_part(name, '_', 1), resource = split_part(name, '_', 2)")
     op.drop_index(op.f('ix_permissions_name'), table_name='permissions')
     op.create_index('idx_permissions_action', 'permissions', ['action'], unique=False)
     op.create_index('idx_permissions_resource', 'permissions', ['resource'], unique=False)
@@ -3048,7 +3139,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_prompt_evaluations_organization_id'), 'prompt_evaluations', ['organization_id'], unique=False)
     op.create_index(op.f('ix_prompt_evaluations_prompt_id'), 'prompt_evaluations', ['prompt_id'], unique=False)
     op.create_index(op.f('ix_prompt_evaluations_test_case_id'), 'prompt_evaluations', ['test_case_id'], unique=False)
-    op.add_column('prompt_executions', sa.Column('status', sa.String(length=50), nullable=False))
+    op.add_column('prompt_executions', sa.Column('status', sa.String(length=50), server_default='SUCCESS', nullable=False))
     op.add_column('prompt_executions', sa.Column('error_message', sa.Text(), nullable=True))
     op.add_column('prompt_executions', sa.Column('version', sa.Integer(), server_default='1', nullable=False))
     op.alter_column('prompt_executions', 'prompt_id',
@@ -3109,12 +3200,12 @@ def upgrade() -> None:
     op.create_index(op.f('ix_prompt_test_cases_prompt_id'), 'prompt_test_cases', ['prompt_id'], unique=False)
     op.add_column('prompts', sa.Column('description', sa.Text(), nullable=True))
     op.add_column('prompts', sa.Column('category_id', sa.UUID(), nullable=True))
-    op.add_column('prompts', sa.Column('prompt_type', sa.String(length=50), nullable=False))
+    op.add_column('prompts', sa.Column('prompt_type', sa.String(length=50), server_default='text', nullable=False))
     op.add_column('prompts', sa.Column('variable_specs', sa.JSON(), nullable=True))
-    op.add_column('prompts', sa.Column('visibility', sa.String(length=50), nullable=False))
+    op.add_column('prompts', sa.Column('visibility', sa.String(length=50), server_default='organization', nullable=False))
     op.add_column('prompts', sa.Column('share_token', sa.String(length=255), nullable=True))
     op.add_column('prompts', sa.Column('share_expires_at', sa.DateTime(timezone=True), nullable=True))
-    op.add_column('prompts', sa.Column('is_editable', sa.Boolean(), nullable=False))
+    op.add_column('prompts', sa.Column('is_editable', sa.Boolean(), server_default='TRUE', nullable=False))
     op.alter_column('prompts', 'organization_id',
                existing_type=sa.NUMERIC(),
                type_=sa.UUID(),
@@ -3149,9 +3240,15 @@ def upgrade() -> None:
     op.create_index(op.f('ix_prompts_status'), 'prompts', ['status'], unique=False)
     op.create_foreign_key(None, 'prompts', 'prompt_categories', ['category_id'], ['id'], ondelete='SET NULL')
     op.add_column('queue_messages', sa.Column('version', sa.Integer(), server_default='1', nullable=False))
-    op.add_column('refresh_tokens', sa.Column('session_id', sa.UUID(), nullable=False))
-    op.add_column('refresh_tokens', sa.Column('token_hash', sa.String(length=64), nullable=False, comment='SHA-256 of the raw token — plaintext NEVER stored'))
-    op.add_column('refresh_tokens', sa.Column('family_id', sa.UUID(), nullable=False, comment='Shared across all rotations — used for compromise detection'))
+    op.add_column('refresh_tokens', sa.Column('session_id', sa.UUID(), nullable=True))
+    op.add_column('refresh_tokens', sa.Column('token_hash', sa.String(length=64), nullable=True, comment='SHA-256 of the raw token — plaintext NEVER stored'))
+    op.add_column('refresh_tokens', sa.Column('family_id', sa.UUID(), nullable=True, comment='Shared across all rotations — used for compromise detection'))
+
+    op.execute("UPDATE refresh_tokens SET session_id = md5(id::text || 'session')::uuid, family_id = md5(id::text || 'family')::uuid, token_hash = md5(token) || md5(token) WHERE session_id IS NULL")
+
+    op.alter_column('refresh_tokens', 'session_id', nullable=False)
+    op.alter_column('refresh_tokens', 'token_hash', nullable=False)
+    op.alter_column('refresh_tokens', 'family_id', nullable=False)
     op.add_column('refresh_tokens', sa.Column('is_used', sa.Boolean(), server_default='FALSE', nullable=False, comment='TRUE = consumed in a rotation cycle'))
     op.add_column('refresh_tokens', sa.Column('used_at', sa.DateTime(timezone=True), nullable=True))
     op.add_column('refresh_tokens', sa.Column('replaced_by', sa.UUID(), nullable=True, comment='The new token that replaced this one during rotation'))
@@ -3209,7 +3306,7 @@ def upgrade() -> None:
                type_=sa.UUID(),
                existing_nullable=False)
     op.add_column('user_organizations', sa.Column('is_primary', sa.Boolean(), server_default='FALSE', nullable=False, comment="TRUE = user's primary/default organization"))
-    op.add_column('user_organizations', sa.Column('joined_at', sa.DateTime(timezone=True), nullable=False, comment='Timestamp when membership became active'))
+    op.add_column('user_organizations', sa.Column('joined_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False, comment='Timestamp when membership became active'))
     op.add_column('user_organizations', sa.Column('invited_by', sa.UUID(), nullable=True, comment='The user who sent the invitation'))
     op.add_column('user_organizations', sa.Column('department', sa.String(length=100), nullable=True, comment="Member's department within the organization"))
     op.add_column('user_organizations', sa.Column('job_title', sa.String(length=100), nullable=True, comment="Member's job title (may differ from platform profile)"))

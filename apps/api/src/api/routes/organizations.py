@@ -2,6 +2,7 @@ import re
 import uuid
 from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from api.database.session import get_db
@@ -10,6 +11,9 @@ from api.models.user import User
 from api.models.organization import Organization
 from api.models.membership import UserOrganization, UserRole
 from api.schemas.organization import OrganizationCreate, OrganizationResponse, OrganizationMemberResponse
+
+from api.services.base import ServiceContext
+from api.services.core import OrganizationService, CreateOrganizationDTO, get_organization_service
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -23,36 +27,33 @@ def slugify(text: str) -> str:
 @router.post(
     "/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED
 )
-def create_organization(
+async def create_organization(
     org_in: OrganizationCreate,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    org_service: OrganizationService = Depends(get_organization_service),
 ) -> Any:
     """
-    Create a new organization and bind current user as OWNER.
+    Create a new organization using OrganizationService.
     """
     base_slug = org_in.slug or slugify(org_in.name)
+    ctx = ServiceContext(user_id=current_user.id)
 
-    # Ensure slug uniqueness
-    slug = base_slug
-    counter = 1
-    while db.query(Organization).filter(Organization.slug == slug).first():
-        slug = f"{base_slug}-{counter}"
-        counter += 1
-
-    org = Organization(name=org_in.name, slug=slug)
-    db.add(org)
-    db.flush()
-
-    # Link user to organization
-    membership = UserOrganization(
-        user_id=current_user.id, organization_id=org.id, role=UserRole.OWNER
+    dto = CreateOrganizationDTO(
+        name=org_in.name,
+        slug=base_slug,
     )
-    db.add(membership)
-    db.commit()
-    db.refresh(org)
+    result = await org_service.create(ctx, dto)
+    if result.is_failure:
+        raise HTTPException(status_code=result.status_code, detail=result.errors)
 
-    return org
+    org_res = result.unwrap()
+    return {
+        "id": org_res.id,
+        "name": org_res.name,
+        "slug": org_res.slug,
+        "is_active": org_res.is_active,
+        "created_at": org_res.created_at,
+    }
 
 
 @router.get("/", response_model=List[OrganizationResponse])
@@ -123,10 +124,17 @@ import secrets
 from api.core.deps import RoleChecker
 from api.models.membership import OrganizationInvitation
 from api.routes.auth import log_audit
+from api.core.config import settings
+from api.services.email_service import send_invitation_email
 
 
 owner_admin_checker = RoleChecker([UserRole.OWNER, UserRole.ADMIN])
 owner_checker = RoleChecker([UserRole.OWNER])
+
+
+class InviteMemberRequest(BaseModel):
+    email: EmailStr
+    role: UserRole = UserRole.MEMBER
 
 
 @router.patch("/{organization_id}", response_model=OrganizationResponse)
@@ -262,14 +270,17 @@ def remove_member(
 @router.post("/{organization_id}/invitations/")
 def invite_member(
     organization_id: uuid.UUID,
-    email: str,
-    role: UserRole = UserRole.MEMBER,
+    body: InviteMemberRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     membership: UserOrganization = Depends(owner_admin_checker),
 ) -> Any:
     """
     Invite a user to join organization. Only OWNER or ADMIN.
     """
+    email = body.email
+    role = body.role
+
     user = db.query(User).filter(User.email == email).first()
     if user:
         existing_membership = (
@@ -307,6 +318,7 @@ def invite_member(
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     invitation = OrganizationInvitation(
         organization_id=organization_id,
+        invited_by=current_user.id,
         email=email,
         role=role,
         token=token,
@@ -318,11 +330,20 @@ def invite_member(
     db.commit()
     db.refresh(invitation)
 
-    invite_link = f"http://localhost:3000/auth/register?token={token}&email={email}"
-    print(f"\n========================================")
-    print(f"ORGANIZATION INVITATION TO {email}")
-    print(f"Invite Link: {invite_link}")
-    print(f"========================================\n")
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
+    org_name = org.name if org else "EAIMOS"
+    invite_link = f"{settings.FRONTEND_URL}/auth/accept-invitation?token={token}"
+    try:
+        send_invitation_email(
+            email,
+            current_user.full_name,
+            org_name,
+            role.value if hasattr(role, "value") else str(role),
+            invite_link,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send invitation email: {exc}")
 
     return {
         "id": invitation.id,
@@ -358,7 +379,7 @@ def list_invitations(
             "email": i.email,
             "role": i.role.value if hasattr(i.role, "value") else str(i.role),
             "expires_at": i.expires_at,
-            "invite_link": f"http://localhost:3000/auth/register?token={i.token}&email={i.email}",
+            "invite_link": f"{settings.FRONTEND_URL}/auth/accept-invitation?token={i.token}",
         }
         for i in invites
     ]

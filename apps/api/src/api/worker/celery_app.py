@@ -15,6 +15,9 @@ from celery.schedules import crontab
 from api.core.config import settings
 from api.models.infrastructure import AIBackgroundJob, AIJobHistory
 
+import logging
+logger = logging.getLogger("eaimos.worker")
+
 # Initialize Celery app
 celery_app = Celery(
     "viptant_worker",
@@ -354,6 +357,23 @@ def process_document_pipeline_task(
             "title": doc.title,
             "status": doc.status,
         }
+
+
+
+@celery_app.task(name="worker.tasks.send_email_task", bind=True, max_retries=3, default_retry_delay=10)
+def send_email_task(self, to_email: str, subject: str, html_body: str) -> Dict[str, Any]:
+    """Background task to send transactional email via SMTP."""
+    import logging
+    _logger = logging.getLogger("eaimos.email.worker")
+    try:
+        from api.services.email_service import _send_email
+        success = _send_email(to_email, subject, html_body)
+        if success:
+            _logger.info(f"Background email sent: to={to_email}, subject={subject}")
+        return {"success": success, "to_email": to_email, "subject": subject}
+    except Exception as exc:
+        _logger.error(f"Background email task failed (attempt {self.request.retries + 1}): {exc}")
+        raise self.retry(exc=exc)
 
 
 # Celery Beat scheduler configuration

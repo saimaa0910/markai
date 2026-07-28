@@ -45,7 +45,7 @@ class KnowledgeTool(BaseTool):
             query = input.params.get("query", "")
             limit = input.params.get("limit", 3)
 
-            from api.services.knowledge import KnowledgeService
+            from api.services.knowledge_service import KnowledgeService
             chunks = KnowledgeService.query_similar_chunks(
                 db=db,
                 query_text=query,

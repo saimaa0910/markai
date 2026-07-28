@@ -66,7 +66,7 @@ def test_ai_gateway_phase2_flow(db_session: Session):
     assert "[Simulated" in res["content"]
 
     # Check that success log is in DB
-    logs = db_session.query(AITokenUsage).filter_by(status="success").all()
+    logs = db_session.query(AITokenUsage).filter_by(status="success", organization_id=org.id).all()
     assert len(logs) == 1
     assert logs[0].model_name == "llama3-70b-8192"
     assert logs[0].total_tokens > 0
@@ -97,7 +97,7 @@ def test_ai_gateway_phase2_flow(db_session: Session):
     assert unhealthy_model.is_healthy is False
 
     # Check failure and subsequent success logs in DB
-    failure_log = db_session.query(AITokenUsage).filter_by(status="failure").first()
+    failure_log = db_session.query(AITokenUsage).filter_by(status="failure", organization_id=org.id).first()
     assert failure_log is not None
     assert failure_log.model_name == "llama3-70b-8192"
     assert "rate limit" in failure_log.error_message

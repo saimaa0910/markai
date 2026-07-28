@@ -73,11 +73,30 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str = "eaimos-storage"
 
     # Email configuration (SMTP)
-    SMTP_HOST: str = Field(default="smtp.sendgrid.net", validation_alias="SMTP_HOST")
+    SMTP_HOST: str = Field(default="smtp.gmail.com", validation_alias="SMTP_HOST")
     SMTP_PORT: int = Field(default=587, validation_alias="SMTP_PORT")
-    SMTP_USER: str = Field(default="apikey", validation_alias="SMTP_USER")
+    SMTP_USER: str = Field(default="", validation_alias="SMTP_USER")
     SMTP_PASSWORD: str = Field(default="", validation_alias="SMTP_PASSWORD")
-    EMAIL_FROM: str = Field(default="noreply@viptant.ai", validation_alias="EMAIL_FROM")
+    EMAIL_FROM: str = Field(default="noreply@eaimos.ai", validation_alias="EMAIL_FROM")
+    EMAIL_FROM_NAME: str = Field(default="EAIMOS Platform", validation_alias="EMAIL_FROM_NAME")
+    SMTP_TIMEOUT: int = Field(default=30, validation_alias="SMTP_TIMEOUT")
+    ALERT_EMAIL_RECIPIENT: str = Field(default="alerts@eaimos.ai", validation_alias="ALERT_EMAIL_RECIPIENT")
+
+    # Frontend URL (used in email links)
+    FRONTEND_URL: str = Field(default="http://localhost:3000", validation_alias="FRONTEND_URL")
+
+    # MFA settings
+    MFA_ISSUER: str = Field(default="EAIMOS", validation_alias="MFA_ISSUER")
+    MFA_RECOVERY_CODE_COUNT: int = 10
+
+    # Rate limiting
+    RATE_LIMIT_LOGIN: str = Field(default="5/minute", validation_alias="RATE_LIMIT_LOGIN")
+    RATE_LIMIT_REGISTER: str = Field(default="3/minute", validation_alias="RATE_LIMIT_REGISTER")
+    RATE_LIMIT_FORGOT_PASSWORD: str = Field(default="3/minute", validation_alias="RATE_LIMIT_FORGOT_PASSWORD")
+
+    # Account lockout
+    MAX_FAILED_LOGIN_ATTEMPTS: int = Field(default=5, validation_alias="MAX_FAILED_LOGIN_ATTEMPTS")
+    LOCKOUT_DURATION_MINUTES: int = Field(default=30, validation_alias="LOCKOUT_DURATION_MINUTES")
 
     # External integrations
     SLACK_BOT_TOKEN: str = Field(default="", validation_alias="SLACK_BOT_TOKEN")
@@ -87,6 +106,7 @@ class Settings(BaseSettings):
     class Config:
         case_sensitive = True
         env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()
