@@ -152,6 +152,10 @@ class ModelRouter:
                 matched = [c for c in filtered if c.id in rule_model_ids]
                 others = [c for c in filtered if c.id not in rule_model_ids]
                 filtered = matched + others
+            else:
+                groq_models = [c for c in filtered if c.provider.lower() == "groq"]
+                other_models = [c for c in filtered if c.provider.lower() != "groq"]
+                filtered = groq_models + other_models
 
         # 6. Apply load balancing strategy
         lb_mode = load_balancer or "priority"

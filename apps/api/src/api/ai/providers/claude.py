@@ -154,17 +154,5 @@ class ClaudeProvider(BaseLLMProvider):
         return self.chat(messages=json_messages, model=model)
 
     def health(self) -> bool:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return True
-        if not self.api_key:
-            return False
-        try:
-            self.chat(
-                messages=[{"role": "user", "content": "ping"}],
-                model="claude-3-haiku-20240307",
-                max_tokens=1,
-            )
-            return True
-        except Exception:
-            return False
+        api_key = self.api_key or os.getenv("ANTHROPIC_API_KEY")
+        return bool(api_key and len(api_key.strip()) > 0)

@@ -5,9 +5,7 @@
   "private": true,
   "workspaces": [
     "apps/web",
-    "packages/ui",
-    "packages/shared",
-    "packages/types"
+    "packages/*"
   ],
   "scripts": {
     "web:dev": "npm run dev --workspace=apps/web",
@@ -16,9 +14,11 @@
     "web:lint": "npm run lint --workspace=apps/web",
     "packages:build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "tsc --noEmit",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\""
   },
   "devDependencies": {
+    "@types/jest": "^29.5.12",
     "prettier": "^3.2.5",
     "typescript": "^5.4.5"
   }

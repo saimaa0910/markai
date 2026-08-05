@@ -47,7 +47,7 @@ ai_errors_total = Counter(
 ai_token_usage_total = Counter(
     "ai_token_usage_total",
     "Total tokens consumed",
-    ["organization_id", "provider", "model", "type"]  # type: prompt, completion
+    ["organization_id", "provider", "model", "type"]  # metric type: prompt, completion
 )
 
 ai_cost_usd_total = Counter(

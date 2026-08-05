@@ -1121,7 +1121,7 @@ def sync_providers_and_models(db: Session) -> None:
     """
     Synchronize dynamic list of providers and models in PostgreSQL.
     """
-    provider_names = ["groq", "openai", "anthropic", "google", "openrouter"]
+    provider_names = ["groq", "openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "ollama"]
     providers = {}
     for name in provider_names:
         prov = db.query(AIProvider).filter(AIProvider.name == name).first()
@@ -1164,10 +1164,12 @@ def sync_providers_and_models(db: Session) -> None:
     ModelRegistryManager.seed_default_models(db)
 
     registry_models = {model.model_name: model for model in db.query(AIModelRegistry).all()}
+    
+    # Register Groq models if not present
     for model_name in groq_models:
         if model_name in registry_models:
             continue
-        registry_models[model_name] = AIModelRegistry(
+        reg = AIModelRegistry(
             provider="groq",
             model_name=model_name,
             context_window=131072 if "70b" in model_name or model_name == "openai/gpt-oss-120b" else 8192,
@@ -1179,7 +1181,35 @@ def sync_providers_and_models(db: Session) -> None:
             priority=8,
             is_healthy=True,
         )
-        db.add(registry_models[model_name])
+        db.add(reg)
+        registry_models[model_name] = reg
+
+    # Seed DeepSeek, Mistral, Ollama models in AIModelRegistry
+    new_provider_models = [
+        {"provider": "deepseek", "model_name": "deepseek-chat", "context_window": 64000, "supports_streaming": True, "supports_json": True, "priority": 10},
+        {"provider": "deepseek", "model_name": "deepseek-reasoner", "context_window": 64000, "supports_streaming": True, "supports_json": False, "priority": 10},
+        {"provider": "mistral", "model_name": "mistral-large-latest", "context_window": 32000, "supports_streaming": True, "supports_json": True, "priority": 9},
+        {"provider": "mistral", "model_name": "open-mixtral-8x22b", "context_window": 64000, "supports_streaming": True, "supports_json": True, "priority": 8},
+        {"provider": "ollama", "model_name": "llama3", "context_window": 8192, "supports_streaming": True, "supports_json": True, "priority": 7},
+        {"provider": "ollama", "model_name": "mistral", "context_window": 8192, "supports_streaming": True, "supports_json": True, "priority": 7},
+    ]
+    for pm in new_provider_models:
+        if pm["model_name"] in registry_models:
+            continue
+        reg = AIModelRegistry(
+            provider=pm["provider"],
+            model_name=pm["model_name"],
+            context_window=pm["context_window"],
+            supports_streaming=pm["supports_streaming"],
+            supports_json=pm["supports_json"],
+            input_token_price=Decimal("0.0000"),
+            output_token_price=Decimal("0.0000"),
+            latency=Decimal("0.30"),
+            priority=pm["priority"],
+            is_healthy=True,
+        )
+        db.add(reg)
+        registry_models[pm["model_name"]] = reg
 
     db.commit()
 
@@ -1326,6 +1356,8 @@ class ProviderKeyResponse(BaseModel):
     is_active: bool
     masked_key: str
     created_at: datetime.datetime
+    user_id: Optional[uuid.UUID] = None
+    level: Optional[str] = None # "user" or "organization"
 
     class Config:
         from_attributes = True
@@ -1334,6 +1366,7 @@ class ProviderKeyCreate(BaseModel):
     provider_id: uuid.UUID
     api_key: str
     is_active: Optional[bool] = True
+    level: Optional[str] = "organization" # "user" or "organization"
 
 class ProviderKeyRotate(BaseModel):
     api_key: str
@@ -1374,7 +1407,8 @@ def get_provider_keys(
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
     keys = db.query(AIProviderKey).filter(
-        AIProviderKey.organization_id == membership.organization_id
+        (AIProviderKey.organization_id == membership.organization_id) &
+        ((AIProviderKey.user_id == None) | (AIProviderKey.user_id == membership.user_id))
     ).all()
     
     result = []
@@ -1396,6 +1430,8 @@ def get_provider_keys(
             "is_active": k.is_active,
             "masked_key": masked,
             "created_at": k.created_at,
+            "user_id": k.user_id,
+            "level": "user" if k.user_id else "organization",
         })
     return result
 
@@ -1409,10 +1445,18 @@ def create_or_update_provider_key(
     if not prov:
         raise HTTPException(status_code=404, detail="Provider not found.")
         
-    existing = db.query(AIProviderKey).filter(
-        AIProviderKey.provider_id == key_in.provider_id,
-        AIProviderKey.organization_id == membership.organization_id
-    ).first()
+    if key_in.level == "user":
+        existing = db.query(AIProviderKey).filter(
+            AIProviderKey.provider_id == key_in.provider_id,
+            AIProviderKey.organization_id == membership.organization_id,
+            AIProviderKey.user_id == membership.user_id
+        ).first()
+    else:
+        existing = db.query(AIProviderKey).filter(
+            AIProviderKey.provider_id == key_in.provider_id,
+            AIProviderKey.organization_id == membership.organization_id,
+            AIProviderKey.user_id == None
+        ).first()
     
     encrypted = encrypt_key(key_in.api_key)
     
@@ -1426,6 +1470,7 @@ def create_or_update_provider_key(
         new_key = AIProviderKey(
             provider_id=key_in.provider_id,
             organization_id=membership.organization_id,
+            user_id=membership.user_id if key_in.level == "user" else None,
             api_key=encrypted,
             is_active=key_in.is_active if key_in.is_active is not None else True
         )
@@ -1444,6 +1489,8 @@ def create_or_update_provider_key(
         "is_active": target.is_active,
         "masked_key": masked,
         "created_at": target.created_at,
+        "user_id": target.user_id,
+        "level": "user" if target.user_id else "organization",
     }
 
 @providers_router.post("/keys/{key_id}/rotate", response_model=ProviderKeyResponse)
@@ -1455,7 +1502,8 @@ def rotate_provider_key(
 ) -> Any:
     key_rec = db.query(AIProviderKey).filter(
         AIProviderKey.id == key_id,
-        AIProviderKey.organization_id == membership.organization_id
+        AIProviderKey.organization_id == membership.organization_id,
+        ((AIProviderKey.user_id == None) | (AIProviderKey.user_id == membership.user_id))
     ).first()
     if not key_rec:
         raise HTTPException(status_code=404, detail="Provider key record not found.")
@@ -1475,6 +1523,8 @@ def rotate_provider_key(
         "is_active": key_rec.is_active,
         "masked_key": masked,
         "created_at": key_rec.created_at,
+        "user_id": key_rec.user_id,
+        "level": "user" if key_rec.user_id else "organization",
     }
 
 @providers_router.get("/health-logs", response_model=List[ProviderHealthLogResponse])
@@ -1764,15 +1814,186 @@ def get_playground_history(
     return res
 
 
+class PlaygroundSessionCreate(BaseModel):
+    name: str
+    provider: str
+    model: str
+    temperature: float = 0.7
+    system_prompt: Optional[str] = None
+
+
+class PlaygroundSessionUpdate(BaseModel):
+    name: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    system_prompt: Optional[str] = None
+
+
+class PlaygroundMessageCreate(BaseModel):
+    role: str
+    content: str
+
+
+@playground_router.get("/sessions")
+def list_playground_sessions(
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    sessions = db.query(AIPlaygroundSession).filter(
+        AIPlaygroundSession.organization_id == membership.organization_id,
+        AIPlaygroundSession.user_id == membership.user_id
+    ).order_by(AIPlaygroundSession.created_at.desc()).all()
+    
+    res = []
+    for s in sessions:
+        res.append({
+            "id": s.id,
+            "name": s.name,
+            "provider": s.provider,
+            "model": s.model,
+            "temperature": float(s.temperature),
+            "system_prompt": s.system_prompt,
+            "created_at": s.created_at
+        })
+    return res
+
+
+@playground_router.post("/sessions")
+def create_playground_session(
+    sess_in: PlaygroundSessionCreate,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    sess = AIPlaygroundSession(
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        name=sess_in.name,
+        provider=sess_in.provider,
+        model=sess_in.model,
+        temperature=sess_in.temperature,
+        system_prompt=sess_in.system_prompt
+    )
+    db.add(sess)
+    db.commit()
+    db.refresh(sess)
+    return sess
+
+
+@playground_router.patch("/sessions/{session_id}")
+def update_playground_session(
+    session_id: uuid.UUID,
+    sess_in: PlaygroundSessionUpdate,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    sess = db.query(AIPlaygroundSession).filter(
+        AIPlaygroundSession.id == session_id,
+        AIPlaygroundSession.organization_id == membership.organization_id
+    ).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found.")
+        
+    if sess_in.name is not None:
+        sess.name = sess_in.name
+    if sess_in.provider is not None:
+        sess.provider = sess_in.provider
+    if sess_in.model is not None:
+        sess.model = sess_in.model
+    if sess_in.temperature is not None:
+        sess.temperature = sess_in.temperature
+    if sess_in.system_prompt is not None:
+        sess.system_prompt = sess_in.system_prompt
+        
+    db.commit()
+    db.refresh(sess)
+    return sess
+
+
+@playground_router.delete("/sessions/{session_id}")
+def delete_playground_session(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    sess = db.query(AIPlaygroundSession).filter(
+        AIPlaygroundSession.id == session_id,
+        AIPlaygroundSession.organization_id == membership.organization_id
+    ).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    db.delete(sess)
+    db.commit()
+    return {"success": True}
+
+
+@playground_router.get("/sessions/{session_id}/messages")
+def get_playground_messages(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    sess = db.query(AIPlaygroundSession).filter(
+        AIPlaygroundSession.id == session_id,
+        AIPlaygroundSession.organization_id == membership.organization_id
+    ).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    
+    msgs = db.query(AIPlaygroundMessage).filter(
+        AIPlaygroundMessage.session_id == session_id
+    ).order_by(AIPlaygroundMessage.created_at.asc()).all()
+    
+    return [{"role": m.role, "content": m.content} for m in msgs]
+
+
+@playground_router.post("/sessions/{session_id}/messages")
+def create_playground_message(
+    session_id: uuid.UUID,
+    msg_in: PlaygroundMessageCreate,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    sess = db.query(AIPlaygroundSession).filter(
+        AIPlaygroundSession.id == session_id,
+        AIPlaygroundSession.organization_id == membership.organization_id
+    ).first()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found.")
+        
+    msg = AIPlaygroundMessage(
+        session_id=session_id,
+        role=msg_in.role,
+        content=msg_in.content
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
 @router_settings_router.get("/", response_model=RouterSettingsResponse)
 def get_router_settings(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
+    from api.models.membership import OrganizationSettings
+    settings_rows = db.query(OrganizationSettings).filter(
+        OrganizationSettings.organization_id == membership.organization_id,
+        OrganizationSettings.namespace == "ai"
+    ).all()
+    
+    settings_dict = {row.key: row.value for row in settings_rows}
+    
+    def to_bool(val: Any) -> bool:
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes")
+        return bool(val)
+        
     return {
-        "routing_mode": "cheapest",
-        "fallback_provider": "groq",
-        "is_active": True
+        "routing_mode": settings_dict.get("routing_mode", "cheapest"),
+        "fallback_provider": settings_dict.get("fallback_provider", "groq"),
+        "is_active": to_bool(settings_dict.get("is_active", "true"))
     }
 
 
@@ -1782,11 +2003,36 @@ def update_router_settings(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    return {
-        "routing_mode": settings_in.routing_mode or "cheapest",
-        "fallback_provider": settings_in.fallback_provider or "groq",
-        "is_active": settings_in.is_active if settings_in.is_active is not None else True
-    }
+    from api.models.membership import OrganizationSettings
+    
+    def set_setting(key: str, value: Any):
+        if value is None:
+            return
+        row = db.query(OrganizationSettings).filter(
+            OrganizationSettings.organization_id == membership.organization_id,
+            OrganizationSettings.namespace == "ai",
+            OrganizationSettings.key == key
+        ).first()
+        if row:
+            row.value = str(value)
+        else:
+            row = OrganizationSettings(
+                organization_id=membership.organization_id,
+                namespace="ai",
+                key=key,
+                value=str(value)
+            )
+            db.add(row)
+
+    if settings_in.routing_mode is not None:
+        set_setting("routing_mode", settings_in.routing_mode)
+    if settings_in.fallback_provider is not None:
+        set_setting("fallback_provider", settings_in.fallback_provider)
+    if settings_in.is_active is not None:
+        set_setting("is_active", settings_in.is_active)
+        
+    db.commit()
+    return get_router_settings(db, membership)
 
 
 @compare_router.post("/", response_model=CompareResponse)

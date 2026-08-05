@@ -98,10 +98,7 @@ class OpenAIProvider(BaseLLMProvider):
 
     def embeddings(self, text: str, model: str) -> List[float]:
         api_key = self.api_key or os.getenv("OPENAI_API_KEY")
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return [0.01] * 1536
-        elif not api_key:
+        if not api_key:
             raise RuntimeError("OpenAI API key is not configured.")
 
         response = self.client.post(
@@ -140,18 +137,5 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
     def health(self) -> bool:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return True
-        if not self.api_key:
-            return False
-        try:
-            # Perform tiny check query
-            self.chat(
-                messages=[{"role": "user", "content": "ping"}],
-                model="gpt-3.5-turbo",
-                max_tokens=1,
-            )
-            return True
-        except Exception:
-            return False
+        api_key = self.api_key or os.getenv("OPENAI_API_KEY")
+        return bool(api_key and len(api_key.strip()) > 0)

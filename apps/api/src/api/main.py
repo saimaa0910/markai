@@ -176,6 +176,16 @@ def on_startup():
             db.commit()
             
             print("Successfully seeded initial tenant organization and admin user credentials.")
+            
+        # Initialize AgentRegistry and sync manifests to database
+        try:
+            from api.ai.agents.base.registry import AgentRegistry
+            AgentRegistry.initialize()
+            AgentRegistry.sync_to_db(db)
+            print("Successfully synchronized AI Agent Registry manifests to the database.")
+        except Exception as registry_err:
+            print(f"Error initializing or syncing Agent Registry: {registry_err}")
+            
     except Exception as e:
         print(f"Error seeding initial startup data: {e}")
     finally:

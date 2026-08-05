@@ -27,18 +27,28 @@ class AIGateway:
         from api.ai.providers.openrouter import OpenRouterProvider
         from api.ai.providers.claude import ClaudeProvider
         from api.ai.providers.gemini import GeminiProvider
+        from api.ai.providers.deepseek import DeepSeekProvider
+        from api.ai.providers.mistral import MistralProvider
+        from api.ai.providers.ollama import OllamaProvider
         self.providers = {
             "openai": OpenAIProvider(),
             "groq": GroqProvider(),
             "openrouter": OpenRouterProvider(),
             "anthropic": ClaudeProvider(),
             "google": GeminiProvider(),
+            "deepseek": DeepSeekProvider(),
+            "mistral": MistralProvider(),
+            "ollama": OllamaProvider(),
         }
 
-    def _get_provider_adapter(self, db: Session, provider_name: str, organization_id: uuid.UUID) -> Any:
+    def _get_provider_adapter(
+        self, db: Session, provider_name: str, organization_id: uuid.UUID, user_id: Optional[uuid.UUID] = None
+    ) -> Any:
         """
-        Dynamically lookup the decrypted custom API Key for the organization,
-        or fall back to the system environment key.
+        Dynamically lookup the decrypted custom API Key:
+        1. Checks User-level keys
+        2. Checks Organization-level (Workspace) keys
+        3. Falls back to system environment variables
         """
         from sqlalchemy import func
         prov_name_lower = provider_name.lower()
@@ -47,15 +57,31 @@ class AIGateway:
             select(AIProvider).where(func.lower(AIProvider.name) == prov_name_lower)
         ).first()
 
-        db_key = db.scalars(
-            select(AIProviderKey)
-            .join(AIProvider)
-            .where(
-                func.lower(AIProvider.name) == prov_name_lower,
-                AIProviderKey.organization_id == organization_id,
-                AIProviderKey.is_active == True
-            )
-        ).first()
+        db_key = None
+        # 1. User-level credentials check
+        if user_id:
+            db_key = db.scalars(
+                select(AIProviderKey)
+                .join(AIProvider)
+                .where(
+                    func.lower(AIProvider.name) == prov_name_lower,
+                    AIProviderKey.user_id == user_id,
+                    AIProviderKey.is_active == True
+                )
+            ).first()
+
+        # 2. Org-level credentials check
+        if not db_key:
+            db_key = db.scalars(
+                select(AIProviderKey)
+                .join(AIProvider)
+                .where(
+                    func.lower(AIProvider.name) == prov_name_lower,
+                    AIProviderKey.organization_id == organization_id,
+                    AIProviderKey.user_id == None,
+                    AIProviderKey.is_active == True
+                )
+            ).first()
 
         decrypted_key = None
         if db_key and db_key.api_key:
@@ -70,6 +96,9 @@ class AIGateway:
         from api.ai.providers.openrouter import OpenRouterProvider
         from api.ai.providers.claude import ClaudeProvider
         from api.ai.providers.gemini import GeminiProvider
+        from api.ai.providers.deepseek import DeepSeekProvider
+        from api.ai.providers.mistral import MistralProvider
+        from api.ai.providers.ollama import OllamaProvider
 
         adapters = {
             "openai": OpenAIProvider,
@@ -77,6 +106,9 @@ class AIGateway:
             "openrouter": OpenRouterProvider,
             "anthropic": ClaudeProvider,
             "google": GeminiProvider,
+            "deepseek": DeepSeekProvider,
+            "mistral": MistralProvider,
+            "ollama": OllamaProvider,
         }
 
         adapter_cls = adapters.get(prov_name_lower, GroqProvider)
@@ -88,6 +120,9 @@ class AIGateway:
             "openai": "OPENAI_API_KEY",
             "groq": "GROQ_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "mistral": "MISTRAL_API_KEY",
+            "ollama": "OLLAMA_API_KEY",
         }
         target_env = env_key_names.get(prov_name_lower, f"{prov_name_lower.upper()}_API_KEY")
         active_key = decrypted_key or os.getenv(target_env)
@@ -99,8 +134,8 @@ class AIGateway:
                 provider_instance.base_url = base_url
             return provider_instance
 
-        if adapter_cls == OpenAIProvider:
-            return OpenAIProvider(api_key=active_key, base_url=base_url)
+        if adapter_cls in (OpenAIProvider, DeepSeekProvider, MistralProvider, OllamaProvider):
+            return adapter_cls(api_key=active_key, base_url=base_url)
         return adapter_cls(api_key=active_key)
 
     def _calculate_cost(
@@ -632,7 +667,7 @@ class AIGateway:
                 start_time = time.perf_counter()
                 try:
                     self._validate_request(db, organization_id, user_id, model_meta)
-                    adapter = self._get_provider_adapter(db, provider_name, organization_id)
+                    adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                     if not adapter:
                         raise ValueError(f"Provider adapter '{provider_name}' not available.")
 
@@ -892,7 +927,7 @@ class AIGateway:
                 start_time = time.perf_counter()
                 try:
                     self._validate_request(db, organization_id, user_id, model_meta)
-                    adapter = self._get_provider_adapter(db, provider_name, organization_id)
+                    adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                     if not adapter:
                         raise ValueError(f"Provider adapter '{provider_name}' not available.")
 
@@ -1074,7 +1109,7 @@ class AIGateway:
             start_time = time.perf_counter()
             try:
                 self._validate_request(db, organization_id, user_id, model_meta)
-                adapter = self._get_provider_adapter(db, provider_name, organization_id)
+                adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                 if not adapter:
                     raise ValueError(f"Provider adapter '{provider_name}' not available.")
 
@@ -1190,7 +1225,7 @@ class AIGateway:
             start_time = time.perf_counter()
             try:
                 self._validate_request(db, organization_id, user_id, model_meta)
-                adapter = self._get_provider_adapter(db, provider_name, organization_id)
+                adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                 if not adapter:
                     raise ValueError(f"Provider adapter '{provider_name}' not available.")
 
@@ -1327,7 +1362,7 @@ class AIGateway:
             start_time = time.perf_counter()
             try:
                 self._validate_request(db, organization_id, user_id, model_meta)
-                adapter = self._get_provider_adapter(db, provider_name, organization_id)
+                adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                 if not adapter:
                     raise ValueError(f"Provider adapter '{provider_name}' not available.")
 

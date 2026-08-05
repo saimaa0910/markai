@@ -9,6 +9,12 @@ from api.ai.tools.crm_tool import CRMTool
 from api.ai.tools.knowledge_tool import KnowledgeTool, PromptTool, CampaignTool
 from api.ai.tools.web_search_tool import WebSearchTool
 from api.ai.tools.workflow_tool import WorkflowTool
+# Sprint 7.1 — New tools
+from api.ai.tools.calculator_tool import CalculatorTool
+from api.ai.tools.rest_api_tool import RESTAPITool
+from api.ai.tools.email_tool import EmailTool
+from api.ai.tools.analytics_tool import AnalyticsTool
+from api.ai.agents.image.tools import ImageGenerateTool, ImageEditTool, ImageUpscaleTool
 
 
 class ToolRegistry:
@@ -32,14 +38,27 @@ class ToolRegistry:
             CampaignTool(),
             WebSearchTool(),
             WorkflowTool(),
+            # Sprint 7.1 — New tools
+            CalculatorTool(),
+            RESTAPITool(),
+            EmailTool(),
+            AnalyticsTool(),
+            # Sprint 7.4 — Image tools
+            ImageGenerateTool(),
+            ImageEditTool(),
+            ImageUpscaleTool(),
         ]
         for tool in tools:
             cls._registry[tool.name] = tool
+            if tool.name == "image_generate_tool":
+                cls._registry["image_generation_tool"] = tool
         cls._initialized = True
 
     @classmethod
     def get_tool(cls, name: str) -> Optional[BaseTool]:
         cls.initialize()
+        if name == "image_generation_tool":
+            return cls._registry.get("image_generate_tool")
         return cls._registry.get(name)
 
     @classmethod

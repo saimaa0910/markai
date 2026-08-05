@@ -1,0 +1,3 @@
+"""
+Users Domain Package Initializer.
+"""

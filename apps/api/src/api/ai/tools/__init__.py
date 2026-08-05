@@ -5,7 +5,7 @@ Every tool in the Viptant platform must implement BaseTool.
 This ensures a consistent interface for the AgentExecutor and ToolRegistry.
 """
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from pydantic import BaseModel
 
 
@@ -56,6 +56,34 @@ class BaseTool(ABC):
         Used by the LLM to generate correct tool calls.
         """
         return {}
+
+    @property
+    def required_permissions(self) -> List[str]:
+        return []
+
+    @property
+    def required_scopes(self) -> List[str]:
+        return []
+
+    @property
+    def estimated_cost(self) -> float:
+        return 0.0
+
+    @property
+    def timeout(self) -> int:
+        return 60
+
+    @property
+    def supports_streaming(self) -> bool:
+        return False
+
+    @property
+    def supports_async(self) -> bool:
+        return False
+
+    @property
+    def supports_batch(self) -> bool:
+        return False
 
     @abstractmethod
     def execute(self, input: ToolInput, db: Any) -> ToolResult:

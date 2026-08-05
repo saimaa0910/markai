@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Users, Megaphone, Bot, Settings, Search, 
   Bell, ChevronLeft, ChevronRight, Menu, LogOut, Building, Check, X,
   Brain, BookOpen, MessageSquare, BarChart2, Plug, FolderOpen,
-  Cpu, Database, TrendingUp, Router, SlidersHorizontal, ChevronDown, Terminal, Columns, Activity, Shield, UploadCloud, Sparkles, FileText, Code, History, Library, Server
+  Cpu, Database, TrendingUp, Router, SlidersHorizontal, ChevronDown, Terminal, Columns, Activity, Shield, UploadCloud, Sparkles, FileText, Code, History, Library, Server, Share2, Image
 } from 'lucide-react';
 import { cn } from '@eaimos/shared';
 import { Button } from '@/components/ui/button';
@@ -113,6 +113,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
   const agentsSubItems = [
     { name: 'Dashboard', href: '/dashboard/agents', icon: LayoutDashboard },
+    { name: 'Image Studio', href: '/dashboard/image-studio', icon: Image },
     { name: 'Marketplace', href: '/dashboard/agents/marketplace', icon: Library },
     { name: 'Create Agent', href: '/dashboard/agents/create', icon: Bot },
     { name: 'Playground', href: '/dashboard/agents/playground', icon: Terminal },
@@ -120,6 +121,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     { name: 'Runs Timeline', href: '/dashboard/agents/runs', icon: History },
     { name: 'Execution Logs', href: '/dashboard/agents/logs', icon: Activity },
     { name: 'Analytics', href: '/dashboard/agents/analytics', icon: BarChart2 },
+    { name: '📲 Social Studio', href: '/dashboard/social-studio', icon: Share2 },
     { name: 'Settings', href: '/dashboard/agents/settings', icon: Settings },
   ];
 

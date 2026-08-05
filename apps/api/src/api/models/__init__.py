@@ -48,6 +48,7 @@ from api.models.agent import (
 from api.models.agent_tools import (
     AgentTool, AgentToolExecution, AgentKnowledgeBinding, AgentAnalytics
 )
+from api.ai.agents.image.history import AIImageLibrary, AIImageCollection
 # Phase 3 — Agent Memory System
 from api.models.memory import (
     AgentMemory, ConversationMemory, OrganizationMemory, MemoryType
@@ -136,6 +137,7 @@ __all__ = [
     "AgentDefinition", "AgentSession", "AgentRun", "AgentLog",
     "AgentType", "AgentStatus", "AgentRunStatus",
     "AgentTool", "AgentToolExecution", "AgentKnowledgeBinding", "AgentAnalytics",
+    "AIImageLibrary", "AIImageCollection",
     # Phase 3: Memory
     "AgentMemory", "ConversationMemory", "OrganizationMemory", "MemoryType",
     # Phase 4: Workflow

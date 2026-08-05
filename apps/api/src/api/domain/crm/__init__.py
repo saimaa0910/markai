@@ -1,0 +1,3 @@
+"""
+CRM Domain Package Initializer.
+"""

@@ -1,0 +1,6 @@
+"""
+Knowledge Constants.
+"""
+
+DEFAULT_CHUNK_SIZE = 512
+DEFAULT_CHUNK_OVERLAP = 50

@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/services/api-client';
-import { Bot, Sparkles, Megaphone, Search, Users, Cpu, ArrowRight } from 'lucide-react';
+import { Bot, Sparkles, Megaphone, Search, Users, Cpu, ArrowRight, Share2 } from 'lucide-react';
 
 interface Template {
   id: string;
@@ -47,6 +47,16 @@ const TEMPLATES: Template[] = [
     systemPrompt: 'You are the Viptant Campaign Agent. You analyze performance data, coordinate multichannels, design A/B tests, recommend budget allocations, and automate promotional messaging.',
     icon: Megaphone,
     color: 'from-emerald-600/30 to-teal-600/30 border-emerald-500/20 text-emerald-400',
+  },
+  {
+    id: 'social-media-agent',
+    name: 'Social Media Agent',
+    desc: 'Plans, generates, optimizes, schedules, and publishes content across 14 social media platforms.',
+    agentType: 'SOCIAL',
+    tools: ['knowledge_tool', 'image_generation_tool', 'campaign_tool', 'analytics_tool', 'brand_tool', 'web_search_tool', 'email_tool', 'calendar_tool'],
+    systemPrompt: 'You are the Viptant Social Media Agent. You specialize in generating platform-optimized posts, threads, stories, and community content. You orchestrate caption writing, image generation, hashtag selection, and calendar scheduling.',
+    icon: Share2,
+    color: 'from-sky-600/30 to-blue-600/30 border-sky-500/20 text-sky-400',
   },
 ];
 

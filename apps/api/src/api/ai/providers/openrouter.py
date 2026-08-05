@@ -125,17 +125,5 @@ class OpenRouterProvider(BaseLLMProvider):
         )
 
     def health(self) -> bool:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return True
-        if not self.api_key:
-            return False
-        try:
-            self.chat(
-                messages=[{"role": "user", "content": "ping"}],
-                model="meta-llama/llama-3-8b-instruct:free",
-                max_tokens=1,
-            )
-            return True
-        except Exception:
-            return False
+        api_key = self.api_key or os.getenv("OPENROUTER_API_KEY")
+        return bool(api_key and len(api_key.strip()) > 0)

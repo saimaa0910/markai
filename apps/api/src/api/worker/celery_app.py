@@ -376,6 +376,41 @@ def send_email_task(self, to_email: str, subject: str, html_body: str) -> Dict[s
         raise self.retry(exc=exc)
 
 
+@celery_app.task(name="worker.tasks.generate_image_task", bind=True)
+def generate_image_task(self, library_item_id_str: str) -> Dict[str, Any]:
+    """Background task to run Image Generation asynchronously."""
+    with track_task_execution("generate_image_task", self.request.id, args_str=library_item_id_str) as db:
+        from api.models import AIImageLibrary
+        from api.ai.agents.image.executor import ImageExecutor
+        import uuid
+
+        item_id = uuid.UUID(library_item_id_str)
+        item = db.query(AIImageLibrary).filter(AIImageLibrary.id == item_id).first()
+        if not item:
+            return {"success": False, "error": "Image Library record not found"}
+
+        item.status = "RUNNING"
+        db.commit()
+
+        try:
+            executor = ImageExecutor(db, item.organization_id, item.user_id)
+            res = executor.generate(
+                prompt=item.prompt,
+                negative_prompt=item.negative_prompt,
+                campaign_id=item.campaign_id,
+                model=item.model,
+                seed=item.seed,
+                cfg_scale=float(item.cfg_scale) if item.cfg_scale else None,
+                steps=item.steps,
+                library_item_id=item.id,
+            )
+            return {"success": True, "library_item_id": str(item.id)}
+        except Exception as e:
+            item.status = "FAILED"
+            db.commit()
+            raise
+
+
 # Celery Beat scheduler configuration
 celery_app.conf.beat_schedule = {
     "provider-health-check-every-minute": {

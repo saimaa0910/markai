@@ -1,6 +1,8 @@
+from pydantic import BaseModel
 import uuid
 from typing import Any, List, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.database.session import get_db
@@ -24,12 +26,29 @@ from api.schemas.agent import (
     AgentRunCreate,
     AgentRunResponse,
     AgentLogResponse,
+    # Sprint 7.1
+    AgentChatRequest,
+    AgentStreamRequest,
+    AgentEvaluationResponse,
+    AgentToolInfo,
 )
 from api.schemas.common import PaginatedResponse
 from api.services.agent_executor import AgentExecutorService
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
+
+# Sprint 7.2 Content Agent Router
+from api.ai.agents.content import content_agent_router
+router.include_router(content_agent_router)
+
+# Sprint 7.4 Image Agent Router
+from api.ai.agents.image.router import router as image_agent_router
+router.include_router(image_agent_router)
+
+# Sprint 7.5 Social Media Agent Router
+from api.ai.agents.social import social_agent_router
+router.include_router(social_agent_router)
 
 
 # --- AGENT DEFINITION ENDPOINTS ---
@@ -401,6 +420,44 @@ def list_agent_templates() -> Any:
             "welcome_message": "Hello! I am your Campaign Agent. Let's orchestrate, plan, and analyze marketing campaigns or creative copy variations.",
             "reasoning_mode": "standard",
             "execution_mode": "sequential"
+        },
+        {
+            "name": "Social Media Agent",
+            "description": "Plans, generates, optimizes, schedules, and publishes content across 14 social media platforms.",
+            "agent_type": "SOCIAL",
+            "system_prompt": "You are the Viptant Social Media Agent. You specialize in generating platform-optimized posts, threads, stories, and community content. You orchestrate caption writing, image generation, hashtag selection, and calendar scheduling.",
+            "allowed_tools": ["knowledge_tool", "image_generation_tool", "campaign_tool", "analytics_tool", "brand_tool", "web_search_tool", "email_tool", "calendar_tool"],
+            "preferred_model": "gemini-2.5-flash",
+            "temperature": 0.75,
+            "max_tokens": 1500,
+            "memory_enabled": True,
+            "max_memory_items": 20,
+            "max_iterations": 10,
+            "is_public": True,
+            "avatar_color": "sky",
+            "avatar": "share",
+            "welcome_message": "Hello! I am your Social Media Agent. I can help you write platform-optimized captions, generate post images, schedule content, or build threads for Twitter and LinkedIn.",
+            "reasoning_mode": "standard",
+            "execution_mode": "sequential"
+        },
+        {
+            "name": "Image Generation Agent",
+            "description": "Generates visual assets, product mockups, and marketing graphics with style presets and aspect ratio layouts.",
+            "agent_type": "IMAGE",
+            "system_prompt": "You are the Viptant Image Generation Agent. You help visual creators and design teams generate product graphics, marketing visual mockups, and banner images. You structure prompt compilations, style presets selection, aspect ratio sizes, and follow brand design guidelines.",
+            "allowed_tools": ["image_generate_tool", "image_edit_tool", "image_upscale_tool", "brand_tool", "knowledge_tool"],
+            "preferred_model": "gemini-2.5-flash",
+            "temperature": 0.7,
+            "max_tokens": 1500,
+            "memory_enabled": True,
+            "max_memory_items": 20,
+            "max_iterations": 10,
+            "is_public": True,
+            "avatar_color": "rose",
+            "avatar": "image",
+            "welcome_message": "Hello! I am your Image Generation Agent. I can help you generate product images, marketing graphics, edit visuals, or upscale images.",
+            "reasoning_mode": "standard",
+            "execution_mode": "sequential"
         }
     ]
 
@@ -641,3 +698,424 @@ def get_agent_analytics(
         "preferred_model": agent.preferred_model or "Gateway Default",
         "preferred_provider": agent.preferred_provider or "Gateway Default"
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SPRINT 7.1 — RUNTIME ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/definitions/{agent_id}/chat", response_model=AgentRunResponse, status_code=status.HTTP_201_CREATED)
+def agent_chat(
+    agent_id: uuid.UUID,
+    chat_in: AgentChatRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """
+    Single-turn convenience endpoint: creates a new session and executes a run.
+    Uses the full Agent Runtime (context builder + reflection + evaluation).
+    """
+    agent = agent_definition_repo.get_by_id_and_org(
+        db=db, id=agent_id, organization_id=membership.organization_id
+    )
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent definition not found")
+
+    # Create ephemeral session
+    session = AgentSession(
+        agent_id=agent_id,
+        user_id=membership.user_id,
+        organization_id=membership.organization_id,
+        title=chat_in.session_title or "Chat Session",
+        context=None,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    # Use full Agent Runtime (extends existing AgentExecutorService)
+    from api.ai.runtime.agent_runtime import agent_runtime
+    result = agent_runtime.execute(
+        db=db,
+        session=session,
+        user_input=chat_in.user_input,
+        run_reflection=chat_in.run_reflection if chat_in.run_reflection is not None else True,
+        run_evaluation=chat_in.run_evaluation if chat_in.run_evaluation is not None else True,
+    )
+    return result.run
+
+
+@router.post("/definitions/{agent_id}/stream")
+def agent_stream(
+    agent_id: uuid.UUID,
+    stream_in: AgentStreamRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> StreamingResponse:
+    """
+    SSE streaming agent execution endpoint.
+    Yields Server-Sent Events throughout the agent lifecycle.
+
+    Event types: agent_start, context_ready, plan, tool_call, tool_result,
+                 token, reflection, evaluation, done, error
+    """
+    agent = agent_definition_repo.get_by_id_and_org(
+        db=db, id=agent_id, organization_id=membership.organization_id
+    )
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent definition not found")
+
+    # Resolve or create session
+    if stream_in.session_id:
+        session = agent_session_repo.get_by_id_and_org(
+            db=db, id=stream_in.session_id, organization_id=membership.organization_id
+        )
+        if not session:
+            raise HTTPException(status_code=404, detail="Agent session not found")
+        if not session.is_active:
+            raise HTTPException(status_code=400, detail="Cannot stream on an inactive session")
+    else:
+        session = AgentSession(
+            agent_id=agent_id,
+            user_id=membership.user_id,
+            organization_id=membership.organization_id,
+            title=stream_in.session_title or "Stream Session",
+            context=None,
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+    from api.ai.runtime.streaming_runtime import agent_streaming_runtime
+
+    def event_generator():
+        yield from agent_streaming_runtime.stream_run(
+            db=db,
+            session=session,
+            user_input=stream_in.user_input,
+            conversation_history=stream_in.conversation_history or [],
+            run_reflection=stream_in.run_reflection if stream_in.run_reflection is not None else True,
+            run_evaluation=stream_in.run_evaluation if stream_in.run_evaluation is not None else True,
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/definitions/{agent_id}/evaluations", response_model=List[AgentEvaluationResponse])
+def list_agent_evaluations(
+    agent_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+    limit: int = Query(20, ge=1, le=100),
+) -> Any:
+    """List evaluation scores for all runs of an agent."""
+    agent = agent_definition_repo.get_by_id_and_org(
+        db=db, id=agent_id, organization_id=membership.organization_id
+    )
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent definition not found")
+
+    from api.models.agent import AgentEvaluation
+    from sqlalchemy import select
+
+    evaluations = db.scalars(
+        select(AgentEvaluation)
+        .join(AgentRun, AgentEvaluation.run_id == AgentRun.id)
+        .join(AgentSession, AgentRun.session_id == AgentSession.id)
+        .where(
+            AgentSession.agent_id == agent_id,
+            AgentEvaluation.organization_id == membership.organization_id,
+            AgentEvaluation.deleted_at.is_(None),
+        )
+        .order_by(AgentEvaluation.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    return evaluations
+
+
+@router.get("", response_model=List[Dict[str, Any]])
+def discover_agents(
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """
+    Agent Discovery API.
+    Returns registered agents' manifests, capabilities, health, models, and tools.
+    """
+    from api.ai.agents.base.registry import AgentRegistry
+    AgentRegistry.initialize()
+    agents = AgentRegistry.list()
+    return [
+        {
+            "id": a.manifest.id,
+            "name": a.manifest.name,
+            "description": a.manifest.description,
+            "version": a.manifest.version,
+            "category": a.manifest.category,
+            "tags": a.manifest.tags,
+            "icon": a.manifest.icon,
+            "color": a.manifest.color,
+            "owner": a.manifest.owner,
+            "visibility": a.manifest.visibility,
+            "capabilities": a.manifest.capabilities,
+            "supported_providers": a.manifest.supported_providers,
+            "supported_models": a.manifest.supported_models,
+            "supported_tools": a.manifest.supported_tools,
+            "required_permissions": a.manifest.required_permissions,
+            "default_prompt": a.manifest.default_prompt,
+            "default_model": a.manifest.default_model,
+            "default_temperature": a.manifest.default_temperature,
+            "default_max_tokens": a.manifest.default_max_tokens,
+            "memory_requirements": a.manifest.memory_requirements,
+            "knowledge_requirements": a.manifest.knowledge_requirements,
+            "streaming_support": a.manifest.streaming_support,
+            "reflection_support": a.manifest.reflection_support,
+            "evaluation_support": a.manifest.evaluation_support,
+            "telemetry_support": a.manifest.telemetry_support,
+            "status": a.manifest.metadata.status.value if hasattr(a.manifest.metadata.status, "value") else str(a.manifest.metadata.status),
+            "health": "healthy",
+            "metadata": {
+                "icon": a.manifest.metadata.icon,
+                "gradient": a.manifest.metadata.gradient,
+                "accent_color": a.manifest.metadata.accent_color,
+                "category": a.manifest.metadata.category,
+                "description": a.manifest.metadata.description,
+                "author": a.manifest.metadata.author,
+                "version": a.manifest.metadata.version,
+                "release_notes": a.manifest.metadata.release_notes,
+            }
+        }
+        for a in agents
+    ]
+
+
+@router.get("/tools", response_model=List[AgentToolInfo])
+def list_available_tools(
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """List all tools available in the Tool Registry."""
+    from api.ai.tools.registry import ToolRegistry
+    tools = ToolRegistry.list_tools()
+    return [
+        AgentToolInfo(
+            name=t.name,
+            description=t.description,
+            parameters_schema=t.parameters_schema,
+        )
+        for t in tools
+    ]
+
+
+@router.get("/sessions/{session_id}/memory")
+def get_session_memory(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+    limit: int = Query(20, ge=1, le=100),
+) -> Any:
+    """Retrieve memory items for a specific agent session."""
+    session = agent_session_repo.get_by_id_and_org(
+        db=db, id=session_id, organization_id=membership.organization_id
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from api.services.memory_manager import MemoryManager
+    memory_items = MemoryManager.read_memory(
+        db=db,
+        agent_id=session.agent_id,
+        organization_id=session.organization_id,
+        session_id=session_id,
+        limit=limit,
+    )
+    return [
+        {
+            "id": str(m.id),
+            "memory_key": m.memory_key,
+            "memory_value": m.memory_value,
+            "memory_type": m.memory_type.value,
+            "importance": m.importance,
+            "access_count": m.access_count,
+        }
+        for m in memory_items
+    ]
+
+
+@router.post("/sessions/{session_id}/memory", status_code=status.HTTP_201_CREATED)
+def write_session_memory(
+    session_id: uuid.UUID,
+    key: str,
+    value: str,
+    importance: float = 0.5,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Write a memory item to a session."""
+    session = agent_session_repo.get_by_id_and_org(
+        db=db, id=session_id, organization_id=membership.organization_id
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from api.services.memory_manager import MemoryManager
+    memory = MemoryManager.write_memory(
+        db=db,
+        agent_id=session.agent_id,
+        organization_id=session.organization_id,
+        key=key,
+        value=value,
+        session_id=session_id,
+        importance=importance,
+    )
+    return {
+        "id": str(memory.id),
+        "memory_key": memory.memory_key,
+        "memory_value": memory.memory_value,
+        "memory_type": memory.memory_type.value,
+        "importance": memory.importance,
+    }
+
+
+class MarketingAgentExecuteRequest(BaseModel):
+    agent_id: str
+    user_input: str
+    session_id: Optional[uuid.UUID] = None
+    conversation_history: Optional[List[Dict[str, str]]] = None
+
+
+class MarketingAgentStreamRequest(BaseModel):
+    agent_id: str
+    user_input: str
+    session_id: Optional[uuid.UUID] = None
+    conversation_history: Optional[List[Dict[str, str]]] = None
+
+
+@router.post("/execute", response_model=Dict[str, Any])
+def execute_agent(
+    request: MarketingAgentExecuteRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Execute any registered AI agent dynamically based on its configuration."""
+    from api.services.marketing_agent_service import MarketingAgentService
+    try:
+        result = MarketingAgentService.execute_agent(
+            db=db,
+            organization_id=membership.organization_id,
+            user_id=membership.user_id,
+            agent_id=request.agent_id,
+            user_input=request.user_input,
+            session_id=request.session_id,
+            conversation_history=request.conversation_history
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/generate")
+def generate_agent_response(
+    request: MarketingAgentExecuteRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Alias for /execute to keep simple generative client compatibilities."""
+    from api.services.marketing_agent_service import MarketingAgentService
+    try:
+        return MarketingAgentService.execute_agent(
+            db=db,
+            organization_id=membership.organization_id,
+            user_id=membership.user_id,
+            agent_id=request.agent_id,
+            user_input=request.user_input,
+            session_id=request.session_id,
+            conversation_history=request.conversation_history
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/stream")
+def stream_agent(
+    request: MarketingAgentStreamRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Stream execution logs and tokens for any registered AI agent."""
+    from api.services.marketing_agent_service import MarketingAgentService
+    from fastapi.responses import StreamingResponse
+    try:
+        generator = MarketingAgentService.stream_agent(
+            db=db,
+            organization_id=membership.organization_id,
+            user_id=membership.user_id,
+            agent_id=request.agent_id,
+            user_input=request.user_input,
+            session_id=request.session_id,
+            conversation_history=request.conversation_history
+        )
+        return StreamingResponse(generator, media_type="text/event-stream")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/history")
+def get_global_history(
+    session_id: Optional[uuid.UUID] = None,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Retrieve history elements across session run instances."""
+    if session_id:
+        return get_session_memory(session_id=session_id, db=db, membership=membership)
+    return []
+
+
+@router.get("/runs")
+def get_runs_metrics(
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Get list of active run executions organization-wide."""
+    from api.models.agent import AgentRun
+    runs = db.query(AgentRun).filter(AgentRun.organization_id == membership.organization_id).limit(50).all()
+    return [
+        {
+            "id": str(r.id),
+            "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+            "tokens_used": r.tokens_used,
+            "cost": r.cost,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        }
+        for r in runs
+    ]
+
+
+@router.get("/metrics")
+def get_cost_metrics(
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Retrieve cost aggregated statistics."""
+    from api.models.agent import AgentRun
+    from sqlalchemy import func
+    stats = db.query(
+        func.sum(func.coalesce(AgentRun.cost, 0.0)).label("total_cost"),
+        func.sum(func.coalesce(AgentRun.tokens_used, 0)).label("total_tokens"),
+        func.count(AgentRun.id).label("total_runs")
+    ).filter(AgentRun.organization_id == membership.organization_id).first()
+    return {
+        "total_cost": stats.total_cost or 0.0,
+        "total_tokens": stats.total_tokens or 0,
+        "total_runs": stats.total_runs or 0
+    }
+

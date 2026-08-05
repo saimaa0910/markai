@@ -15,6 +15,12 @@ class AIProvider(Base):
     priority: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     base_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     api_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    
+    # Provider default parameters
+    default_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    temperature: Mapped[Optional[float]] = mapped_column(Numeric(4, 2), default=0.70, nullable=True)
+    max_tokens: Mapped[Optional[int]] = mapped_column(Integer, default=2048, nullable=True)
+    streaming: Mapped[Optional[bool]] = mapped_column(Boolean, default=True, nullable=True)
 
     # Relationships
     models: Mapped[List["AIModel"]] = relationship(
@@ -67,6 +73,11 @@ class AIProviderKey(Base):
     organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
     )
 

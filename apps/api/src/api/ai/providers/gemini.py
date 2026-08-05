@@ -50,18 +50,7 @@ class GeminiProvider(BaseLLMProvider):
         **kwargs,
     ) -> Dict[str, Any]:
         api_key = self.api_key or os.getenv("GEMINI_API_KEY")
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            combined = " ".join(m.get("content", "") for m in messages)
-            return {
-                "content": f"Gemini Router ({model}) simulated response. Context: {combined}",
-                "prompt_tokens": 10,
-                "completion_tokens": 15,
-                "latency_ms": 10,
-                "provider": "google",
-                "model": model,
-            }
-        elif not api_key:
+        if not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         payload = self._prepare_payload(messages, temperature)
@@ -128,10 +117,7 @@ class GeminiProvider(BaseLLMProvider):
 
     def embeddings(self, text: str, model: str) -> List[float]:
         api_key = self.api_key or os.getenv("GEMINI_API_KEY")
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return [0.02] * 1536
-        elif not api_key:
+        if not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         response = self.client.post(
@@ -164,17 +150,7 @@ class GeminiProvider(BaseLLMProvider):
         payload = self._prepare_payload(messages, 0.2)
         payload["generationConfig"]["responseMimeType"] = "application/json"
         
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return {
-                "content": "{}",
-                "prompt_tokens": 10,
-                "completion_tokens": 10,
-                "latency_ms": 10,
-                "provider": "google",
-                "model": model,
-            }
-        elif not api_key:
+        if not api_key:
             raise RuntimeError("Gemini API key is not configured.")
 
         response = self.client.post(
@@ -198,16 +174,5 @@ class GeminiProvider(BaseLLMProvider):
         }
 
     def health(self) -> bool:
-        from api.core.config import settings
-        if settings.ENVIRONMENT != "production":
-            return True
-        if not self.api_key:
-            return False
-        try:
-            self.chat(
-                messages=[{"role": "user", "content": "ping"}],
-                model="gemini-1.5-flash",
-            )
-            return True
-        except Exception:
-            return False
+        api_key = self.api_key or os.getenv("GEMINI_API_KEY")
+        return bool(api_key and len(api_key.strip()) > 0)

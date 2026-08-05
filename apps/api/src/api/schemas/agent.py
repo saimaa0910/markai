@@ -135,3 +135,61 @@ class AgentLogResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprint 7.1 — Runtime API Schemas
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AgentChatRequest(BaseModel):
+    """Single-turn chat: creates a session and executes a run in one call."""
+    user_input: str
+    session_title: Optional[str] = "Chat Session"
+    run_reflection: Optional[bool] = True
+    run_evaluation: Optional[bool] = True
+
+
+class AgentStreamRequest(BaseModel):
+    """Request body for the SSE streaming endpoint."""
+    user_input: str
+    session_id: Optional[uuid.UUID] = None
+    session_title: Optional[str] = "Stream Session"
+    run_reflection: Optional[bool] = True
+    run_evaluation: Optional[bool] = True
+    conversation_history: Optional[List[Dict[str, str]]] = Field(default_factory=list)
+
+
+class AgentEvaluationResponse(BaseModel):
+    """Response schema for persisted AgentEvaluation records."""
+    id: uuid.UUID
+    run_id: uuid.UUID
+    organization_id: uuid.UUID
+    accuracy_score: Optional[float] = None
+    cost_score: Optional[float] = None
+    latency_score: Optional[float] = None
+    reasoning_score: Optional[float] = None
+    tool_usage_score: Optional[float] = None
+    knowledge_usage_score: Optional[float] = None
+    brand_alignment_score: Optional[float] = None
+    safety_score: Optional[float] = None
+    hallucination_score: Optional[float] = None
+    grammar_score: Optional[float] = None
+    tone_score: Optional[float] = None
+    completeness_score: Optional[float] = None
+    overall_score: Optional[float] = None
+    confidence: Optional[float] = None
+    critique: Optional[str] = None
+    suggested_edits: Optional[str] = None
+    is_satisfactory: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class AgentToolInfo(BaseModel):
+    """Descriptor for a registered tool."""
+    name: str
+    description: str
+    category: Optional[str] = None
+    parameters_schema: Optional[Dict[str, Any]] = None
+

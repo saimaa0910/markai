@@ -17,7 +17,8 @@
     "paths": {
       "@eaimos/types/*": ["packages/types/src/*"],
       "@eaimos/shared/*": ["packages/shared/src/*"],
-      "@eaimos/ui/*": ["packages/ui/src/*"]
+      "@eaimos/ui/*": ["packages/ui/src/*"],
+      "@/*": ["apps/web/src/*"]
     }
   },
   "exclude": ["node_modules"]

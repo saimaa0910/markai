@@ -12,6 +12,9 @@ export const PROVIDER_META: Record<string, { label: string; logoUrl?: string; de
   anthropic: { label: 'Anthropic Claude', description: 'Highly precise reasoning, long context window.' },
   google: { label: 'Google Gemini', description: 'Multimodal processing and enormous context sizes.' },
   openrouter: { label: 'OpenRouter', description: 'Unified access gateway to hundreds of open-source LLMs.' },
+  deepseek: { label: 'DeepSeek', description: 'Powerful intelligence and cheap reasoning models.' },
+  mistral: { label: 'Mistral AI', description: 'State of the art open weights models from France.' },
+  ollama: { label: 'Local Ollama', description: 'Secure local execution of large language models.' },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

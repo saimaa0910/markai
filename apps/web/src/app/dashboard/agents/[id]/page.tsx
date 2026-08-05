@@ -50,7 +50,7 @@ export default function AgentDetailsRoute({ params }: RouteProps) {
       setDescription(agent.description || '');
       setAgentType(agent.agent_type);
       setPreferredModel(agent.preferred_model || '');
-      setTemperature(agent.temperature);
+      setTemperature(agent.temperature ?? 0.7);
       setSystemPrompt(agent.system_prompt || '');
       setMemoryEnabled(agent.memory_enabled);
       setMaxMemoryItems(agent.max_memory_items);
