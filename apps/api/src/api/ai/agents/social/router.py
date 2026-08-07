@@ -96,6 +96,32 @@ def _resolve_social_session(db: Session, org_id: uuid.UUID, user_id: uuid.UUID) 
     return session
 
 
+def _resolve_social_session_by_id(db: Session, org_id: uuid.UUID, user_id: uuid.UUID, agent_id: Optional[uuid.UUID] = None) -> AgentSession:
+    if not agent_id:
+        return _resolve_social_session(db, org_id, user_id)
+        
+    session = db.scalars(
+        select(AgentSession).where(
+            AgentSession.agent_id == agent_id,
+            AgentSession.organization_id == org_id,
+            AgentSession.is_active == True,
+        )
+    ).first()
+    
+    if not session:
+        session = AgentSession(
+            agent_id=agent_id,
+            user_id=user_id,
+            organization_id=org_id,
+            title="Social Studio Session",
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        
+    return session
+
+
 # ─── POST /generate ───────────────────────────────────────────────────────────
 
 @router.post("/generate", status_code=status.HTTP_200_OK)
@@ -106,7 +132,7 @@ def generate_social_post(
 ) -> Any:
     """Generate a complete social media post synchronously."""
     validate_social_input(payload.prompt, payload.platform, payload.keywords)
-    session = _resolve_social_session(db, membership.organization_id, membership.user_id)
+    session = _resolve_social_session_by_id(db, membership.organization_id, membership.user_id, payload.agent_id)
 
     result = SocialAgentService.generate_social(
         db=db,
@@ -151,7 +177,7 @@ def stream_social_post(
         if not session:
             raise HTTPException(status_code=404, detail="Social session not found.")
     else:
-        session = _resolve_social_session(db, membership.organization_id, membership.user_id)
+        session = _resolve_social_session_by_id(db, membership.organization_id, membership.user_id, payload.agent_id)
 
     def event_generator():
         yield from SocialAgentService.stream_social(

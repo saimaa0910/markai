@@ -175,7 +175,7 @@ def test_sprint_10_integrations_repository(db_session):
         integ_repo = IntegrationRepository(organization_id=org.id)
         integ = await integ_repo.create(db_session, {
             "name": "HubSpot Sync",
-            "provider": f"hubspot_{uuid.uuid4().hex[:4]}",
+            "provider": "HUBSPOT",
         })
         assert integ.id is not None
 

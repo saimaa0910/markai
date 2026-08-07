@@ -15,12 +15,11 @@ import { motion } from 'framer-motion';
 
 export function TestingPage() {
   const { prompts } = usePrompts();
-  const { test, isTesting, testResult } = usePromptTesting();
+  const { test, isTesting, testResult, streamOutput } = usePromptTesting();
   const store = usePromptsStore();
   const { providers, models } = usePromptProviders(store.testProvider);
 
   const [activePromptName, setActivePromptName] = React.useState<string>('');
-  const [typedOutput, setTypedOutput] = React.useState('');
 
   const providerSelectOptions = React.useMemo(() => {
     return providers.map((p: any) => ({
@@ -72,22 +71,7 @@ export function TestingPage() {
     }
   }, [prompts, activePromptName]);
 
-  // Simulation typing effect on test result load
-  React.useEffect(() => {
-    if (testResult?.output) {
-      setTypedOutput('');
-      let index = 0;
-      const text = testResult.output;
-      const timer = setInterval(() => {
-        setTypedOutput((prev) => prev + text.charAt(index));
-        index++;
-        if (index >= text.length) {
-          clearInterval(timer);
-        }
-      }, 15);
-      return () => clearInterval(timer);
-    }
-  }, [testResult]);
+
 
   const handleRun = async () => {
     if (!activePrompt) return;
@@ -106,7 +90,7 @@ export function TestingPage() {
         content: activePrompt.content,
         variables: store.testVariables,
       });
-      toast.success('Simulation Complete', 'Testing completion output generated.');
+      toast.success('Test Complete', 'Testing completion output generated.');
     } catch (err) {
       toast.error('Testing failed', 'Could not run sandbox completions.');
     }
@@ -254,13 +238,13 @@ export function TestingPage() {
             {/* Output view area */}
             <div className="flex-1 rounded-xl border border-white/5 bg-black/40 p-4 font-mono text-xs text-neutral-300 leading-relaxed min-h-[250px] whitespace-pre-wrap max-h-[400px] overflow-y-auto">
               {isTesting ? (
-                <div className="flex flex-col gap-2.5 animate-pulse py-8">
-                  <div className="h-4 bg-neutral-900 rounded w-2/3" />
-                  <div className="h-4 bg-neutral-900 rounded w-1/2" />
-                  <div className="h-4 bg-neutral-900 rounded w-3/4" />
-                </div>
-              ) : typedOutput ? (
-                typedOutput
+                streamOutput || (
+                  <div className="flex items-center gap-2 text-neutral-500">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-violet-400" /> Connecting to gateway...
+                  </div>
+                )
+              ) : testResult?.output ? (
+                testResult.output
               ) : (
                 <span className="text-neutral-600 select-none">
                   Console idle. Map settings parameters and click "Run Test" to parse output.

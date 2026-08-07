@@ -354,6 +354,7 @@ class ProviderResponse(BaseModel):
     name: str
     is_active: bool
     priority: int
+    config: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
 
     class Config:
@@ -370,6 +371,7 @@ class ProviderUpdate(BaseModel):
     name: Optional[str] = None
     is_active: Optional[bool] = None
     priority: Optional[int] = None
+    config: Optional[Dict[str, Any]] = None
 
 
 class ProviderHealthResponse(BaseModel):
@@ -396,6 +398,7 @@ class CompareRequest(BaseModel):
     prompt: str
     model_names: List[str]
     system_prompt: Optional[str] = None
+    category: Optional[str] = "text"
 
 
 class CompareResponseElement(BaseModel):
@@ -420,12 +423,32 @@ class RouterSettingsResponse(BaseModel):
     routing_mode: str
     fallback_provider: Optional[str] = None
     is_active: bool
+    default_text_provider: Optional[str] = None
+    default_image_provider: Optional[str] = None
+    default_video_provider: Optional[str] = None
+    default_audio_provider: Optional[str] = None
+    default_speech_provider: Optional[str] = None
+    default_embeddings_provider: Optional[str] = None
+    default_vision_provider: Optional[str] = None
+    default_ocr_provider: Optional[str] = None
+    default_moderation_provider: Optional[str] = None
+    default_multimodal_provider: Optional[str] = None
 
 
 class RouterSettingsUpdate(BaseModel):
     routing_mode: Optional[str] = None
     fallback_provider: Optional[str] = None
     is_active: Optional[bool] = None
+    default_text_provider: Optional[str] = None
+    default_image_provider: Optional[str] = None
+    default_video_provider: Optional[str] = None
+    default_audio_provider: Optional[str] = None
+    default_speech_provider: Optional[str] = None
+    default_embeddings_provider: Optional[str] = None
+    default_vision_provider: Optional[str] = None
+    default_ocr_provider: Optional[str] = None
+    default_moderation_provider: Optional[str] = None
+    default_multimodal_provider: Optional[str] = None
 
 # --- PROMPT PLATFORM EXTENDED SCHEMAS ---
 

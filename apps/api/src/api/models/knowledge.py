@@ -7,42 +7,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
 
 
-class SafeVector(TypeDecorator):
-    impl = Text
+from pgvector.sqlalchemy import Vector
+
+
+class SafeVector(Vector):
+    """
+    Standardized Vector field mapped directly to pgvector.sqlalchemy.Vector.
+    """
     cache_ok = True
 
-    def __init__(self, dimensions: int) -> None:
-        super().__init__()
-        self.dimensions = dimensions
-
-    def load_dialect_impl(self, dialect):
-        if dialect.name == "postgresql":
-            try:
-                from pgvector.sqlalchemy import Vector
-                return dialect.type_descriptor(Vector(self.dimensions))
-            except ImportError:
-                return dialect.type_descriptor(Text)
-        else:
-            return dialect.type_descriptor(Text)
-
-    def process_bind_param(self, value, dialect):
-        if value is None:
-            return None
-        if dialect.name == "postgresql":
-            return value
-        return json.dumps(value)
-
-    def process_result_value(self, value, dialect):
-        if value is None:
-            return None
-        if dialect.name == "postgresql":
-            return value
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except Exception:
-                return value
-        return value
+    def __init__(self, dim: Optional[int] = None, dimensions: Optional[int] = None, *args, **kwargs) -> None:
+        actual_dim = dim if dim is not None else dimensions
+        super().__init__(dim=actual_dim, *args, **kwargs)
 
 
 class KnowledgeCollection(Base):

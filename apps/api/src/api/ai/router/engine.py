@@ -153,9 +153,24 @@ class ModelRouter:
                 others = [c for c in filtered if c.id not in rule_model_ids]
                 filtered = matched + others
             else:
-                groq_models = [c for c in filtered if c.provider.lower() == "groq"]
-                other_models = [c for c in filtered if c.provider.lower() != "groq"]
-                filtered = groq_models + other_models
+                from api.models.membership import OrganizationSettings
+                default_prov_key = f"default_{request_type}_provider"
+                if request_type in ("chat", "content"):
+                    default_prov_key = "default_text_provider"
+                elif request_type == "json":
+                    default_prov_key = "default_text_provider"
+                
+                default_row = db.query(OrganizationSettings).filter(
+                    OrganizationSettings.organization_id == organization_id,
+                    OrganizationSettings.namespace == "ai",
+                    OrganizationSettings.key == default_prov_key
+                ).first() if organization_id else None
+                
+                default_prov_name = default_row.value.lower() if default_row and default_row.value else "groq"
+                
+                matched_models = [c for c in filtered if c.provider.lower() == default_prov_name]
+                other_models = [c for c in filtered if c.provider.lower() != default_prov_name]
+                filtered = matched_models + other_models
 
         # 6. Apply load balancing strategy
         lb_mode = load_balancer or "priority"

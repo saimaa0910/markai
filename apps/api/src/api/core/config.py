@@ -3,19 +3,35 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import List
 
-# Load root .env file manually into os.environ if it exists
+# Load appropriate .env file manually into os.environ if it exists
 try:
+    env_type = os.environ.get("ENVIRONMENT")
+    if env_type == "test":
+        files_to_try = [".env.test", ".env"]
+    elif env_type == "production":
+        files_to_try = [".env.production", ".env"]
+    else:
+        files_to_try = [".env.local", ".env"]
+
     dir_to_check = os.path.dirname(os.path.abspath(__file__))
     env_path = None
-    for _ in range(6):
-        possible_path = os.path.join(dir_to_check, ".env")
-        if os.path.exists(possible_path):
-            env_path = possible_path
+    
+    # Search upwards for the first matching env file
+    for filename in files_to_try:
+        curr_dir = dir_to_check
+        found = False
+        for _ in range(6):
+            possible_path = os.path.join(curr_dir, filename)
+            if os.path.exists(possible_path):
+                env_path = possible_path
+                found = True
+                break
+            parent = os.path.dirname(curr_dir)
+            if parent == curr_dir:
+                break
+            curr_dir = parent
+        if found:
             break
-        parent = os.path.dirname(dir_to_check)
-        if parent == dir_to_check:
-            break
-        dir_to_check = parent
 
     if env_path:
         with open(env_path, "r", encoding="utf-8") as f:
@@ -59,7 +75,6 @@ class Settings(BaseSettings):
 
     # JWT Secrets
     SECRET_KEY: str = Field(
-        default="SUPER_SECRET_JWT_KEY_MIN_32_CHARS_LONG_PLEASE_REPLACE_IN_PRODUCTION",
         validation_alias="SECRET_KEY",
     )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
@@ -72,13 +87,15 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET_NAME: str = "eaimos-storage"
 
-    # Email configuration (SMTP)
-    SMTP_HOST: str = Field(default="smtp.gmail.com", validation_alias="SMTP_HOST")
+    # Email configuration — Resend (primary) + SMTP (dev fallback)
+    RESEND_API_KEY: str = Field(default="", validation_alias="RESEND_API_KEY")
+    EMAIL_FROM: str = Field(default="noreply@eaimos.ai", validation_alias="EMAIL_FROM")
+    EMAIL_FROM_NAME: str = Field(default="EAIMOS Platform", validation_alias="EMAIL_FROM_NAME")
+    # Legacy SMTP fields kept for dev fallback (not used when RESEND_API_KEY is set)
+    SMTP_HOST: str = Field(default="", validation_alias="SMTP_HOST")
     SMTP_PORT: int = Field(default=587, validation_alias="SMTP_PORT")
     SMTP_USER: str = Field(default="", validation_alias="SMTP_USER")
     SMTP_PASSWORD: str = Field(default="", validation_alias="SMTP_PASSWORD")
-    EMAIL_FROM: str = Field(default="noreply@eaimos.ai", validation_alias="EMAIL_FROM")
-    EMAIL_FROM_NAME: str = Field(default="EAIMOS Platform", validation_alias="EMAIL_FROM_NAME")
     SMTP_TIMEOUT: int = Field(default=30, validation_alias="SMTP_TIMEOUT")
     ALERT_EMAIL_RECIPIENT: str = Field(default="alerts@eaimos.ai", validation_alias="ALERT_EMAIL_RECIPIENT")
 

@@ -2,19 +2,18 @@ from api.main import app
 from fastapi.testclient import TestClient
 import json
 
-# Setup a temporary SQLite testing DB and override get_db dependency like tests do
-from sqlalchemy import create_engine, event
+# Setup a temporary testing DB and override get_db dependency like tests do
+import os
+os.environ["ENVIRONMENT"] = "test"
+os.environ["DATABASE_URL"] = "postgresql://postgres:postgres@localhost:5432/eaimos_test"
+
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from api.database.session import get_db
 from api.models import Base
-import datetime
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./_temp_test_db.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-
-@event.listens_for(engine, "connect")
-def register_sqlite_now(dbapi_connection, connection_record):
-    dbapi_connection.create_function("now", 0, lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
+SQLALCHEMY_DATABASE_URL = os.environ["DATABASE_URL"]
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

@@ -3,6 +3,7 @@ from api.models.user import User
 from api.models.organization import Organization
 from api.models.membership import UserOrganization, OrganizationInvitation, OrganizationSettings
 from api.models.auth import Role, Permission, RefreshToken, AuditLog
+from api.models.email_verification import EmailVerificationToken
 from api.models.iam import (
     UserSession, PasswordResetToken, APIKey, OAuthProvider, OAuthAccount, SecurityPolicy,
     role_permissions_junction, UserRole
@@ -110,6 +111,7 @@ __all__ = [
     # Foundation
     "Base", "User", "Organization", "UserOrganization", "UserRole", "OrganizationInvitation", "OrganizationSettings",
     "Role", "Permission", "RefreshToken", "AuditLog",
+    "EmailVerificationToken",
     # CRM
     "Company", "Contact", "Lead", "LeadStatus", "Activity", "ActivityType",
     "Pipeline", "DealStage", "Deal", "EmailSubscription", "ContactCustomField", "ContactCustomValue",

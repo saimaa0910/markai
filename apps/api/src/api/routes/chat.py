@@ -844,6 +844,23 @@ async def upload_voice_and_transcribe(
     db.refresh(file_asset)
 
     groq_key = os.getenv("GROQ_API_KEY")
+    if not groq_key:
+        from api.models.ai_platform import AIProvider, AIProviderKey
+        from api.core.encryption import decrypt_key
+        from sqlalchemy import func
+        prov = db.query(AIProvider).filter(func.lower(AIProvider.name) == "groq").first()
+        if prov:
+            key_record = db.query(AIProviderKey).filter(
+                AIProviderKey.provider_id == prov.id,
+                AIProviderKey.organization_id == membership.organization_id,
+                AIProviderKey.is_active == True
+            ).first()
+            if key_record:
+                try:
+                    groq_key = decrypt_key(key_record.api_key)
+                except Exception:
+                    pass
+
     transcription = ""
     if groq_key:
         try:
@@ -864,7 +881,10 @@ async def upload_voice_and_transcribe(
         except Exception as e:
             transcription = f"[Groq Whisper Transcription Failed: {str(e)}]"
     else:
-        transcription = "Simulated speech transcription: Hello, Viptant. This is a voice-submitted message."
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Groq API key not configured. Unable to perform voice transcription."
+        )
 
     if not transcription.strip():
         transcription = "[Inaudible voice message]"

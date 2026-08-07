@@ -11,6 +11,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import useSocialStudio from '../hooks/useSocialStudio';
 import { useSocialStore } from '../store/socialStore';
+import { useAgents } from '../../agents/hooks';
 import {
   PLATFORM_ICONS, PLATFORM_COLORS, CONTENT_TYPE_ICONS,
   formatPlatformName, formatContentTypeName, formatScore,
@@ -67,6 +68,25 @@ export const SocialStudio: React.FC = () => {
   const { data: queueData } = useQueue();
   const { data: analyticsData } = useAnalytics();
 
+  // Custom Social Agents
+  const { agents } = useAgents(1, 100);
+  const socialAgents = agents.filter(a => a.agent_type === 'SOCIAL');
+  const [selectedAgentId, setSelectedAgentId] = useState('');
+
+  useEffect(() => {
+    if (socialAgents.length > 0 && !selectedAgentId) {
+      setSelectedAgentId(socialAgents[0].id);
+    }
+  }, [socialAgents, selectedAgentId]);
+
+  const handleAgentChange = (agentId: string) => {
+    setSelectedAgentId(agentId);
+    const agent = socialAgents.find(a => a.id === agentId);
+    if (agent?.temperature !== undefined) {
+      store.setTemperature(agent.temperature);
+    }
+  };
+
   // Chat / prompt state
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
@@ -114,8 +134,9 @@ export const SocialStudio: React.FC = () => {
       temperature: store.temperature,
       run_reflection: true,
       run_evaluation: true,
+      agent_id: selectedAgentId || undefined,
     });
-  }, [store, isStreaming, startStream]);
+  }, [store, isStreaming, startStream, selectedAgentId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -190,6 +211,38 @@ export const SocialStudio: React.FC = () => {
             <div style={{ fontSize: '11px', color: '#64748b' }}>Enterprise Social Agent</div>
           </div>
         </div>
+
+        {/* Agent Selector */}
+        <Section title="Social Agent">
+          <select
+            id="social-agent-select"
+            value={selectedAgentId}
+            onChange={(e) => handleAgentChange(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="">-- Select Agent --</option>
+            {socialAgents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                🤖 {agent.name}
+              </option>
+            ))}
+          </select>
+          {selectedAgentId && (
+            <div style={{
+              background: 'rgba(255,255,255,0.02)',
+              border: '1px solid rgba(255,255,255,0.06)',
+              borderRadius: '8px',
+              padding: '10px',
+              marginTop: '6px',
+              fontSize: '11px',
+              color: '#94a3b8',
+              lineHeight: '1.4',
+            }}>
+              <strong style={{ color: platformColor, display: 'block', marginBottom: '2px' }}>Agent Info:</strong>
+              {socialAgents.find((a) => a.id === selectedAgentId)?.description || 'No description provided.'}
+            </div>
+          )}
+        </Section>
 
         {/* Platform Selector */}
         <Section title="Platform">

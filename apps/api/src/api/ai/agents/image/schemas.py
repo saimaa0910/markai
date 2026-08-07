@@ -14,6 +14,7 @@ class ImageGenerateRequest(BaseModel):
     seed: Optional[int] = Field(None, description="PRNG Seed configuration.")
     steps: Optional[int] = Field(None, description="Iteration steps count.")
     cfg_scale: Optional[float] = Field(None, description="CFG scale prompt alignment strength.")
+    agent_id: Optional[uuid.UUID] = Field(None, description="Selected agent definition ID.")
 
 
 class ImageEditRequest(BaseModel):

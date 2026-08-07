@@ -32,6 +32,7 @@ import type {
   SocialStreamEventType,
 } from '../types';
 import { apiClient } from '../../../services/api-client';
+import { useAuthStore } from '@/store/auth';
 
 const QUERY_KEYS = {
   history: (platform?: string) => ['social', 'history', platform],
@@ -44,6 +45,7 @@ const QUERY_KEYS = {
 
 export const useSocialStudio = () => {
   const queryClient = useQueryClient();
+  const { accessToken, activeOrg } = useAuthStore();
 
   // ─── Queries ────────────────────────────────────────────────────────────────
 
@@ -143,13 +145,15 @@ export const useSocialStudio = () => {
       setIsStreaming(true);
 
       try {
+        const apiBase = apiClient.defaults.baseURL || '/api/v1';
         const response = await fetch(
-          `${apiClient.defaults.baseURL}/agents/social/stream`,
+          `${apiBase}/agents/social/stream`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...(apiClient.defaults.headers.common as Record<string, string>),
+              'Authorization': `Bearer ${accessToken || ''}`,
+              'X-Organization-ID': activeOrg?.id || '',
             },
             body: JSON.stringify(payload),
             signal: abortRef.current.signal,

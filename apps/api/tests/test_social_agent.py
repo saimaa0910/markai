@@ -107,13 +107,13 @@ class TestHashtagEngine:
             industry="marketing",
             brand_name="Viptant",
             campaign_name="Launch V2",
-            max_count=10
+            max_count=15
         )
 
         assert "hashtags" in result
         assert "hashtag_string" in result
         assert result["total_count"] > 0
-        assert len(result["hashtags"]) <= 10  # Default limit
+        assert len(result["hashtags"]) <= 15  # Default limit
         assert any(h["tag"] == "#Viptant" for h in result["hashtags"])
         assert any(h["category"] == "trending" for h in result["hashtags"])
 

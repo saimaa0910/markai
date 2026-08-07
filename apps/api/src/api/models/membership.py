@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, TYPE_CHECKING
 from sqlalchemy import (
-    Boolean, DateTime, Enum, ForeignKey, Index, String, Text,
+    Boolean, DateTime, Enum, ForeignKey, Index, String, Text, Integer,
     UniqueConstraint, CheckConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -39,6 +39,13 @@ class UserRole(str, enum.Enum):
     ADMIN = "ADMIN"    # Manage members, settings, integrations
     MEMBER = "MEMBER"  # Standard access
     GUEST = "GUEST"    # Read-only limited access
+
+
+class MembershipStatus(str, enum.Enum):
+    """Active state of a membership record."""
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    PENDING = "pending"  # invited but not yet confirmed
 
 
 class UserOrganization(Base):
@@ -89,7 +96,7 @@ class UserOrganization(Base):
         server_default="MEMBER",
     )
 
-    # ── Membership Metadata ───────────────────────────────────────────────────
+    # ── Membership Metadata ──────────────────────────────────────────────
     is_primary: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="FALSE",
         comment="TRUE = user's primary/default organization",
@@ -99,6 +106,14 @@ class UserOrganization(Base):
         default=lambda: datetime.now(timezone.utc),
         server_default="CURRENT_TIMESTAMP",
         comment="Timestamp when membership became active",
+    )
+    last_active_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Last time user was active in this organization",
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default="active",
+        comment="active | suspended | pending",
     )
     invited_by: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
@@ -183,7 +198,7 @@ class OrganizationInvitation(Base):
         Text, nullable=True, comment="Optional personal invite message"
     )
 
-    # ── State ─────────────────────────────────────────────────────────────────
+    # ── State ──────────────────────────────────────────────────────────────
     is_accepted: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="FALSE"
     )
@@ -196,6 +211,23 @@ class OrganizationInvitation(Base):
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
         comment="Invitation expires at this time (default: 72h from creation)",
+    )
+    # ── Resend & Revocation Tracking ───────────────────────────────────────
+    resent_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+        comment="Number of times the invitation email was resent",
+    )
+    last_resent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who revoked this invitation",
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────

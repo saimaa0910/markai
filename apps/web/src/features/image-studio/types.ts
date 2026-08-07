@@ -9,6 +9,7 @@ export interface ImageGenerateRequest {
   seed?: number;
   steps?: number;
   cfg_scale?: number;
+  agent_id?: string;
 }
 
 export interface ImageEditRequest {

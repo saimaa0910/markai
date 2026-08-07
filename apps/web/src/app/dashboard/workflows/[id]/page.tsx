@@ -3,7 +3,20 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { useWorkflowDetails, useWorkflows, useWorkflowExecution, useExecutionSteps } from '@/features/workflows/hooks';
-import { WorkflowFlowchart } from '@/features/workflows/components/WorkflowFlowchart';
+import dynamic from 'next/dynamic';
+
+const WorkflowFlowchart = dynamic(
+  () => import('@/features/workflows/components/WorkflowFlowchart').then((mod) => mod.WorkflowFlowchart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[500px] bg-neutral-900/50 rounded-xl border border-white/5 flex flex-col items-center justify-center gap-3">
+        <RefreshCw className="w-6 h-6 animate-spin text-violet-400" />
+        <span className="text-xs text-neutral-500 font-mono">Loading dynamic workflow canvas editor...</span>
+      </div>
+    ),
+  }
+);
 import { NodeInspector } from '@/features/workflows/components/canvas';
 import { useNodesState, useEdgesState, addEdge, MarkerType } from '@xyflow/react';
 import { Button } from '@/components/ui/button';

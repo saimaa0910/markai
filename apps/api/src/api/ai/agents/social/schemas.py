@@ -105,6 +105,7 @@ class SocialGenerateRequest(BaseModel):
     # Pipeline flags
     run_reflection: bool = True
     run_evaluation: bool = True
+    agent_id: Optional[uuid.UUID] = Field(None, description="Selected agent definition ID.")
 
 
 class SocialStreamRequest(SocialGenerateRequest):

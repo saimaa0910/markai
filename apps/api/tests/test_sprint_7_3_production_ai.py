@@ -105,6 +105,12 @@ def test_fallback_to_groq_when_no_rules_exist(db_session: Session):
     """
     Verify that ModelRouter prioritizes Groq models when no active routing rule matches.
     """
+    from api.models.ai_registry import AIRoutingRule
+    from api.models.router import AIRoutingPolicy
+    db_session.query(AIRoutingRule).delete()
+    db_session.query(AIRoutingPolicy).delete()
+    db_session.commit()
+
     router = ModelRouter()
     sync_providers_and_models(db_session)
 

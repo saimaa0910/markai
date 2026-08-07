@@ -72,6 +72,32 @@ def _resolve_image_session(db: Session, org_id: uuid.UUID, user_id: uuid.UUID) -
     return session
 
 
+def _resolve_image_session_by_id(db: Session, org_id: uuid.UUID, user_id: uuid.UUID, agent_id: Optional[uuid.UUID] = None) -> AgentSession:
+    if not agent_id:
+        return _resolve_image_session(db, org_id, user_id)
+        
+    session = db.scalars(
+        select(AgentSession).where(
+            AgentSession.agent_id == agent_id,
+            AgentSession.organization_id == org_id,
+            AgentSession.is_active == True,
+        )
+    ).first()
+    
+    if not session:
+        session = AgentSession(
+            agent_id=agent_id,
+            user_id=user_id,
+            organization_id=org_id,
+            title="Image Studio Creative Session",
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        
+    return session
+
+
 @router.post("/generate", response_model=ImageResponse, status_code=status.HTTP_200_OK)
 def generate_image_sync(
     payload: ImageGenerateRequest,
@@ -80,7 +106,7 @@ def generate_image_sync(
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
     """Synchronous or asynchronous visual layout asset compilation."""
-    session = _resolve_image_session(db, membership.organization_id, membership.user_id)
+    session = _resolve_image_session_by_id(db, membership.organization_id, membership.user_id, payload.agent_id)
 
     if background:
         # Create queued record
@@ -142,7 +168,7 @@ def generate_image_stream(
     membership: UserOrganization = Depends(active_member),
 ) -> StreamingResponse:
     """Streamed Server-Sent Events (SSE) layout timelines generator."""
-    session = _resolve_image_session(db, membership.organization_id, membership.user_id)
+    session = _resolve_image_session_by_id(db, membership.organization_id, membership.user_id, payload.agent_id)
     generator = ImageAgentService.generate_stream(
         db=db,
         session=session,
@@ -582,19 +608,39 @@ def get_providers(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    """Lists configuration and health state of image providers."""
+    """Lists configuration and health state of image providers dynamically from registry."""
+    import os
+    from api.models.ai_platform import AIProvider
+    from api.models.ai_registry import AIModelRegistry
+    
+    db_provs = db.query(AIProvider).all()
+    models = db.query(AIModelRegistry).all()
+    
+    from api.routes.ai import resolve_provider_capabilities
+    
     out = []
-    for i, name in enumerate(DEFAULT_PROVIDER_PRIORITY):
-        env_var = f"{name.upper()}_API_KEY"
-        is_configured = (name == "pollinations") or bool(os.getenv(env_var))
-        out.append(
-            ImageProviderResponse(
-                name=name,
-                label=name.capitalize(),
-                priority=i + 1,
-                configured=is_configured
+    for prov in db_provs:
+        prov_name = prov.name.lower()
+        caps = resolve_provider_capabilities(prov_name, models)
+        
+        if "Image Generation" in caps or prov_name in ("pollinations", "cloudflare", "replicate", "stability", "ideogram", "blackforestlabs", "fal"):
+            has_key = False
+            if prov_name == "pollinations":
+                has_key = True
+            elif prov.config and prov.config.get("api_key"):
+                has_key = True
+            else:
+                env_var = f"{prov.name.upper()}_API_KEY"
+                has_key = bool(os.getenv(env_var))
+                
+            out.append(
+                ImageProviderResponse(
+                    name=prov_name,
+                    label=prov.name.capitalize(),
+                    priority=prov.priority,
+                    configured=prov.is_active and has_key
+                )
             )
-        )
     return out
 
 
@@ -603,21 +649,18 @@ def get_models(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    """Lists supported layout generation models."""
+    """Lists supported layout generation models from the database registry."""
+    from api.models.ai_registry import AIModelRegistry
+    models_in_db = db.query(AIModelRegistry).filter(AIModelRegistry.supports_images == True).all()
+    
     ratios = list(ASPECT_RATIOS.keys())
     out = []
-    for m in SUPPORTED_MODELS:
-        provider = "pollinations"
-        if "dalle" in m:
-            provider = "openai"
-        elif "imagen" in m:
-            provider = "google"
-
+    for m in models_in_db:
         out.append(
             ImageModelResponse(
-                name=m,
-                label=m.upper().replace("-", " "),
-                provider=provider,
+                name=m.model_name,
+                label=m.model_name.upper().replace("-", " ").replace("@CF/", "").replace("STABILITY-AI/", ""),
+                provider=m.provider,
                 supported_ratios=ratios
             )
         )

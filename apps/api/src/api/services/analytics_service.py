@@ -91,10 +91,7 @@ class AnalyticsService:
         """Return daily aggregated token count and cost records."""
         start_date = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
         
-        if db.bind.dialect.name == "sqlite":
-            day_field = func.date(AITokenUsage.created_at).label("day")
-        else:
-            day_field = func.date_trunc("day", AITokenUsage.created_at).label("day")
+        day_field = func.date_trunc("day", AITokenUsage.created_at).label("day")
 
         stmt = (
             select(

@@ -3,6 +3,7 @@ import uuid
 import shutil
 import datetime
 from typing import List, Optional, Any, Dict
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Body, Response
 from fastapi.responses import StreamingResponse
 from api.services.storage_service import MinIOService
@@ -1603,7 +1604,110 @@ def search_autocomplete_suggestions(
     saved = db.query(KnowledgeSavedSearch).filter(
         KnowledgeSavedSearch.organization_id == membership.organization_id
     ).all()
-    saved_matches = [s.name for s in saved if q_lower in s.name.lower()][:5]
     suggestions.extend(saved_matches)
     
     return list(set(suggestions))
+
+
+class SaveAgentImageRequest(BaseModel):
+    image_url: str
+    title: Optional[str] = None
+
+
+@router.post("/save-agent-image", response_model=KnowledgeDocumentResponse)
+def save_agent_image(
+    req: SaveAgentImageRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    # 1. Check if the collection "Agents Workspace" exists. If not, create it.
+    collection = db.scalars(
+        select(KnowledgeCollection).where(
+            KnowledgeCollection.organization_id == membership.organization_id,
+            KnowledgeCollection.name == "Agents Workspace",
+            KnowledgeCollection.deleted_at.is_(None)
+        )
+    ).first()
+    
+    if not collection:
+        collection = KnowledgeCollection(
+            name="Agents Workspace",
+            description="Dedicated workspace for agent generated content and files.",
+            organization_id=membership.organization_id,
+            created_by=str(current_user.id),
+            updated_by=str(current_user.id),
+        )
+        db.add(collection)
+        db.flush()
+        
+    # 2. Check if the folder "Agents File Folder" exists in this collection. If not, create it.
+    folder = db.scalars(
+        select(KnowledgeFolder).where(
+            KnowledgeFolder.organization_id == membership.organization_id,
+            KnowledgeFolder.collection_id == collection.id,
+            KnowledgeFolder.name == "Agents File Folder",
+            KnowledgeFolder.deleted_at.is_(None)
+        )
+    ).first()
+    
+    if not folder:
+        folder = KnowledgeFolder(
+            name="Agents File Folder",
+            collection_id=collection.id,
+            organization_id=membership.organization_id,
+            created_by=str(current_user.id),
+            updated_by=str(current_user.id),
+        )
+        db.add(folder)
+        db.flush()
+        
+    # 3. Create the KnowledgeDocument
+    doc_id = uuid.uuid4()
+    title = req.title or f"Agent Image {datetime.date.today().isoformat()}"
+    
+    doc = KnowledgeDocument(
+        id=doc_id,
+        title=title,
+        file_type="PNG",
+        file_size=0,
+        storage_url=req.image_url,
+        organization_id=membership.organization_id,
+        collection_id=collection.id,
+        folder_id=folder.id,
+        status="completed",
+        progress=100.0,
+        owner_id=current_user.id,
+        current_version=1
+    )
+    
+    # Try to find a FileAsset matching this url to get actual file size
+    from api.models.file_asset import FileAsset
+    file_asset = db.scalars(
+        select(FileAsset).where(
+            FileAsset.organization_id == membership.organization_id,
+            FileAsset.storage_url == req.image_url
+        )
+    ).first()
+    if file_asset:
+        doc.file_size = file_asset.file_size
+        
+    db.add(doc)
+    db.flush()
+    
+    # 4. Create version history
+    ver = KnowledgeDocumentVersion(
+        document_id=doc_id,
+        version=1,
+        title=title,
+        file_type="PNG",
+        file_size=doc.file_size or 0,
+        storage_url=req.image_url,
+        change_summary="Saved from Image Studio",
+        content=f"Generated agent image. Prompt/Title: {title}",
+    )
+    db.add(ver)
+    db.commit()
+    db.refresh(doc)
+    
+    return doc

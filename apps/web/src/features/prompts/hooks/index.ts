@@ -4,6 +4,7 @@ import { useAuthStore } from '@/store/auth';
 import { PromptsAPI } from '../services/prompts';
 import { usePromptsStore } from '../store/prompts';
 import { Prompt, PromptVersion, PromptTestingResult } from '../types';
+import { toast } from '@/components/ui/toast';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook: usePrompts
@@ -103,54 +104,131 @@ import { apiClient } from '@/services/api-client';
 // Hook: usePromptTesting
 // ─────────────────────────────────────────────────────────────────────────────
 export function usePromptTesting() {
-  const testMutation = useMutation({
-    mutationFn: async ({
-      provider,
-      model,
-      content,
-      variables,
-      systemPrompt,
-    }: {
-      provider: string;
-      model: string;
-      content: string;
-      variables: Record<string, string>;
-      systemPrompt?: string;
-    }): Promise<PromptTestingResult> => {
-      // Sift prompt variables replacements
-      let rendered = content;
-      Object.entries(variables).forEach(([key, val]) => {
-        rendered = rendered.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), val);
+  const { activeOrg, accessToken } = useAuthStore();
+  const [isTesting, setIsTesting] = React.useState(false);
+  const [testResult, setTestResult] = React.useState<PromptTestingResult | null>(null);
+  const [streamOutput, setStreamOutput] = React.useState('');
+
+  const test = React.useCallback(async ({
+    provider,
+    model,
+    content,
+    variables,
+    systemPrompt,
+  }: {
+    provider: string;
+    model: string;
+    content: string;
+    variables: Record<string, string>;
+    systemPrompt?: string;
+  }) => {
+    setIsTesting(true);
+    setTestResult(null);
+    setStreamOutput('');
+
+    let rendered = content;
+    Object.entries(variables).forEach(([key, val]) => {
+      rendered = rendered.replace(new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'g'), val);
+    });
+
+    const apiBase = apiClient.defaults.baseURL || '/api/v1';
+    
+    try {
+      const response = await fetch(`${apiBase}/ai/prompts/test/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken || ''}`,
+          'X-Organization-ID': activeOrg?.id || '',
+        },
+        body: JSON.stringify({
+          system_prompt: systemPrompt || 'You are a helpful AI assistant.',
+          user_prompt: rendered,
+          model_name: model,
+        }),
       });
 
-      // Call the real backend /ai/prompts/test endpoint
-      const res = await apiClient.post('/ai/prompts/test', {
-        system_prompt: systemPrompt || 'You are a helpful AI assistant.',
-        user_prompt: rendered,
-        model_name: model,
-      });
+      if (!response.ok) {
+        throw new Error(`Connection error: ${response.statusText}`);
+      }
 
-      const { output, provider: resProvider, model: resModel, tokens_used, cost_usd, latency_ms } = res.data;
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder('utf-8');
+      if (!reader) {
+        throw new Error('Readable stream not supported.');
+      }
 
-      return {
+      let buffer = '';
+      let textAccumulator = '';
+      let metaLatency = 0;
+      let metaTokens = 0;
+      let metaCost = 0;
+      let resProvider = provider;
+      let resModel = model;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const cleanLine = line.trim();
+          if (cleanLine.startsWith('data: ')) {
+            const dataStr = cleanLine.slice(6).trim();
+            if (dataStr) {
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (parsed.error) {
+                  throw new Error(parsed.error);
+                }
+                const token = parsed.content || parsed.token || '';
+                textAccumulator += token;
+                setStreamOutput(textAccumulator);
+
+                if (parsed.latency_ms) metaLatency = parsed.latency_ms;
+                if (parsed.prompt_tokens || parsed.completion_tokens) {
+                  metaTokens = (parsed.prompt_tokens || 0) + (parsed.completion_tokens || 0);
+                }
+                if (parsed.cost_usd) metaCost = parsed.cost_usd;
+                if (parsed.provider) resProvider = parsed.provider;
+                if (parsed.model) resModel = parsed.model;
+              } catch (e) {
+                // Ignore partial JSON blocks
+              }
+            }
+          }
+        }
+      }
+
+      setTestResult({
         id: `test-${Date.now()}`,
         provider: resProvider,
         model: resModel,
         prompt_name: 'Sandbox Inferences',
         variables_used: variables,
-        output: output,
-        latency_ms: latency_ms,
-        tokens_used: tokens_used,
-        cost_usd: cost_usd,
+        output: textAccumulator,
+        latency_ms: metaLatency || 120,
+        tokens_used: metaTokens || textAccumulator.split(' ').length,
+        cost_usd: metaCost || 0.0,
         created_at: new Date().toISOString(),
-      };
-    },
-  });
+      });
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Testing failed', err.message || 'Could not run sandbox completions.');
+      throw err;
+    } finally {
+      setIsTesting(false);
+    }
+  }, [accessToken, activeOrg]);
 
   return {
-    test: testMutation.mutateAsync,
-    isTesting: testMutation.isPending,
-    testResult: testMutation.data || null,
+    test,
+    isTesting,
+    testResult,
+    streamOutput,
   };
 }
 

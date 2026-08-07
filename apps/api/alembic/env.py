@@ -10,21 +10,6 @@ sys.path.insert(0, abspath(dirname(dirname(__file__)) + "/src"))
 
 from api.core.config import settings
 from api.models import Base
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.dialects.postgresql import JSONB, ARRAY, UUID as PG_UUID
-
-@compiles(JSONB, "sqlite")
-def compile_jsonb_sqlite(type_, compiler, **kw):
-    return "JSON"
-
-@compiles(ARRAY, "sqlite")
-def compile_array_sqlite(type_, compiler, **kw):
-    return "JSON"
-
-@compiles(PG_UUID, "sqlite")
-def compile_pg_uuid_sqlite(type_, compiler, **kw):
-    return "CHAR(36)"
-
 # Alembic Config object
 config = context.config
 

@@ -143,6 +143,19 @@ class User(Base):
         String(50), nullable=True, comment="Last completed onboarding step"
     )
 
+    # ── Account Deletion Lifecycle ────────────────────────────────────────────
+    deletion_requested_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="When user requested account deletion",
+    )
+    scheduled_deletion_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Permanent deletion scheduled for this time (requested_at + 7 days)",
+    )
+    deletion_reason: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, comment="Optional reason provided by user"
+    )
+
     # ── Preferences ───────────────────────────────────────────────────────────
     preferences: Mapped[Optional[dict]] = mapped_column(
         JSONB, nullable=True, default=dict,

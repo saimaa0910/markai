@@ -12,6 +12,7 @@ Design Rules:
 - CDC: sync to Databricks bronze.organizations_raw
 """
 import uuid
+from datetime import datetime
 from typing import List, Optional, TYPE_CHECKING
 from sqlalchemy import String, Boolean, Integer, Numeric, Text, JSON, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -120,6 +121,28 @@ class Organization(Base):
     metadata_json: Mapped[Optional[dict]] = mapped_column(
         JSONB, nullable=True, default=dict, server_default="{}",
         comment="Extensible metadata (internal tagging, enrichment)",
+    )
+
+    # ── Branding & AI Defaults ─────────────────────────────────────────────
+    theme_color: Mapped[Optional[str]] = mapped_column(
+        String(7), nullable=True, comment="Primary brand color (hex e.g. #6d28d9)"
+    )
+    language: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="en", server_default="en",
+        comment="Default language for the organization"
+    )
+    default_ai_provider: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="Default AI provider (openai | anthropic | groq | gemini)"
+    )
+    default_image_provider: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="Default image generation provider"
+    )
+    default_ai_model: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="Default AI model identifier"
+    )
+    archived_at: Mapped[Optional[datetime]] = mapped_column(
+        "archived_at_ts", nullable=True,
+        comment="Soft-archived timestamp (org hidden from switcher but not deleted)"
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────

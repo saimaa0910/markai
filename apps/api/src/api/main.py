@@ -10,6 +10,8 @@ from api.routes import (
 )
 from api.routes.chat import chat_router
 from api.routes.sessions import router as sessions_router
+from api.routes.rbac import router as rbac_router
+from api.routes.audit import router as audit_router
 from api.middleware.logging import LoggingMiddleware
 from api.middleware.telemetry_middleware import TelemetryMiddleware
 
@@ -22,6 +24,7 @@ app = FastAPI(
 
 # Set CORS origins cleanly for credentialed requests
 dev_origins = [
+    "http://localhost",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -32,6 +35,8 @@ dev_origins = [
 configured_origins = [o for o in settings.cors_origins_list if o != "*"]
 allowed_origins = list(set(dev_origins + configured_origins))
 
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(TelemetryMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -39,9 +44,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(LoggingMiddleware)
-app.add_middleware(TelemetryMiddleware)
 
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
@@ -77,6 +79,8 @@ app.include_router(infrastructure.router, prefix=settings.API_V1_STR)
 app.include_router(security.router, prefix=settings.API_V1_STR)
 app.include_router(observability.router, prefix=settings.API_V1_STR)
 app.include_router(sessions_router, prefix=settings.API_V1_STR)
+app.include_router(rbac_router, prefix=settings.API_V1_STR)
+app.include_router(audit_router, prefix=settings.API_V1_STR)
 
 
 @app.on_event("startup")
@@ -186,6 +190,10 @@ def on_startup():
         except Exception as registry_err:
             print(f"Error initializing or syncing Agent Registry: {registry_err}")
             
+        from api.tasks.account_cleanup import schedule_cleanup_job
+        schedule_cleanup_job()
+        print("Account cleanup scheduler started (daily at 02:00 UTC)")
+
     except Exception as e:
         print(f"Error seeding initial startup data: {e}")
     finally:

@@ -230,12 +230,11 @@ def test_change_email_static_route_and_confirm_body(monkeypatch):
     assert confirm_response.status_code == 200
 
 
-def test_mfa_login_enforcement_and_verification(monkeypatch):
+def test_mfa_login_enforcement_and_verification(monkeypatch, db_session):
     """
     Test that users with MFA enabled are prompted for MFA and can verify successfully.
     """
     import pyotp
-    from api.database.session import SessionLocal
     from api.models.user import User
 
     email = f"mfa-user-{uuid.uuid4()}@example.com"
@@ -245,19 +244,16 @@ def test_mfa_login_enforcement_and_verification(monkeypatch):
     _register_and_login(email, password)
 
     # 2. Get user database object to set up MFA secret
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == email).first()
-        assert user is not None
-        # Manually enable MFA for test
-        secret = pyotp.random_base32()
-        user.mfa_secret = secret
-        user.mfa_enabled = True
-        user.mfa_method = "totp"
-        db.add(user)
-        db.commit()
-    finally:
-        db.close()
+    db = db_session
+    user = db.query(User).filter(User.email == email).first()
+    assert user is not None
+    # Manually enable MFA for test
+    secret = pyotp.random_base32()
+    user.mfa_secret = secret
+    user.mfa_enabled = True
+    user.mfa_method = "totp"
+    db.add(user)
+    db.commit()
 
     # 3. Login again — should require MFA
     login_response = client.post(
@@ -291,12 +287,11 @@ def test_mfa_login_enforcement_and_verification(monkeypatch):
     assert "refresh_token" in tokens
 
 
-def test_oauth_mock_bypass_and_invitation():
+def test_oauth_mock_bypass_and_invitation(db_session):
     """
     Test that the backend OAuth mock token bypass provisions users correctly
     and handles organization invitation linking.
     """
-    from api.database.session import SessionLocal
     from api.models.user import User
     from api.models.membership import UserOrganization, OrganizationInvitation, UserRole
     from api.models.organization import Organization
@@ -314,52 +309,41 @@ def test_oauth_mock_bypass_and_invitation():
     assert "refresh_token" in tokens
 
     # Verify user and default org were created
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == f"{mock_token.replace('mock_', '')}@example.com").first()
-        assert user is not None
-        assert user.is_verified is True
+    db = db_session
+    user = db.query(User).filter(User.email == f"{mock_token.replace('mock_', '')}@example.com").first()
+    assert user is not None
+    assert user.is_verified is True
 
-        orgs_membership = db.query(UserOrganization).filter(UserOrganization.user_id == user.id).all()
-        assert len(orgs_membership) == 1
-        assert orgs_membership[0].role == UserRole.OWNER
-    finally:
-        db.close()
+    orgs_membership = db.query(UserOrganization).filter(UserOrganization.user_id == user.id).all()
+    assert len(orgs_membership) == 1
+    assert orgs_membership[0].role == UserRole.OWNER
 
     # 2. OAuth login with invitation token
     org_id = None
-    db = SessionLocal()
-    try:
-        # Create an org and invite
-        org = Organization(name="Invited Org", slug=f"invited-org-{uuid.uuid4().hex[:6]}")
-        db.add(org)
-        db.flush()
-        org_id = org.id
+    # Create an org and invite
+    org = Organization(name="Invited Org", slug=f"invited-org-{uuid.uuid4().hex[:6]}")
+    db.add(org)
+    db.flush()
+    org_id = org.id
 
-        invite_token = f"invite-token-{uuid.uuid4().hex}"
-        invitation = OrganizationInvitation(
-            email=f"invited-oauth-{uuid.uuid4().hex[:6]}@example.com",
-            organization_id=org.id,
-            role=UserRole.MEMBER,
-            token=invite_token,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
-        )
-        db.add(invitation)
-        db.commit()
-    finally:
-        db.close()
+    invite_token = f"invite-token-{uuid.uuid4().hex}"
+    invitation = OrganizationInvitation(
+        email=f"invited-oauth-{uuid.uuid4().hex[:6]}@example.com",
+        organization_id=org.id,
+        role=UserRole.MEMBER,
+        token=invite_token,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    db.add(invitation)
+    db.commit()
 
     # Login via mock OAuth with invitation token
     invited_mock_token = f"mock_google_invited_{uuid.uuid4().hex[:6]}"
     invited_email = f"{invited_mock_token.replace('mock_', '')}@example.com"
-    db = SessionLocal()
-    try:
-        inv = db.query(OrganizationInvitation).filter(OrganizationInvitation.token == invite_token).first()
-        inv.email = invited_email
-        db.add(inv)
-        db.commit()
-    finally:
-        db.close()
+    inv = db.query(OrganizationInvitation).filter(OrganizationInvitation.token == invite_token).first()
+    inv.email = invited_email
+    db.add(inv)
+    db.commit()
 
     oauth_invite_response = client.post(
         "/api/v1/auth/oauth/google",
@@ -368,18 +352,14 @@ def test_oauth_mock_bypass_and_invitation():
     assert oauth_invite_response.status_code == 200
 
     # Verify user joined the invited organization and did NOT get a new one
-    db = SessionLocal()
-    try:
-        invited_user = db.query(User).filter(User.email == invited_email).first()
-        assert invited_user is not None
+    invited_user = db.query(User).filter(User.email == invited_email).first()
+    assert invited_user is not None
 
-        memberships = db.query(UserOrganization).filter(UserOrganization.user_id == invited_user.id).all()
-        assert len(memberships) == 1
-        assert memberships[0].organization_id == org_id
-        assert memberships[0].role == UserRole.MEMBER
+    memberships = db.query(UserOrganization).filter(UserOrganization.user_id == invited_user.id).all()
+    assert len(memberships) == 1
+    assert memberships[0].organization_id == org_id
+    assert memberships[0].role == UserRole.MEMBER
 
-        # Verify invitation is marked accepted
-        inv = db.query(OrganizationInvitation).filter(OrganizationInvitation.token == invite_token).first()
-        assert inv.is_accepted is True
-    finally:
-        db.close()
+    # Verify invitation is marked accepted
+    inv = db.query(OrganizationInvitation).filter(OrganizationInvitation.token == invite_token).first()
+    assert inv.is_accepted is True

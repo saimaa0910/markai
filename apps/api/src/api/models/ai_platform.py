@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import ForeignKey, String, Boolean, Integer, Numeric, DateTime, Text
+from sqlalchemy import ForeignKey, String, Boolean, Integer, Numeric, DateTime, Text, Index, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
@@ -11,6 +11,7 @@ class AIProvider(Base):
     __tablename__ = "ai_providers"
 
     name: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)  # groq, openai, anthropic, google, openrouter
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     priority: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     base_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -36,6 +37,9 @@ class AIProvider(Base):
 
 class AIModel(Base):
     __tablename__ = "ai_models"
+    __table_args__ = (
+        Index("idx_ai_models_provider_id", "provider_id"),
+    )
 
     provider_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -52,6 +56,7 @@ class AIModel(Base):
     supports_vision: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     supports_tools: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     supports_json: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    supports_images: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -62,6 +67,11 @@ class AIModel(Base):
 
 class AIProviderKey(Base):
     __tablename__ = "ai_provider_keys"
+    __table_args__ = (
+        Index("idx_ai_provider_keys_provider_id", "provider_id"),
+        Index("idx_ai_provider_keys_org_id", "organization_id"),
+        Index("idx_ai_provider_keys_user_id", "user_id"),
+    )
 
     provider_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -87,6 +97,9 @@ class AIProviderKey(Base):
 
 class AIProviderHealth(Base):
     __tablename__ = "ai_provider_health"
+    __table_args__ = (
+        Index("idx_ai_provider_health_provider_id", "provider_id"),
+    )
 
     provider_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

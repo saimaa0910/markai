@@ -67,68 +67,19 @@ export function useModels() {
 // Hook: Providers
 // ─────────────────────────────────────────────────────────────────────────────
 export function useProviders() {
-  const { models, isLoading: loadingModels, refetch: refetchModels } = useModels();
-  const { data: usage = [] } = useQuery<AITokenUsage[]>({
-    queryKey: ['ai-usage'],
+  const query = useQuery<any[]>({
+    queryKey: ['ai-providers-dashboard'],
     queryFn: async () => {
-      const res = await apiClient.get('/ai/usage/');
+      const res = await apiClient.get('/ai/providers/');
       return res.data || [];
     },
   });
 
-  const providers = React.useMemo<AIProvider[]>(() => {
-    if (!models.length) return [];
-
-    const grouped: Record<string, AIModel[]> = {};
-    for (const m of models) {
-      if (!grouped[m.provider]) grouped[m.provider] = [];
-      grouped[m.provider].push(m);
-    }
-
-    return Object.entries(grouped).map(([key, providerModels]) => {
-      const meta = PROVIDER_META[key] || { label: key, description: '' };
-      const isHealthy = providerModels.some((m) => m.is_healthy);
-      
-      // Calculate average latency
-      const healthyModels = providerModels.filter(m => m.is_healthy);
-      const avgLatency = healthyModels.length
-        ? healthyModels.reduce((s, m) => s + Number(m.latency), 0) / healthyModels.length
-        : 0;
-
-      // Calculate max priority
-      const maxPriority = providerModels.reduce((max, m) => Math.max(max, m.priority), 0);
-
-      // Usages stats for this provider
-      const providerUsages = usage.filter((u) => u.provider === key);
-      const totalCost = providerUsages.reduce((s, u) => s + (u.cost_usd || 0), 0);
-      const errorCount = providerUsages.filter((u) => u.status === 'failure').length;
-
-      return {
-        key,
-        name: meta.label,
-        isConnected: true, // Default to true if models exist
-        isHealthy,
-        status: isHealthy ? 'connected' : 'disconnected',
-        latency: parseFloat(avgLatency.toFixed(2)),
-        priority: maxPriority,
-        availableModels: providerModels.length,
-        currentRequests: Math.max(0, Math.floor(providerUsages.length / 10)), // Mock active requests
-        errorCount,
-        cost: parseFloat(totalCost.toFixed(4)),
-        supportsStreaming: providerModels.some((m) => m.supports_streaming),
-        supportsVision: providerModels.some((m) => m.supports_vision),
-        supportsJson: providerModels.some((m) => m.supports_json),
-        supportsToolCalling: providerModels.some((m) => m.supports_tool_calling),
-        contextWindow: providerModels.reduce((max, m) => Math.max(max, m.context_window), 0),
-        lastSync: new Date().toLocaleTimeString(),
-      };
-    });
-  }, [models, usage]);
-
   return {
-    providers,
-    isLoading: loadingModels,
-    refetch: refetchModels,
+    providers: query.data || [],
+    isLoading: query.isLoading,
+    isError: query.isError,
+    refetch: query.refetch,
   };
 }
 

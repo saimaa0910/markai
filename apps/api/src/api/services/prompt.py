@@ -1120,7 +1120,7 @@ class ShareService:
     def get_shared_prompt(db: Session, token: str) -> Prompt:
         share = ShareRepository.get_by_token(db, token)
         if share:
-            if share.expires_at and share.expires_at < datetime.utcnow():
+            if share.expires_at and share.expires_at.replace(tzinfo=None) < datetime.utcnow():
                 raise HTTPException(
                     status_code=status.HTTP_410_GONE,
                     detail="Shared prompt link has expired."

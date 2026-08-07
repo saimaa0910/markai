@@ -63,9 +63,7 @@ export async function fetchSEOMetrics(content: string, keywords: string[]): Prom
 export async function* streamContentFetch(
   req: ContentGenerateRequest
 ): AsyncGenerator<{ event: string; data: any }> {
-  const API_BASE = typeof window !== 'undefined'
-    ? (window.location.port === '3000' ? 'http://localhost:8000/api/v1' : '/api/v1')
-    : 'http://localhost:8000/api/v1';
+  const API_BASE = apiClient.defaults.baseURL || '/api/v1';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

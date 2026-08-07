@@ -2,58 +2,119 @@ import datetime
 import os
 
 # Override key environment variables to ensure all tests run in mock mode
+os.environ["ENVIRONMENT"] = "test"
+
+# Support parallel testing with pytest-xdist by using worker-specific databases
+worker_id = os.environ.get("PYTEST_XDIST_WORKER")
+if worker_id:
+    db_name = f"eaimos_test_{worker_id}"
+else:
+    db_name = "eaimos_test"
+
+os.environ["DATABASE_URL"] = f"postgresql://postgres:postgres@localhost:5432/{db_name}"
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["GROQ_API_KEY"] = ""
 os.environ["OPENROUTER_API_KEY"] = ""
+os.environ["SECRET_KEY"] = "SUPER_SECRET_JWT_KEY_MIN_32_CHARS_LONG_PLEASE_REPLACE_IN_PRODUCTION"
+os.environ["RESEND_API_KEY"] = ""
 
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.dialects.postgresql import JSONB, ARRAY, UUID as PG_UUID
 from api.database.session import get_db
 from api.models import Base
 from api.main import app
-
-@compiles(JSONB, "sqlite")
-def compile_jsonb_sqlite(type_, compiler, **kw):
-    return "JSON"
-
-@compiles(ARRAY, "sqlite")
-def compile_array_sqlite(type_, compiler, **kw):
-    return "JSON"
-
-@compiles(PG_UUID, "sqlite")
-def compile_pg_uuid_sqlite(type_, compiler, **kw):
-    return "CHAR(36)"
-
-# Use SQLite in-memory shared cache for test isolation
-SQLALCHEMY_DATABASE_URL = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
+from api.core.config import settings
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False, "timeout": 30}
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
 )
 
-@event.listens_for(engine, "connect")
-def register_sqlite_now(dbapi_connection, connection_record):
-    # Teach SQLite what now() is for compatibility with PostgreSQL migrations
-    dbapi_connection.create_function("now", 0, lambda: datetime.datetime.now(datetime.timezone.utc).isoformat())
-    # Enable WAL mode for concurrent readers & writer
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.close()
-
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def pytest_configure(config):
+    # Only run on the master process (not on xdist workers)
+    if not hasattr(config, "workerinput"):
+        import os
+        from sqlalchemy import create_engine as pg_create_engine, text
+        from alembic.config import Config
+        from alembic import command
+        
+        num_workers = config.option.numprocesses
+        if num_workers == "auto":
+            import multiprocessing
+            num_workers = multiprocessing.cpu_count()
+        elif num_workers is not None:
+            try:
+                num_workers = int(num_workers)
+            except ValueError:
+                num_workers = None
+                
+        if num_workers and num_workers > 1:
+            print(f"\n[Master] Pre-initializing {num_workers} parallel test databases sequentially...")
+            system_engine = pg_create_engine("postgresql://postgres:postgres@localhost:5432/postgres", isolation_level="AUTOCOMMIT")
+            
+            tests_dir = os.path.dirname(os.path.abspath(__file__))
+            api_dir = os.path.dirname(tests_dir)
+            alembic_ini_path = os.path.join(api_dir, "alembic.ini")
+            alembic_cfg = Config(alembic_ini_path)
+            alembic_cfg.set_main_option("script_location", os.path.join(api_dir, "alembic"))
+            
+            for i in range(num_workers):
+                worker_db = f"eaimos_test_gw{i}"
+                print(f"[Master] Creating and migrating {worker_db}...")
+                
+                with system_engine.connect() as conn:
+                    db_exists = conn.execute(
+                        text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
+                        {"dbname": worker_db}
+                    ).scalar()
+                    if not db_exists:
+                        conn.execute(text(f"CREATE DATABASE {worker_db};"))
+                
+                worker_url = f"postgresql://postgres:postgres@localhost:5432/{worker_db}"
+                worker_engine = pg_create_engine(worker_url)
+                
+                with worker_engine.begin() as conn:
+                    conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE;"))
+                    conn.execute(text("CREATE SCHEMA public;"))
+                    conn.execute(text("GRANT ALL ON SCHEMA public TO public;"))
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"))
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent;"))
+                
+                worker_engine.dispose()
+                
+                # Run migrations in a subprocess with DATABASE_URL set to worker_url
+                import subprocess
+                env = os.environ.copy()
+                env["DATABASE_URL"] = worker_url
+                env["ENVIRONMENT"] = "test"
+                res = subprocess.run(
+                    ["poetry", "run", "alembic", "-c", alembic_ini_path, "upgrade", "head"],
+                    env=env,
+                    capture_output=True,
+                    text=True
+                )
+                if res.returncode != 0:
+                    print(f"[Master] Migration failed for {worker_db}: {res.stderr}")
+                    raise RuntimeError(f"Migration failed for {worker_db}: {res.stderr}")
+                
+            system_engine.dispose()
+            print("[Master] All parallel test databases initialized successfully.")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def create_test_db():
     """
     Setup clean database tables before executing tests, and drop them after.
+    Runs Alembic migrations to construct the database schema if running sequentially.
+    For parallel workers, uses the pre-initialized database directly.
     """
     import api.database.session
     import api.repositories.unit_of_work
@@ -64,11 +125,59 @@ def create_test_db():
     api.database.session.SessionLocal = TestingSessionLocal
     api.repositories.unit_of_work.SessionLocal = TestingSessionLocal
     
-    Base.metadata.create_all(bind=engine)
+    # If this is a parallel worker, the master has already initialized and migrated the DB
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        yield
+        engine.dispose()
+        api.database.session.SessionLocal = orig_db_session_local
+        api.repositories.unit_of_work.SessionLocal = orig_uow_session_local
+        return
+
+    # Sequential run fallback database creation and migration
+    from sqlalchemy import create_engine as pg_create_engine, text
+    system_engine = pg_create_engine("postgresql://postgres:postgres@localhost:5432/postgres", isolation_level="AUTOCOMMIT")
+    with system_engine.connect() as conn:
+        db_exists = conn.execute(
+            text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
+            {"dbname": db_name}
+        ).scalar()
+        if not db_exists:
+            conn.execute(text(f"CREATE DATABASE {db_name};"))
+    system_engine.dispose()
+    
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    api_dir = os.path.dirname(tests_dir)
+    alembic_ini_path = os.path.join(api_dir, "alembic.ini")
+    
+    from alembic.config import Config
+    from alembic import command
+    
+    alembic_cfg = Config(alembic_ini_path)
+    alembic_cfg.set_main_option("script_location", os.path.join(api_dir, "alembic"))
+    
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE;"))
+        conn.execute(text("CREATE SCHEMA public;"))
+        conn.execute(text("GRANT ALL ON SCHEMA public TO public;"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent;"))
+        
+    command.upgrade(alembic_cfg, "head")
+    
     yield
+    
     engine.dispose()
     try:
-        Base.metadata.drop_all(bind=engine)
+        with engine.begin() as conn:
+            conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE;"))
+            conn.execute(text("CREATE SCHEMA public;"))
+            conn.execute(text("GRANT ALL ON SCHEMA public TO public;"))
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"))
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS unaccent;"))
     except Exception:
         pass
         
@@ -80,10 +189,25 @@ def create_test_db():
 def db_session():
     """
     Function-scoped database session for test isolation.
+    Uses connection-level savepoint/transaction rollback for 100% isolation on PostgreSQL.
     """
+    connection = engine.connect()
+    transaction = connection.begin()
+    
+    # Configure sessionmaker to bind to the active connection for shared transactions
+    TestingSessionLocal.configure(bind=connection)
+    
     session = TestingSessionLocal()
+    
     yield session
+    
     session.close()
+    if transaction.is_active:
+        transaction.rollback()
+    connection.close()
+    
+    # Restore sessionmaker to use the engine
+    TestingSessionLocal.configure(bind=engine)
 
 
 @pytest.fixture(scope="function", autouse=True)

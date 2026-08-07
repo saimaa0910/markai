@@ -9,7 +9,9 @@ export type AgentType =
   | 'WORKFLOW' 
   | 'CUSTOM'
   | 'SALES'
-  | 'SUPPORT';
+  | 'SUPPORT'
+  | 'IMAGE'
+  | 'SOCIAL';
 
 export type AgentStatus = 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
 

@@ -40,15 +40,17 @@ def auth_headers(db_session: Session):
 
 
 def test_list_agent_templates(auth_headers):
-    # Verify templates endpoint is accessible and returns the 3 default templates
+    # Verify templates endpoint is accessible and returns the 5 default templates
     res = client.get("/api/v1/agents/templates", headers=auth_headers)
     assert res.status_code == 200
     data = res.json()
-    assert len(data) == 3
+    assert len(data) == 5
     names = [tmpl["name"] for tmpl in data]
     assert "Content Agent" in names
     assert "SEO Agent" in names
     assert "Campaign Agent" in names
+    assert "Image Generation Agent" in names
+    assert "Social Media Agent" in names
 
 
 def test_agent_favorite_and_pin(auth_headers, db_session: Session):

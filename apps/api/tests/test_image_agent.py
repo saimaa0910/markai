@@ -141,6 +141,7 @@ class TestSmartRouterFailover:
 
         # Mock query sequence returning first together, then openai
         db.scalars().first.side_effect = [db_prov_1, None, db_prov_2, None]
+        db.query().filter().first.return_value = None
 
         router = ImageProviderRouter(db, uuid.uuid4())
         

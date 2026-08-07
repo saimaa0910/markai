@@ -77,6 +77,38 @@ def get_current_user(
     return user
 
 
+def get_current_user_allow_inactive(
+    db: Session = Depends(get_db), token: str = Depends(reusable_oauth2)
+) -> User:
+    """
+    Dependency that decodes access token and retrieves user model even if inactive.
+    Used by restore-account and deletion-status endpoints.
+    """
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+            )
+        user_uuid = uuid.UUID(str(user_id))
+    except (JWTError, ValidationError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
+
+    user = db.query(User).filter(User.id == user_uuid).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    return user
+
+
+
 def get_active_organization_id(
     x_organization_id: Optional[str] = Header(None),
 ) -> Optional[str]:

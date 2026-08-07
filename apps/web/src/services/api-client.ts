@@ -1,12 +1,15 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { useAuthStore } from '../store/auth';
 
-const API_BASE_URL = typeof window !== 'undefined' 
-  ? (window.location.port === '3000' ? 'http://localhost:8000/api/v1' : '/api/v1')
-  : 'http://localhost:8000/api/v1';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL 
+  ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1`
+  : (typeof window !== 'undefined' 
+      ? (window.location.port === '3000' ? 'http://localhost:8000/api/v1' : '/api/v1')
+      : 'http://localhost:8000/api/v1');
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 300000, // 5 minutes
   headers: {
     'Content-Type': 'application/json',
   },
@@ -57,10 +60,8 @@ apiClient.interceptors.response.use(
             const refreshRes = await axios.post(`${API_BASE_URL}/auth/refresh?refresh_token=${refreshToken}`);
             const { access_token, refresh_token } = refreshRes.data;
             
-            // Save back to Zustand storage format
-            parsed.state.accessToken = access_token;
-            parsed.state.refreshToken = refresh_token;
-            localStorage.setItem('eaimos-auth-storage', JSON.stringify(parsed));
+            // Save back to Zustand store directly!
+            useAuthStore.setState({ accessToken: access_token, refreshToken: refresh_token });
             
             if (originalRequest.headers) {
               originalRequest.headers.Authorization = `Bearer ${access_token}`;

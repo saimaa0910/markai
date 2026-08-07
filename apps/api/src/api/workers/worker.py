@@ -1,13 +1,9 @@
-"""
-Worker Process Entry Point & Lifecycle Orchestrator.
-"""
-
-from typing import Dict, Any
+from api.worker.celery_app import celery_app
 
 
 def run_worker_daemon() -> None:
     """
     Initialize background worker process daemon.
     """
-    # TODO: Connect to Celery or RQ message broker and start consumption loop
-    pass
+    celery_app.worker_main(argv=["worker", "--loglevel=info"])
+

@@ -32,3 +32,7 @@ class AITokenUsage(Base):
     
     status: Mapped[str] = mapped_column(String(20), default="success", nullable=False)  # success | failure
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    retry_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, nullable=True)
+    capability: Mapped[Optional[str]] = mapped_column(String(50), default="text", nullable=True)
+    agent: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

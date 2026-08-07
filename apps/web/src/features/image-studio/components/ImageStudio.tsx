@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import useImageStudio from '../hooks/useImageStudio';
+import { useAgents } from '../../agents/hooks';
 import {
   ImageGenerateRequest,
   ImageHistoryItem,
@@ -9,7 +10,11 @@ import {
   ImageModel
 } from '../types';
 
+import { useAuthStore } from '@/store/auth';
+import { apiClient } from '@/services/api-client';
+
 export const ImageStudio: React.FC = () => {
+  const { accessToken, activeOrg } = useAuthStore();
   const {
     useHistory,
     useProviders,
@@ -23,6 +28,12 @@ export const ImageStudio: React.FC = () => {
     inpaintMutation,
     outpaintMutation,
   } = useImageStudio();
+
+  // Custom Agents
+  const { agents } = useAgents(1, 100);
+  const imageAgents = agents.filter(a => a.agent_type === 'IMAGE');
+  const [selectedAgentId, setSelectedAgentId] = useState('');
+  const [savingToKb, setSavingToKb] = useState(false);
 
   // Queries
   const { data: history = [], refetch: refetchHistory } = useHistory();
@@ -43,6 +54,47 @@ export const ImageStudio: React.FC = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasMask, setHasMask] = useState(false);
   const [bgPrompt, setBgPrompt] = useState('');
+
+  // Agent Selection Effect
+  useEffect(() => {
+    if (imageAgents.length > 0 && !selectedAgentId) {
+      setSelectedAgentId(imageAgents[0].id);
+    }
+  }, [imageAgents, selectedAgentId]);
+
+  const handleAgentChange = (agentId: string) => {
+    setSelectedAgentId(agentId);
+    const agent = imageAgents.find(a => a.id === agentId);
+    if (agent?.preferred_model) {
+      setSelectedModel(agent.preferred_model);
+    }
+  };
+
+  const handleSaveToKnowledgeBase = async () => {
+    if (!activeImage) return;
+    setSavingToKb(true);
+    try {
+      const apiBase = apiClient.defaults.baseURL || '/api/v1';
+      const res = await fetch(`${apiBase}/ai/knowledge/save-agent-image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken || ''}`,
+          'X-Organization-ID': activeOrg?.id || '',
+        },
+        body: JSON.stringify({
+          image_url: activeImage,
+          title: prompt || "Agent Generated Creative Image"
+        })
+      });
+      if (!res.ok) throw new Error("Failed to save to Knowledge Base");
+      alert("Successfully saved generated image to Knowledge Base under 'Agents File Folder'!");
+    } catch (err: any) {
+      alert(`Error saving to Knowledge Base: ${err.message}`);
+    } finally {
+      setSavingToKb(false);
+    }
+  };
 
   // SSE Stream log state
   const [streamLogs, setStreamLogs] = useState<string[]>([]);
@@ -147,14 +199,17 @@ export const ImageStudio: React.FC = () => {
       negative_prompt: negativePrompt || undefined,
       model: selectedModel,
       seed,
+      agent_id: selectedAgentId || undefined,
     };
 
     try {
-      const response = await fetch('/api/v1/agents/image/generate/stream', {
+      const apiBase = apiClient.defaults.baseURL || '/api/v1';
+      const response = await fetch(`${apiBase}/agents/image/generate/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${accessToken || ''}`,
+          'X-Organization-ID': activeOrg?.id || '',
         },
         body: JSON.stringify(payload),
       });
@@ -230,6 +285,7 @@ export const ImageStudio: React.FC = () => {
         negative_prompt: negativePrompt || undefined,
         model: selectedModel,
         seed,
+        agent_id: selectedAgentId || undefined,
       },
       {
         onSuccess: (data) => {
@@ -342,6 +398,31 @@ export const ImageStudio: React.FC = () => {
         <div>
           <h2 className="text-lg font-bold text-violet-400">Creative Configuration</h2>
           <p className="text-xs text-slate-400">Assemble visual cues and target styles</p>
+        </div>
+
+        {/* Visual Agent selector */}
+        <div className="flex flex-col gap-2 bg-slate-950/30 p-3 rounded-xl border border-slate-800/40">
+          <label className="text-xs font-semibold text-slate-300">Active Visual Agent</label>
+          <select
+            value={selectedAgentId}
+            onChange={(e) => handleAgentChange(e.target.value)}
+            className="w-full rounded-lg bg-slate-950 border border-slate-800 p-2.5 text-xs focus:outline-none focus:border-violet-500 text-slate-200"
+          >
+            <option value="">-- Select Agent --</option>
+            {imageAgents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                🤖 {agent.name}
+              </option>
+            ))}
+          </select>
+          {selectedAgentId && (
+            <div className="bg-slate-950/50 rounded-lg p-2.5 border border-slate-800/60 mt-1">
+              <span className="text-[10px] text-violet-400 font-bold uppercase tracking-wider block">Agent Context</span>
+              <p className="text-[11px] text-slate-300 mt-1 leading-normal font-medium">
+                {imageAgents.find((a) => a.id === selectedAgentId)?.description || 'No description provided.'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Style presets */}
@@ -485,6 +566,14 @@ export const ImageStudio: React.FC = () => {
               className="text-xs hover:text-pink-400 transition-colors font-semibold"
             >
               🔄 Variation
+            </button>
+            <span className="w-px h-4 bg-slate-800" />
+            <button
+              onClick={handleSaveToKnowledgeBase}
+              disabled={savingToKb}
+              className="text-xs text-violet-400 hover:text-violet-300 font-bold transition-colors flex items-center gap-1"
+            >
+              💾 {savingToKb ? 'Saving...' : 'Save to KB'}
             </button>
             {hasMask && (
               <>

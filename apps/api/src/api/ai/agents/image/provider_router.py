@@ -50,8 +50,23 @@ class ImageProviderRouter:
         Executes routing pipeline by filtering providers, checking circuit breakers,
         validating capabilities, and resolving failovers.
         """
+        from api.models.membership import OrganizationSettings
+        default_row = self.db.query(OrganizationSettings).filter(
+            OrganizationSettings.organization_id == self.organization_id,
+            OrganizationSettings.namespace == "ai",
+            OrganizationSettings.key == "default_image_provider"
+        ).first()
+        
         from api.ai.agents.image.constants import DEFAULT_PROVIDER_PRIORITY
-        routing_priority = priority_override or DEFAULT_PROVIDER_PRIORITY
+        routing_priority = list(priority_override or DEFAULT_PROVIDER_PRIORITY)
+        if default_row and default_row.value:
+            def_val = default_row.value.lower()
+            if def_val in routing_priority:
+                routing_priority.remove(def_val)
+            routing_priority.insert(0, def_val)
+            
+        if "pollinations" not in routing_priority:
+            routing_priority.append("pollinations")
 
         errors = []
         if seed is None:

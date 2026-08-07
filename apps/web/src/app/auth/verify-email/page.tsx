@@ -1,93 +1,238 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { Mail, CheckCircle2, XCircle, RefreshCcw, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toast';
-import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { apiClient } from '@/services/api-client';
 
+const resendSchema = z.object({
+  email: z.string().email('Please enter a valid email'),
+});
+
+type ResendValues = z.infer<typeof resendSchema>;
+
 function VerifyEmailContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const token = searchParams.get('token');
-  const [status, setStatus] = React.useState<'verifying' | 'success' | 'error'>('verifying');
-  const [errorMsg, setErrorMsg] = React.useState('');
 
+  const [verifying, setVerifying] = React.useState(false);
+  const [verified, setVerified] = React.useState(false);
+  const [verifyError, setVerifyError] = React.useState<string | null>(null);
+  const [resending, setResending] = React.useState(false);
+  const [cooldown, setCooldown] = React.useState(0);
+  const [showResendForm, setShowResendForm] = React.useState(!token);
+
+  const { register, handleSubmit, formState: { errors } } = useForm<ResendValues>({
+    resolver: zodResolver(resendSchema),
+  });
+
+  // Countdown timer for resend cooldown
   React.useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      setErrorMsg('Verification token is missing.');
-      return;
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown(c => c - 1), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
+
+  // Auto-verify if token in URL
+  React.useEffect(() => {
+    if (!token) return;
+    setVerifying(true);
+    apiClient.post('/auth/verify-email', { token })
+      .then(() => {
+        setVerified(true);
+        toast.success('Email Verified!', 'Your account is now fully active. Welcome to EAIMOS!');
+        setTimeout(() => router.push('/auth/login?verified=true'), 2500);
+      })
+      .catch(err => {
+        const msg = err.response?.data?.detail || 'Verification failed. The link may have expired.';
+        setVerifyError(msg);
+      })
+      .finally(() => setVerifying(false));
+  }, [token, router]);
+
+  const onResend = async (data: ResendValues) => {
+    setResending(true);
+    try {
+      await apiClient.post('/auth/resend-verification', { email: data.email });
+      toast.success('Verification Email Sent', 'Check your inbox for a new verification link.');
+      setCooldown(60);
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || 'Failed to resend verification email.';
+      toast.error('Error', msg);
+    } finally {
+      setResending(false);
     }
+  };
 
-    const triggerVerification = async () => {
-      try {
-        await apiClient.post(`/auth/verify-email?token=${encodeURIComponent(token)}`);
-        setStatus('success');
-        toast.success('Email Verified', 'Your account has been successfully verified.');
-      } catch (err: any) {
-        setStatus('error');
-        setErrorMsg(err.response?.data?.detail || err.message || 'Verification failed.');
-      }
-    };
-
-    triggerVerification();
-  }, [token]);
-
-  return (
-    <div className="flex flex-col gap-6 text-center items-center py-4">
-      {status === 'verifying' && (
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-12 h-12 text-violet-500 animate-spin" />
-          <h1 className="text-xl font-bold text-white">Verifying your email</h1>
-          <p className="text-sm text-neutral-400">
-            Please wait while we confirm your email token...
-          </p>
+  // ── Verifying state ──
+  if (verifying) {
+    return (
+      <div className="flex flex-col items-center gap-6 py-6">
+        <div className="w-14 h-14 rounded-full bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
+          <div className="w-7 h-7 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
         </div>
-      )}
-
-      {status === 'success' && (
-        <div className="flex flex-col items-center gap-4">
-          <CheckCircle2 className="w-16 h-16 text-emerald-400" />
-          <h1 className="text-2xl font-bold text-white">Email Verified!</h1>
-          <p className="text-sm text-neutral-300">
-            Your email has been verified. You can now access your EAIMOS workspace.
-          </p>
-          <Button variant="violet" className="mt-2 w-full" onClick={() => router.push('/dashboard')}>
-            Go to Dashboard
-          </Button>
+        <div className="text-center">
+          <h2 className="text-xl font-bold text-white mb-1">Verifying your email...</h2>
+          <p className="text-neutral-400 text-sm">Please wait a moment.</p>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {status === 'error' && (
-        <div className="flex flex-col items-center gap-4">
-          <AlertCircle className="w-16 h-16 text-rose-400" />
-          <h1 className="text-xl font-bold text-white">Verification Failed</h1>
-          <p className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 px-3.5 py-2.5 rounded-lg">
-            {errorMsg}
+  // ── Verified success ──
+  if (verified) {
+    return (
+      <div className="flex flex-col items-center gap-6 py-4">
+        <div className="relative">
+          <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center">
+            <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+          </div>
+          <div className="absolute inset-0 rounded-full bg-emerald-400/20 animate-ping" />
+        </div>
+        <div className="text-center flex flex-col gap-2">
+          <h2 className="text-2xl font-bold text-white">Email Verified! 🎉</h2>
+          <p className="text-neutral-400 text-sm">
+            Your account is now fully activated. Welcome to EAIMOS!
           </p>
-          <p className="text-xs text-neutral-400">
-            The link may have expired or is invalid.
-          </p>
-          <div className="flex flex-col gap-2 w-full mt-2">
-            <Button variant="violet" onClick={() => router.push('/auth/login')}>
-              Sign In
-            </Button>
-            <Link href="/auth/forgot-password" className="text-violet-400 hover:text-violet-300 text-xs font-semibold mt-1">
-              Need to reset password?
-            </Link>
+          <p className="text-neutral-500 text-xs">Redirecting you to sign in...</p>
+        </div>
+        <Link href="/auth/login" className="text-violet-400 hover:text-violet-300 text-sm">
+          Sign in now →
+        </Link>
+      </div>
+    );
+  }
+
+  // ── Verification error (expired token) ──
+  if (verifyError) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-bold text-white">Verification Failed</h1>
+        </div>
+
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 flex gap-3 items-start">
+          <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-rose-400 font-semibold text-sm">Link Expired or Invalid</p>
+            <p className="text-rose-400/70 text-xs mt-1">{verifyError}</p>
           </div>
         </div>
-      )}
+
+        <div className="flex flex-col gap-4">
+          <p className="text-neutral-400 text-sm">
+            Request a new verification link below.
+          </p>
+          <form onSubmit={handleSubmit(onResend)} className="flex flex-col gap-3">
+            <Input
+              label="Email Address"
+              type="email"
+              placeholder="name@company.com"
+              error={errors.email?.message}
+              leftIcon={<Mail className="w-4 h-4" />}
+              {...register('email')}
+            />
+            <Button
+              id="resend-verification-btn"
+              type="submit"
+              variant="violet"
+              isLoading={resending}
+              disabled={cooldown > 0}
+              className="w-full"
+            >
+              {cooldown > 0 ? (
+                <span className="flex items-center gap-2">
+                  <RefreshCcw className="w-4 h-4" />
+                  Resend in {cooldown}s
+                </span>
+              ) : (
+                'Send New Verification Link'
+              )}
+            </Button>
+          </form>
+        </div>
+
+        <Link href="/auth/login" className="text-neutral-500 hover:text-neutral-300 text-xs text-center">
+          ← Back to Sign In
+        </Link>
+      </div>
+    );
+  }
+
+  // ── No token — resend form ──
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <div className="w-12 h-12 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center mb-1">
+          <Mail className="w-6 h-6 text-violet-400" />
+        </div>
+        <h1 className="text-2xl font-bold tracking-tight text-white">
+          Verify your email
+        </h1>
+        <p className="text-sm text-neutral-400">
+          We sent a verification link to your email address. Check your inbox and click the link to activate your account.
+        </p>
+      </div>
+
+      <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 flex gap-3 items-start">
+        <AlertTriangle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+        <div className="text-xs text-blue-400">
+          <p className="font-medium mb-0.5">Didn't get the email?</p>
+          <p className="text-blue-400/70">Check your spam folder, or request a new link below. Links expire after 24 hours.</p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit(onResend)} className="flex flex-col gap-3">
+        <Input
+          label="Email Address"
+          type="email"
+          placeholder="name@company.com"
+          error={errors.email?.message}
+          leftIcon={<Mail className="w-4 h-4" />}
+          {...register('email')}
+        />
+        <Button
+          id="resend-verification-btn"
+          type="submit"
+          variant="violet"
+          isLoading={resending}
+          disabled={cooldown > 0}
+          className="w-full"
+        >
+          {cooldown > 0 ? (
+            <span className="flex items-center gap-2">
+              <RefreshCcw className="w-4 h-4" />
+              Resend in {cooldown}s
+            </span>
+          ) : (
+            <span className="flex items-center gap-2">
+              <RefreshCcw className="w-4 h-4" />
+              Resend Verification Email
+            </span>
+          )}
+        </Button>
+      </form>
+
+      <div className="text-center text-xs text-neutral-500">
+        <Link href="/auth/login" className="text-neutral-400 hover:text-white transition-colors">
+          ← Back to Sign In
+        </Link>
+      </div>
     </div>
   );
 }
 
-export default function VerifyEmail() {
+export default function VerifyEmailPage() {
   return (
-    <React.Suspense fallback={<div className="text-neutral-500 text-xs">Loading email validation session...</div>}>
+    <React.Suspense fallback={<div className="text-neutral-500 text-xs">Loading...</div>}>
       <VerifyEmailContent />
     </React.Suspense>
   );

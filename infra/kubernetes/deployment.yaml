@@ -19,3 +19,45 @@ spec:
         image: eaimos/api:latest
         ports:
         - containerPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eaimos-worker-deployment
+  labels:
+    app: eaimos-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: eaimos-worker
+  template:
+    metadata:
+      labels:
+        app: eaimos-worker
+    spec:
+      containers:
+      - name: worker
+        image: eaimos/api:latest
+        command: ["celery", "-A", "api.worker.celery_app", "worker", "--loglevel=info"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eaimos-scheduler-deployment
+  labels:
+    app: eaimos-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eaimos-scheduler
+  template:
+    metadata:
+      labels:
+        app: eaimos-scheduler
+    spec:
+      containers:
+      - name: scheduler
+        image: eaimos/api:latest
+        command: ["celery", "-A", "api.worker.celery_app", "beat", "--loglevel=info"]

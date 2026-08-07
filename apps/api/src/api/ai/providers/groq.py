@@ -6,10 +6,12 @@ from typing import Generator, List, Dict, Any, Optional
 from api.ai.providers.base import BaseLLMProvider
 
 
+import anyio.from_thread
+
 class GroqProvider(BaseLLMProvider):
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        self.client = httpx.Client(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=30.0)
 
     def chat(
         self,
@@ -26,19 +28,35 @@ class GroqProvider(BaseLLMProvider):
         valid_model = model if model and ("llama" in model or "mixtral" in model or "gemma" in model or "qwen" in model) else "llama-3.3-70b-versatile"
 
         start_time = time.perf_counter()
-        response = self.client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": valid_model,
-                "messages": messages,
-                "temperature": temperature,
-                **kwargs,
-            },
-        )
+        
+        async def _call():
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                return await client.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": valid_model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        **kwargs,
+                    },
+                )
+
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        if loop.is_running():
+            response = anyio.from_thread.run(_call)
+        else:
+            response = loop.run_until_complete(_call())
+
         response.raise_for_status()
         data = response.json()
         latency_ms = int((time.perf_counter() - start_time) * 1000)

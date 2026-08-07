@@ -61,7 +61,7 @@ export function FilterPanel({ showModelSelector = true, onRefresh }: FilterPanel
             className="bg-neutral-950/40 border-white/5 h-9 text-xs text-white"
             options={[
               { label: 'All Providers', value: 'all' },
-              ...providers.map((p) => ({ label: p.name, value: p.key }))
+              ...providers.map((p) => ({ label: p.name.toUpperCase(), value: p.name.toLowerCase() }))
             ]}
           />
         </div>

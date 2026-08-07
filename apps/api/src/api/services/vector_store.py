@@ -64,50 +64,26 @@ class VectorStore:
         limit: int = 10,
     ) -> List[Tuple[float, DocumentChunk]]:
         """
-        Perform vector similarity search, querying pgvector if on PostgreSQL,
-        otherwise falling back to Python-based memory calculations.
+        Perform vector similarity search, querying pgvector.
         """
-        if db.bind.dialect.name == "postgresql":
-            try:
-                # Build pgvector query
-                # cosine_distance maps to 1 - cosine_similarity
-                stmt = select(DocumentChunk)
-                stmt = cls.apply_filters(stmt, filters, organization_id)
-                stmt = stmt.order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
-                stmt = stmt.limit(limit)
-                
-                chunks = db.scalars(stmt).all()
-                results = []
-                for chunk in chunks:
-                    # Calculate similarity: 1 - cosine_distance
-                    vec = chunk.embedding
-                    sim = cls._cosine_similarity(query_embedding, vec)
-                    results.append((sim, chunk))
-                # Sort descending
-                results.sort(key=lambda x: x[0], reverse=True)
-                return results[:limit]
-            except Exception as e:
-                logger.error(f"PostgreSQL pgvector search failed, falling back to python: {e}")
-
-        # SQLite fallback: Load candidates, compute similarities in memory
-        stmt = select(DocumentChunk)
+        # Build pgvector query
+        # cosine_distance maps to 1 - cosine_similarity
+        from api.models.knowledge import DocumentChunkEmbedding
+        stmt = select(DocumentChunk).join(DocumentChunkEmbedding, DocumentChunk.id == DocumentChunkEmbedding.chunk_id)
         stmt = cls.apply_filters(stmt, filters, organization_id)
-        candidates = db.scalars(stmt).all()
-
-        scored = []
-        for chunk in candidates:
+        stmt = stmt.order_by(DocumentChunkEmbedding.embedding.cosine_distance(query_embedding))
+        stmt = stmt.limit(limit)
+        
+        chunks = db.scalars(stmt).all()
+        results = []
+        for chunk in chunks:
+            # Calculate similarity: 1 - cosine_distance
             vec = chunk.embedding
-            if isinstance(vec, str):
-                try:
-                    vec = json.loads(vec)
-                except Exception:
-                    pass
-            if isinstance(vec, list):
-                sim = cls._cosine_similarity(query_embedding, vec)
-                scored.append((sim, chunk))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return scored[:limit]
+            sim = cls._cosine_similarity(query_embedding, vec)
+            results.append((sim, chunk))
+        # Sort descending
+        results.sort(key=lambda x: x[0], reverse=True)
+        return results[:limit]
 
     @classmethod
     def keyword_search(
@@ -119,29 +95,32 @@ class VectorStore:
         limit: int = 10,
     ) -> List[Tuple[float, DocumentChunk]]:
         """
-        Full text/lexical search query.
+        Full text/lexical search query using PostgreSQL Full Text Search.
         """
         stmt = select(DocumentChunk)
         stmt = cls.apply_filters(stmt, filters, organization_id)
         
         # Build search condition
         search_terms = [term for term in query_text.split() if len(term) > 2]
-        if db.bind.dialect.name == "postgresql":
-            # PostgreSQL Full Text Search
-            ts_query = " & ".join(search_terms)
-            if ts_query:
-                stmt = stmt.where(
-                    text("to_tsvector('english', document_chunks.content) @@ to_tsquery('english', :query)")
-                ).params(query=ts_query)
-            else:
-                stmt = stmt.where(DocumentChunk.content.ilike(f"%{query_text}%"))
+        ts_query = " & ".join(search_terms)
+        if ts_query:
+            stmt = stmt.where(
+                text("to_tsvector('english', document_chunks.content) @@ to_tsquery('english', :query)")
+            ).params(query=ts_query)
         else:
-            # SQLite / Basic LIKE Fallback
-            if search_terms:
-                clause = or_(*[DocumentChunk.content.ilike(f"%{term}%") for term in search_terms])
-                stmt = stmt.where(clause)
-            else:
-                stmt = stmt.where(DocumentChunk.content.ilike(f"%{query_text}%"))
+            stmt = stmt.where(DocumentChunk.content.ilike(f"%{query_text}%"))
+
+        chunks = db.scalars(stmt.limit(limit * 2)).all()
+        
+        # Grade matches by term occurrences
+        results = []
+        for chunk in chunks:
+            count = sum(1 for term in search_terms if term.lower() in chunk.content.lower())
+            score = 0.5 + (count / max(1, len(search_terms))) * 0.5
+            results.append((score, chunk))
+            
+        results.sort(key=lambda x: x[0], reverse=True)
+        return results[:limit]
 
         chunks = db.scalars(stmt.limit(limit * 2)).all()
         

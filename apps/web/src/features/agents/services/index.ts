@@ -145,9 +145,7 @@ export async function* streamAgentFetch(
   getToken: () => string | null,
   getOrgId: () => string | null,
 ): AsyncGenerator<{ event: string; data: any }> {
-  const API_BASE = typeof window !== 'undefined'
-    ? (window.location.port === '3000' ? 'http://localhost:8000/api/v1' : '/api/v1')
-    : 'http://localhost:8000/api/v1';
+  const API_BASE = apiClient.defaults.baseURL || '/api/v1';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

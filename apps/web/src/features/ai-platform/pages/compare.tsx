@@ -80,6 +80,7 @@ const factorial = n => n === 1 ? 1 : n * factorial(n - 1);
 
 export function ComparePage() {
   const { models } = useModels();
+  const [activeCategory, setActiveCategory] = React.useState<'text' | 'image'>('text');
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [prompt, setPrompt] = React.useState('Explain recursion simply with a short code example.');
   const [comparisonList, setComparisonList] = React.useState<ModelComparisonState[]>([]);
@@ -87,11 +88,16 @@ export function ComparePage() {
 
   // Set default models on load
   React.useEffect(() => {
-    if (models.length > 0 && selectedIds.length === 0) {
-      const chatModels = models.filter((m) => m.supports_streaming).slice(0, 3);
-      setSelectedIds(chatModels.map((m) => m.id));
+    if (models.length > 0) {
+      if (activeCategory === 'image') {
+        const imageModels = models.filter((m) => m.supports_images).slice(0, 3);
+        setSelectedIds(imageModels.map((m) => m.id));
+      } else {
+        const chatModels = models.filter((m) => m.supports_streaming).slice(0, 3);
+        setSelectedIds(chatModels.map((m) => m.id));
+      }
     }
-  }, [models, selectedIds]);
+  }, [models, activeCategory]);
 
   const handleCheckboxToggle = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -108,6 +114,7 @@ export function ComparePage() {
       setSelectedIds([...selectedIds, id]);
     }
   };
+
   const handleRunComparison = async () => {
     if (isRunning) return;
     setIsRunning(true);
@@ -134,7 +141,8 @@ export function ComparePage() {
       const modelNames = selectedModels.map((m) => m.model_name);
       const res = await apiClient.post('/ai/compare/', {
         prompt,
-        model_names: modelNames
+        model_names: modelNames,
+        category: activeCategory
       });
 
       const results = res.data.results || [];
@@ -178,6 +186,7 @@ export function ComparePage() {
       setIsRunning(false);
     }
   };
+
   return (
     <div className="flex flex-col gap-6 max-w-[1400px] mx-auto pb-12">
       <PageHeader
@@ -187,12 +196,46 @@ export function ComparePage() {
         badge={<Badge variant="violet">Performance Lab</Badge>}
       />
 
+      {/* Capability Tabs */}
+      <div className="flex gap-2 border-b border-white/5 pb-2 mb-4">
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setActiveCategory('text');
+            setPrompt('Explain recursion simply with a short code example.');
+            setComparisonList([]);
+          }}
+          className={`px-4 py-2 text-xs border-b-2 rounded-none hover:bg-transparent ${
+            activeCategory === 'text' 
+              ? 'border-violet-500 text-violet-400 font-bold' 
+              : 'border-transparent text-neutral-400'
+          }`}
+        >
+          Text Inferences
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setActiveCategory('image');
+            setPrompt('A futuristic high-tech neon cyber city at night, masterpiece, photorealistic.');
+            setComparisonList([]);
+          }}
+          className={`px-4 py-2 text-xs border-b-2 rounded-none hover:bg-transparent ${
+            activeCategory === 'image' 
+              ? 'border-violet-500 text-violet-400 font-bold' 
+              : 'border-transparent text-neutral-400'
+          }`}
+        >
+          Image Generation
+        </Button>
+      </div>
+
       {/* Models Selection Card */}
       <Card className="flex flex-col gap-4">
         <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Select up to 3 models to compare</span>
         <div className="flex flex-wrap gap-4">
           {models
-            .filter((m) => m.supports_streaming)
+            .filter((m) => activeCategory === 'image' ? m.supports_images : m.supports_streaming)
             .map((m) => {
               const checked = selectedIds.includes(m.id);
               return (
@@ -280,24 +323,42 @@ export function ComparePage() {
               {/* Completion Response Text Screen */}
               <div className="flex-1 p-3.5 rounded-xl bg-black/40 border border-white/5 font-sans text-xs text-neutral-300 min-h-[300px] overflow-y-auto leading-relaxed max-h-[350px]">
                 {c.response ? (
-                  // Simple high-fidelity render helper for Markdown preview
-                  <div className="flex flex-col gap-3">
-                    {c.response.split('\n\n').map((para, idx) => {
-                      if (para.startsWith('###')) {
-                        return <h4 key={idx} className="text-white font-bold text-sm mt-1">{para.replace('###', '').trim()}</h4>;
-                      }
-                      if (para.startsWith('-')) {
-                        return (
-                          <ul key={idx} className="list-disc pl-5 flex flex-col gap-1">
-                            {para.split('\n').map((li, j) => (
-                              <li key={j}>{li.replace('-', '').trim()}</li>
-                            ))}
-                          </ul>
-                        );
-                      }
-                      return <p key={idx}>{para}</p>;
-                    })}
-                  </div>
+                  activeCategory === 'image' ? (
+                    <div className="flex flex-col gap-2 items-center justify-center h-full">
+                      <img 
+                        src={c.response} 
+                        alt={c.modelName} 
+                        className="rounded-xl max-h-[250px] border border-white/5 object-cover w-full shadow-lg"
+                      />
+                      <a 
+                        href={c.response} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="text-[10px] text-violet-400 hover:underline font-mono"
+                      >
+                        Open Original URL
+                      </a>
+                    </div>
+                  ) : (
+                    // Simple high-fidelity render helper for Markdown preview
+                    <div className="flex flex-col gap-3">
+                      {c.response.split('\n\n').map((para, idx) => {
+                        if (para.startsWith('###')) {
+                          return <h4 key={idx} className="text-white font-bold text-sm mt-1">{para.replace('###', '').trim()}</h4>;
+                        }
+                        if (para.startsWith('-')) {
+                          return (
+                            <ul key={idx} className="list-disc pl-5 flex flex-col gap-1">
+                              {para.split('\n').map((li, j) => (
+                                <li key={j}>{li.replace('-', '').trim()}</li>
+                              ))}
+                            </ul>
+                          );
+                        }
+                        return <p key={idx}>{para}</p>;
+                      })}
+                    </div>
+                  )
                 ) : (
                   <span className="text-neutral-600 font-mono italic animate-pulse">Running model query calculations...</span>
                 )}

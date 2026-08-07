@@ -7,6 +7,8 @@ export interface UserProfile {
   full_name: string;
   is_active: boolean;
   is_superuser: boolean;
+  role?: string | null;
+  permissions?: string[];
 }
 
 export interface Organization {

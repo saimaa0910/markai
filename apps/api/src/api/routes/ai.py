@@ -1,5 +1,6 @@
 import uuid
 from typing import Any, List, Optional, Dict
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_, func
@@ -286,6 +287,79 @@ def search_prompts(
         limit=getattr(req, "limit", 50) or 50
     )
     return prompts
+
+
+class PromptTestRequest(BaseModel):
+    system_prompt: Optional[str] = None
+    user_prompt: str
+    model_name: str
+
+
+@prompts_router.post("/test")
+def test_prompt(
+    req: PromptTestRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Runs a sandboxed prompt execution using the centralized AI Gateway."""
+    from api.ai.gateway.coordinator import AIGateway
+    gateway = AIGateway()
+    import time
+    
+    messages = [{"role": "user", "content": req.user_prompt}]
+    if req.system_prompt:
+        messages.insert(0, {"role": "system", "content": req.system_prompt})
+        
+    start_time = time.perf_counter()
+    res = gateway.chat(
+        db=db,
+        messages=messages,
+        organization_id=membership.organization_id,
+        user_id=membership.user_id,
+        model_name=req.model_name
+    )
+    latency_ms = int((time.perf_counter() - start_time) * 1000)
+    
+    return {
+        "output": res["content"],
+        "provider": res.get("provider", "unknown"),
+        "model": req.model_name,
+        "tokens_used": res.get("prompt_tokens", 0) + res.get("completion_tokens", 0),
+        "cost_usd": float(res.get("cost_usd", 0.0)),
+        "latency_ms": latency_ms
+    }
+
+
+@prompts_router.post("/test/stream")
+def test_prompt_stream(
+    req: PromptTestRequest,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    """Streams a sandboxed prompt execution using the centralized AI Gateway."""
+    from api.ai.gateway.coordinator import AIGateway
+    gateway = AIGateway()
+    import json
+    
+    messages = [{"role": "user", "content": req.user_prompt}]
+    if req.system_prompt:
+        messages.insert(0, {"role": "system", "content": req.system_prompt})
+        
+    def sse_generator():
+        try:
+            chunks = gateway.stream(
+                db=db,
+                messages=messages,
+                organization_id=membership.organization_id,
+                user_id=membership.user_id,
+                model_name=req.model_name
+            )
+            for chunk in chunks:
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            
+    return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
 
 @prompts_router.get("/shared/{token}", response_model=PromptResponse)
@@ -1121,12 +1195,47 @@ def sync_providers_and_models(db: Session) -> None:
     """
     Synchronize dynamic list of providers and models in PostgreSQL.
     """
-    provider_names = ["groq", "openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "ollama"]
+    from sqlalchemy import text
+    try:
+        db.execute(text("ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS config JSONB"))
+        db.commit()
+    except Exception:
+        try:
+            db.execute(text("ALTER TABLE ai_providers ADD COLUMN config JSON"))
+            db.commit()
+        except Exception:
+            pass
+
+    try:
+        db.execute(text("ALTER TABLE ai_models ADD COLUMN IF NOT EXISTS supports_images BOOLEAN DEFAULT FALSE"))
+        db.commit()
+    except Exception:
+        try:
+            db.execute(text("ALTER TABLE ai_models ADD COLUMN supports_images BOOLEAN"))
+            db.commit()
+        except Exception:
+            pass
+
+    try:
+        db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0"))
+        db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS capability VARCHAR(50) DEFAULT 'text'"))
+        db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS agent VARCHAR(100)"))
+        db.commit()
+    except Exception:
+        try:
+            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN retry_count INTEGER"))
+            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN capability VARCHAR(50)"))
+            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN agent VARCHAR(100)"))
+            db.commit()
+        except Exception:
+            pass
+
+    provider_names = ["groq", "openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "ollama", "cloudflare", "pollinations", "replicate", "together", "fal", "stability", "ideogram", "blackforestlabs"]
     providers = {}
     for name in provider_names:
         prov = db.query(AIProvider).filter(AIProvider.name == name).first()
         if not prov:
-            prov = AIProvider(name=name, is_active=True, priority=1)
+            prov = AIProvider(name=name, is_active=True, priority=1, config={})
             db.add(prov)
             db.flush()
         providers[name] = prov
@@ -1175,6 +1284,7 @@ def sync_providers_and_models(db: Session) -> None:
             context_window=131072 if "70b" in model_name or model_name == "openai/gpt-oss-120b" else 8192,
             supports_streaming=True,
             supports_json=True,
+            supports_images=False,
             input_token_price=Decimal("0.0000"),
             output_token_price=Decimal("0.0000"),
             latency=Decimal("0.20"),
@@ -1184,14 +1294,28 @@ def sync_providers_and_models(db: Session) -> None:
         db.add(reg)
         registry_models[model_name] = reg
 
-    # Seed DeepSeek, Mistral, Ollama models in AIModelRegistry
+    # Seed additional models in AIModelRegistry
     new_provider_models = [
-        {"provider": "deepseek", "model_name": "deepseek-chat", "context_window": 64000, "supports_streaming": True, "supports_json": True, "priority": 10},
-        {"provider": "deepseek", "model_name": "deepseek-reasoner", "context_window": 64000, "supports_streaming": True, "supports_json": False, "priority": 10},
-        {"provider": "mistral", "model_name": "mistral-large-latest", "context_window": 32000, "supports_streaming": True, "supports_json": True, "priority": 9},
-        {"provider": "mistral", "model_name": "open-mixtral-8x22b", "context_window": 64000, "supports_streaming": True, "supports_json": True, "priority": 8},
-        {"provider": "ollama", "model_name": "llama3", "context_window": 8192, "supports_streaming": True, "supports_json": True, "priority": 7},
-        {"provider": "ollama", "model_name": "mistral", "context_window": 8192, "supports_streaming": True, "supports_json": True, "priority": 7},
+        {"provider": "deepseek", "model_name": "deepseek-chat", "context_window": 64000, "supports_streaming": True, "supports_json": True, "supports_images": False, "priority": 10},
+        {"provider": "deepseek", "model_name": "deepseek-reasoner", "context_window": 64000, "supports_streaming": True, "supports_json": False, "supports_images": False, "priority": 10},
+        {"provider": "mistral", "model_name": "mistral-large-latest", "context_window": 32000, "supports_streaming": True, "supports_json": True, "supports_images": False, "priority": 9},
+        {"provider": "mistral", "model_name": "open-mixtral-8x22b", "context_window": 64000, "supports_streaming": True, "supports_json": True, "supports_images": False, "priority": 8},
+        {"provider": "ollama", "model_name": "llama3", "context_window": 8192, "supports_streaming": True, "supports_json": True, "supports_images": False, "priority": 7},
+        {"provider": "ollama", "model_name": "mistral", "context_window": 8192, "supports_streaming": True, "supports_json": True, "supports_images": False, "priority": 7},
+        # Cloudflare Workers AI
+        {"provider": "cloudflare", "model_name": "@cf/stabilityai/stable-diffusion-xl-base-1.0", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 6},
+        {"provider": "cloudflare", "model_name": "@cf/meta/llama-3-8b-instruct", "context_window": 8192, "supports_streaming": True, "supports_json": True, "supports_images": False, "priority": 5},
+        # Pollinations
+        {"provider": "pollinations", "model_name": "flux-schnell", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 8},
+        {"provider": "pollinations", "model_name": "flux-dev", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 7},
+        {"provider": "pollinations", "model_name": "sdxl", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 6},
+        # Other multi-modal
+        {"provider": "replicate", "model_name": "replicate/flux-1.1-pro", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 5},
+        {"provider": "together", "model_name": "togethercomputer/llama-2-70b-chat", "context_window": 4096, "supports_streaming": True, "supports_json": True, "supports_images": False, "priority": 5},
+        {"provider": "stability", "model_name": "stable-diffusion-xl", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 5},
+        {"provider": "ideogram", "model_name": "ideogram-v1", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 5},
+        {"provider": "blackforestlabs", "model_name": "flux-pro", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 5},
+        {"provider": "fal", "model_name": "fal-ai/flux/schnell", "context_window": 0, "supports_streaming": False, "supports_json": False, "supports_images": True, "priority": 5},
     ]
     for pm in new_provider_models:
         if pm["model_name"] in registry_models:
@@ -1202,6 +1326,7 @@ def sync_providers_and_models(db: Session) -> None:
             context_window=pm["context_window"],
             supports_streaming=pm["supports_streaming"],
             supports_json=pm["supports_json"],
+            supports_images=pm["supports_images"],
             input_token_price=Decimal("0.0000"),
             output_token_price=Decimal("0.0000"),
             latency=Decimal("0.30"),
@@ -1229,19 +1354,183 @@ def sync_providers_and_models(db: Session) -> None:
                     supports_vision=reg_model.supports_vision,
                     supports_tools=reg_model.supports_tool_calling,
                     supports_json=reg_model.supports_json,
+                    supports_images=reg_model.supports_images,
                     is_active=True
                 )
                 db.add(m)
     db.commit()
 
 
-@providers_router.get("/", response_model=List[ProviderResponse])
+def resolve_provider_capabilities(provider_name: str, models: list) -> list:
+    caps = []
+    # Check multi-modal registry first
+    from api.ai.providers.base_provider import ProviderRegistry
+    provider_instance = ProviderRegistry.get_provider(provider_name)
+    if provider_instance:
+        caps_dict = provider_instance.capabilities()
+        for k, v in caps_dict.items():
+            if v and k.startswith("supports_"):
+                cap_name = k.replace("supports_", "")
+                if cap_name == "generation":
+                    caps.append("Image Generation")
+                elif cap_name == "editing":
+                    caps.append("Image Editing")
+                elif cap_name == "variation":
+                    caps.append("Image Variations")
+                elif cap_name == "upscale":
+                    caps.append("Image Upscaling")
+                else:
+                    caps.append(cap_name.capitalize())
+    
+    # Also check database model capabilities
+    prov_models = [m for m in models if m.provider == provider_name]
+    if any(m.supports_streaming for m in prov_models) or (prov_models and not caps):
+        if "Text" not in caps: caps.append("Text")
+        if "Chat" not in caps: caps.append("Chat")
+        if "Streaming" not in caps: caps.append("Streaming")
+    if any(m.supports_vision for m in prov_models):
+        if "Vision" not in caps: caps.append("Vision")
+    if any(m.supports_json for m in prov_models):
+        if "JSON" not in caps: caps.append("JSON")
+    if any(m.supports_images for m in prov_models):
+        if "Image Generation" not in caps: caps.append("Image Generation")
+    if any(m.supports_embeddings for m in prov_models):
+        if "Embeddings" not in caps: caps.append("Embeddings")
+        
+    return list(set(caps))
+
+
+@providers_router.get("/")
 def get_providers(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
     sync_providers_and_models(db)
-    return db.query(AIProvider).order_by(AIProvider.priority.desc()).all()
+    provs = db.query(AIProvider).order_by(AIProvider.priority.desc()).all()
+    models = db.query(AIModelRegistry).all()
+    
+    # Fetch recent usage records to calculate statistics
+    usages = db.query(AITokenUsage).filter(
+        AITokenUsage.organization_id == membership.organization_id
+    ).all()
+    
+    # Fetch organization default settings to append defaults badges
+    from api.models.membership import OrganizationSettings
+    settings_rows = db.query(OrganizationSettings).filter(
+        OrganizationSettings.organization_id == membership.organization_id,
+        OrganizationSettings.namespace == "ai"
+    ).all()
+    settings_dict = {row.key: row.value for row in settings_rows}
+    
+    out = []
+    for prov in provs:
+        prov_name = prov.name.lower()
+        caps = resolve_provider_capabilities(prov_name, models)
+        prov_models = [m.model_name for m in models if m.provider == prov_name]
+        
+        # Health check
+        health_check = db.query(AIProviderHealth).filter(
+            AIProviderHealth.provider_id == prov.id
+        ).order_by(AIProviderHealth.last_checked.desc()).first()
+        
+        status = "Healthy" if prov.is_active else "Offline"
+        latency = 0.0
+        last_error = None
+        last_checked = None
+        
+        if health_check:
+            latency = float(health_check.latency)
+            last_checked = health_check.last_checked.isoformat() if health_check.last_checked else None
+            if not health_check.is_healthy:
+                status = "Offline"
+                last_error = health_check.error_message
+                
+        # Recent health stats
+        recent_checks = db.query(AIProviderHealth).filter(
+            AIProviderHealth.provider_id == prov.id
+        ).order_by(AIProviderHealth.last_checked.desc()).limit(20).all()
+        
+        if recent_checks:
+            successes = sum(1 for c in recent_checks if c.is_healthy)
+            success_rate = (successes / len(recent_checks)) * 100.0
+            failure_rate = 100.0 - success_rate
+        else:
+            success_rate = 100.0
+            failure_rate = 0.0
+            
+        # Usage stats
+        import datetime
+        now = datetime.datetime.utcnow()
+        today_start = now - datetime.timedelta(days=1)
+        seven_days_start = now - datetime.timedelta(days=7)
+        thirty_days_start = now - datetime.timedelta(days=30)
+        
+        def _get_naive_dt(u):
+            val = getattr(u, "created_at", None) or now
+            return val.replace(tzinfo=None) if val.tzinfo else val
+            
+        prov_usages = [u for u in usages if u.provider == prov_name]
+        
+        # Today
+        today_usages = [u for u in prov_usages if _get_naive_dt(u) >= today_start]
+        today_req = len(today_usages)
+        today_tokens = sum(u.total_tokens for u in today_usages)
+        today_cost = sum(float(u.cost_usd) for u in today_usages)
+        
+        # 7d
+        seven_usages = [u for u in prov_usages if _get_naive_dt(u) >= seven_days_start]
+        seven_req = len(seven_usages)
+        seven_tokens = sum(u.total_tokens for u in seven_usages)
+        seven_cost = sum(float(u.cost_usd) for u in seven_usages)
+        
+        # 30d
+        thirty_usages = [u for u in prov_usages if _get_naive_dt(u) >= thirty_days_start]
+        thirty_req = len(thirty_usages)
+        thirty_tokens = sum(u.total_tokens for u in thirty_usages)
+        thirty_cost = sum(float(u.cost_usd) for u in thirty_usages)
+        
+        # Determine defaults
+        is_default = False
+        default_for = []
+        for k, v in settings_dict.items():
+            if k.startswith("default_") and v == prov_name:
+                is_default = True
+                default_for.append(k.replace("default_", "").replace("_provider", "").capitalize())
+                
+        # Mask configuration values
+        masked_config = {}
+        if prov.config:
+            for k, v in prov.config.items():
+                if k in ("api_key", "secret_key") and v:
+                    masked_config[k] = "sk-••••" + v[-4:] if len(v) > 4 else "sk-••••"
+                else:
+                    masked_config[k] = v
+
+        out.append({
+            "id": str(prov.id),
+            "name": prov.name,
+            "is_active": prov.is_active,
+            "priority": prov.priority,
+            "config": masked_config,
+            "status": status,
+            "latency": latency,
+            "success_rate": success_rate,
+            "failure_rate": failure_rate,
+            "last_error": last_error,
+            "last_checked": last_checked,
+            "supported_models": prov_models,
+            "supported_capabilities": caps,
+            "estimated_cost": 0.04,
+            "is_default": is_default,
+            "default_for": default_for,
+            "usage": {
+                "today": {"requests": today_req, "tokens": today_tokens, "cost": today_cost},
+                "last_7_days": {"requests": seven_req, "tokens": seven_tokens, "cost": seven_cost},
+                "last_30_days": {"requests": thirty_req, "tokens": thirty_tokens, "cost": thirty_cost}
+            }
+        })
+        
+    return out
 
 
 @providers_router.get("/{provider_name}/models", response_model=List[ModelRegistryResponse])
@@ -1263,7 +1552,7 @@ def create_provider(
     existing = db.query(AIProvider).filter(AIProvider.name == prov_in.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Provider name already exists.")
-    prov = AIProvider(name=prov_in.name, is_active=prov_in.is_active, priority=prov_in.priority or 1)
+    prov = AIProvider(name=prov_in.name, is_active=prov_in.is_active, priority=prov_in.priority or 1, config={})
     db.add(prov)
     db.commit()
     db.refresh(prov)
@@ -1282,11 +1571,149 @@ def update_provider(
         raise HTTPException(status_code=404, detail="Provider not found.")
     
     update_data = prov_in.model_dump(exclude_unset=True)
+    
+    if "config" in update_data and update_data["config"]:
+        from api.core.encryption import encrypt_key
+        config = dict(prov.config or {})
+        new_config = update_data["config"]
+        
+        # If API key is provided and is not masked, encrypt it!
+        if "api_key" in new_config and new_config["api_key"] and not new_config["api_key"].startswith("sk-") and "********" not in new_config["api_key"]:
+            new_config["api_key"] = encrypt_key(new_config["api_key"])
+        elif "api_key" in new_config and (not new_config["api_key"] or new_config["api_key"].startswith("sk-") or "********" in new_config["api_key"]):
+            if "api_key" in config:
+                new_config["api_key"] = config["api_key"]
+                
+        if "secret_key" in new_config and new_config["secret_key"] and not new_config["secret_key"].startswith("sk-") and "********" not in new_config["secret_key"]:
+            new_config["secret_key"] = encrypt_key(new_config["secret_key"])
+        elif "secret_key" in new_config and (not new_config["secret_key"] or new_config["secret_key"].startswith("sk-") or "********" in new_config["secret_key"]):
+            if "secret_key" in config:
+                new_config["secret_key"] = config["secret_key"]
+                
+        config.update(new_config)
+        prov.config = config
+        del update_data["config"]
+        
     for field, value in update_data.items():
         setattr(prov, field, value)
+        
     db.commit()
     db.refresh(prov)
     return prov
+
+
+@providers_router.post("/{id}/health-check")
+def trigger_provider_health_check(
+    id: uuid.UUID,
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+) -> Any:
+    prov = db.query(AIProvider).filter(AIProvider.id == id).first()
+    if not prov:
+        raise HTTPException(status_code=404, detail="Provider not found.")
+    
+    prov_name_lower = prov.name.lower()
+    
+    # Run health check
+    is_healthy = False
+    error_message = None
+    start_time = time.perf_counter()
+    
+    try:
+        from api.ai.providers.base_provider import ProviderRegistry
+        # If registered in visual/multi-modal registry
+        if ProviderRegistry.get_provider_cls(prov_name_lower):
+            provider_instance = ProviderRegistry.get_provider(prov_name_lower)
+            if provider_instance:
+                api_key = None
+                if prov.config:
+                    from api.core.encryption import decrypt_key
+                    encrypted_key = prov.config.get("api_key")
+                    if encrypted_key:
+                        api_key = decrypt_key(encrypted_key)
+                provider_instance.api_key = api_key or os.getenv(f"{prov.name.upper()}_API_KEY")
+                is_healthy = provider_instance.health()
+        else:
+            from api.ai.gateway.coordinator import AIGateway
+            gateway = AIGateway()
+            adapter = gateway._get_provider_adapter(db, prov.name, membership.organization_id)
+            if adapter:
+                is_healthy = adapter.health()
+    except Exception as e:
+        error_message = str(e)
+        
+    latency_ms = int((time.perf_counter() - start_time) * 1000)
+    
+    health_record = AIProviderHealth(
+        provider_id=prov.id,
+        latency=float(latency_ms),
+        is_healthy=is_healthy,
+        last_checked=datetime.datetime.utcnow(),
+        error_message=error_message
+    )
+    db.add(health_record)
+    db.commit()
+    
+    return {
+        "provider_name": prov.name,
+        "is_healthy": is_healthy,
+        "latency": float(latency_ms),
+        "last_checked": health_record.last_checked.isoformat(),
+        "error_message": error_message
+    }
+
+
+@providers_router.get("/logs")
+def get_execution_logs(
+    db: Session = Depends(get_db),
+    membership: UserOrganization = Depends(active_member),
+    provider: Optional[str] = Query(None),
+    capability: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=100)
+) -> Any:
+    query = select(AITokenUsage).where(
+        AITokenUsage.organization_id == membership.organization_id
+    )
+    
+    if provider:
+        query = query.where(func.lower(AITokenUsage.provider) == provider.lower())
+    if capability:
+        query = query.where(func.lower(AITokenUsage.capability) == capability.lower())
+    if status:
+        query = query.where(func.lower(AITokenUsage.status) == status.lower())
+        
+    query = query.order_by(AITokenUsage.id.desc()).limit(limit)
+    rows = db.scalars(query).all()
+    
+    from api.models.user import User
+    from api.models.organization import Organization
+    
+    out = []
+    for r in rows:
+        user = db.query(User).filter(User.id == r.user_id).first()
+        org = db.query(Organization).filter(Organization.id == r.organization_id).first()
+        
+        c = getattr(r, "capability", "text")
+        retries = getattr(r, "retry_count", 0)
+        agent = getattr(r, "agent", "system")
+        
+        out.append({
+            "id": str(r.id),
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "provider": r.provider,
+            "model": r.model_name,
+            "capability": c or "text",
+            "latency": r.latency_ms,
+            "cost": float(r.cost_usd),
+            "status": r.status,
+            "error": r.error_message,
+            "retry_count": retries or 0,
+            "agent": agent or "system",
+            "user": user.full_name if user else "Unknown User",
+            "organization": org.name if org else "Unknown Org"
+        })
+    return out
 
 
 @providers_router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1993,7 +2420,17 @@ def get_router_settings(
     return {
         "routing_mode": settings_dict.get("routing_mode", "cheapest"),
         "fallback_provider": settings_dict.get("fallback_provider", "groq"),
-        "is_active": to_bool(settings_dict.get("is_active", "true"))
+        "is_active": to_bool(settings_dict.get("is_active", "true")),
+        "default_text_provider": settings_dict.get("default_text_provider", "openai"),
+        "default_image_provider": settings_dict.get("default_image_provider", "pollinations"),
+        "default_video_provider": settings_dict.get("default_video_provider", "pollinations"),
+        "default_audio_provider": settings_dict.get("default_audio_provider", "openai"),
+        "default_speech_provider": settings_dict.get("default_speech_provider", "openai"),
+        "default_embeddings_provider": settings_dict.get("default_embeddings_provider", "openai"),
+        "default_vision_provider": settings_dict.get("default_vision_provider", "google"),
+        "default_ocr_provider": settings_dict.get("default_ocr_provider", "google"),
+        "default_moderation_provider": settings_dict.get("default_moderation_provider", "openai"),
+        "default_multimodal_provider": settings_dict.get("default_multimodal_provider", "google")
     }
 
 
@@ -2024,13 +2461,19 @@ def update_router_settings(
             )
             db.add(row)
 
-    if settings_in.routing_mode is not None:
-        set_setting("routing_mode", settings_in.routing_mode)
-    if settings_in.fallback_provider is not None:
-        set_setting("fallback_provider", settings_in.fallback_provider)
-    if settings_in.is_active is not None:
-        set_setting("is_active", settings_in.is_active)
-        
+    fields = [
+        "routing_mode", "fallback_provider", "is_active",
+        "default_text_provider", "default_image_provider", "default_video_provider",
+        "default_audio_provider", "default_speech_provider", "default_embeddings_provider",
+        "default_vision_provider", "default_ocr_provider", "default_moderation_provider",
+        "default_multimodal_provider"
+    ]
+    
+    update_data = settings_in.model_dump(exclude_unset=True)
+    for f in fields:
+        if f in update_data:
+            set_setting(f, update_data[f])
+            
     db.commit()
     return get_router_settings(db, membership)
 
@@ -2045,29 +2488,105 @@ def compare_models(
     gateway = AIGateway()
     
     results = []
+    category = getattr(req, "category", "text")
+    
     for model_name in req.model_names:
-        messages = [{"role": "user", "content": req.prompt}]
-        if req.system_prompt:
-            messages.insert(0, {"role": "system", "content": req.system_prompt})
-            
         try:
-            res = gateway.chat(
-                db=db,
-                messages=messages,
-                organization_id=membership.organization_id,
-                user_id=membership.user_id,
-                model_name=model_name
-            )
-            results.append({
-                "model_name": model_name,
-                "provider": res.get("provider", "unknown"),
-                "response": res["content"],
-                "latency_ms": res.get("latency_ms", 0),
-                "prompt_tokens": res.get("prompt_tokens", 0),
-                "completion_tokens": res.get("completion_tokens", 0),
-                "cost_usd": float(res.get("cost_usd", 0.0)),
-                "status": "success"
-            })
+            if category == "image":
+                from api.ai.agents.image.provider_router import ImageProviderRouter
+                image_router = ImageProviderRouter(db, membership.organization_id, membership.user_id)
+                model_meta = db.query(AIModelRegistry).filter(AIModelRegistry.model_name == model_name).first()
+                provider = model_meta.provider if model_meta else "pollinations"
+                
+                import time
+                start_time = time.perf_counter()
+                image_bytes, resolved_prov, resolved_model = image_router.generate_image(
+                    prompt=req.prompt,
+                    width=512,
+                    height=512,
+                    model=model_name
+                )
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                
+                from api.ai.agents.image.asset_manager import AssetManager
+                import uuid
+                file_asset = AssetManager.save_image_asset(
+                    db=db,
+                    image_bytes=image_bytes,
+                    filename=f"compare_creative_{uuid.uuid4().hex[:8]}.png",
+                    organization_id=membership.organization_id
+                )
+                
+                usage_record = AITokenUsage(
+                    organization_id=membership.organization_id,
+                    user_id=membership.user_id,
+                    provider=resolved_prov,
+                    model_name=resolved_model,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    cost_usd=0.04,
+                    latency_ms=latency_ms,
+                    status="success",
+                    capability="image",
+                    agent="compare_lab"
+                )
+                db.add(usage_record)
+                db.commit()
+                
+                results.append({
+                    "model_name": model_name,
+                    "provider": resolved_prov,
+                    "response": file_asset.storage_url,
+                    "latency_ms": latency_ms,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "cost_usd": 0.04,
+                    "status": "success"
+                })
+            else:
+                messages = [{"role": "user", "content": req.prompt}]
+                if req.system_prompt:
+                    messages.insert(0, {"role": "system", "content": req.system_prompt})
+                    
+                import time
+                start_time = time.perf_counter()
+                res = gateway.chat(
+                    db=db,
+                    messages=messages,
+                    organization_id=membership.organization_id,
+                    user_id=membership.user_id,
+                    model_name=model_name
+                )
+                latency_ms = int((time.perf_counter() - start_time) * 1000)
+                
+                usage_record = AITokenUsage(
+                    organization_id=membership.organization_id,
+                    user_id=membership.user_id,
+                    provider=res.get("provider", "unknown"),
+                    model_name=model_name,
+                    prompt_tokens=res.get("prompt_tokens", 0),
+                    completion_tokens=res.get("completion_tokens", 0),
+                    total_tokens=res.get("prompt_tokens", 0) + res.get("completion_tokens", 0),
+                    cost_usd=float(res.get("cost_usd", 0.0)),
+                    latency_ms=latency_ms,
+                    status="success",
+                    capability="text",
+                    agent="compare_lab"
+                )
+                db.add(usage_record)
+                db.commit()
+                
+                results.append({
+                    "model_name": model_name,
+                    "provider": res.get("provider", "unknown"),
+                    "response": res["content"],
+                    "latency_ms": latency_ms,
+                    "prompt_tokens": res.get("prompt_tokens", 0),
+                    "completion_tokens": res.get("completion_tokens", 0),
+                    "cost_usd": float(res.get("cost_usd", 0.0)),
+                    "status": "success"
+                })
         except Exception as e:
             results.append({
                 "model_name": model_name,

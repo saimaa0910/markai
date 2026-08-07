@@ -73,21 +73,6 @@ class KnowledgeService:
         db.commit()
         db.refresh(doc)
         return doc
-
-    @staticmethod
-    def _cosine_similarity(v1: List[float], v2: List[float]) -> float:
-        """
-        Calculate cosine similarity between two vectors.
-        """
-        if not v1 or not v2 or len(v1) != len(v2):
-            return 0.0
-        dot_product = sum(a * b for a, b in zip(v1, v2))
-        norm_a = math.sqrt(sum(a * a for a in v1))
-        norm_b = math.sqrt(sum(b * b for b in v2))
-        if norm_a == 0.0 or norm_b == 0.0:
-            return 0.0
-        return dot_product / (norm_a * norm_b)
-
     @classmethod
     def query_similar_chunks(
         self,
@@ -98,50 +83,19 @@ class KnowledgeService:
         limit: int = 3,
     ) -> List[DocumentChunk]:
         """
-        Perform vector similarity search. Use native pgvector operators on PostgreSQL,
-        otherwise fall back to in-memory Python calculations on SQLite/development setups.
+        Perform vector similarity search using native pgvector operators.
         """
         gateway = AIGateway()
         query_embedding = gateway.embeddings(
             db=db, text=query_text, organization_id=organization_id, user_id=user_id
         )
 
-        if db.bind.dialect.name == "postgresql":
-            try:
-                # Use pgvector.sqlalchemy's cosine_distance operator if pgvector is available
-                query = (
-                    select(DocumentChunk)
-                    .where(DocumentChunk.organization_id == organization_id)
-                    .order_by(DocumentChunk.embedding.cosine_distance(query_embedding))
-                    .limit(limit)
-                )
-                return list(db.scalars(query).all())
-            except Exception:
-                pass  # Fall back to Python calculation if pgvector operator failed
-
-        # SQLite/In-Memory Python fallback similarity logic
-        all_chunks = list(
-            db.scalars(
-                select(DocumentChunk).where(DocumentChunk.organization_id == organization_id)
-            ).all()
+        from api.models.knowledge import DocumentChunkEmbedding
+        query = (
+            select(DocumentChunk)
+            .join(DocumentChunkEmbedding, DocumentChunk.id == DocumentChunkEmbedding.chunk_id)
+            .where(DocumentChunk.organization_id == organization_id)
+            .order_by(DocumentChunkEmbedding.embedding.cosine_distance(query_embedding))
+            .limit(limit)
         )
-
-        # Calculate cosine similarity score for each candidate chunk
-        scored_chunks = []
-        for chunk in all_chunks:
-            # Ensure chunk.embedding is parsed if represented as string/JSON in DB
-            vec = chunk.embedding
-            if isinstance(vec, str):
-                import json
-                try:
-                    vec = json.loads(vec)
-                except Exception:
-                    pass
-            
-            if isinstance(vec, list):
-                score = self._cosine_similarity(query_embedding, vec)
-                scored_chunks.append((score, chunk))
-
-        # Sort descending by similarity score
-        scored_chunks.sort(key=lambda x: x[0], reverse=True)
-        return [chunk for score, chunk in scored_chunks[:limit]]
+        return list(db.scalars(query).all())

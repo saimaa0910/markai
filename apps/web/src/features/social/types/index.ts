@@ -138,6 +138,7 @@ export interface SocialGenerateRequest {
   temperature?: number;
   run_reflection?: boolean;
   run_evaluation?: boolean;
+  agent_id?: string;
 }
 
 export interface SocialStreamRequest extends SocialGenerateRequest {

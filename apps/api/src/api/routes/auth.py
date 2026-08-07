@@ -31,7 +31,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from api.core.config import settings
-from api.core.deps import get_current_user
+from api.core.deps import get_current_user, get_current_user_allow_inactive
 from api.core.security import (
     ALGORITHM,
     create_access_token,
@@ -48,10 +48,10 @@ from api.models.user import User
 from api.schemas.token import Token
 from api.schemas.user import UserCreate, UserResponse
 from api.services.email_service import (
-    send_invitation_email,
     send_password_reset_email,
     send_verification_email,
     send_security_alert,
+    send_welcome_email,
 )
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -104,7 +104,7 @@ class MFADisableRequest(BaseModel):
 
 
 class OAuthTokenRequest(BaseModel):
-    provider: str
+    provider: Optional[str] = None
     access_token: str
     id_token: Optional[str] = None
     invitation_token: Optional[str] = None
@@ -297,6 +297,71 @@ def _generate_recovery_codes(count: int = 10) -> List[str]:
     return [str(secrets.randbelow(10**8)).zfill(8) for _ in range(count)]
 
 
+def _create_email_verification_token(db: Session, user_id: uuid.UUID) -> str:
+    """
+    Create a single-use email verification token.
+    Invalidates any previously unused tokens for this user.
+    Returns the raw token (to be sent via email, not stored).
+    """
+    from api.models.email_verification import EmailVerificationToken
+
+    # Invalidate all existing unused tokens for this user
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user_id,
+        EmailVerificationToken.is_used == False,
+    ).update({"is_used": True})
+
+    # Generate new 128-bit secure token
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+    db_token = EmailVerificationToken(
+        user_id=user_id,
+        token_hash=token_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        is_used=False,
+    )
+    db.add(db_token)
+    db.commit()
+    return raw_token
+
+
+def _validate_and_consume_verification_token(
+    db: Session, raw_token: str, request: Optional[Request] = None
+) -> Optional[uuid.UUID]:
+    """
+    Validate a raw verification token.
+    Returns user_id if valid, None otherwise.
+    Marks token as used on success.
+    """
+    from api.models.email_verification import EmailVerificationToken
+
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    db_token = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == token_hash,
+        EmailVerificationToken.is_used == False,
+    ).first()
+
+    if not db_token:
+        return None
+
+    # Check expiry
+    expires_at = db_token.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        return None
+
+    # Consume token
+    db_token.is_used = True
+    db_token.used_at = datetime.now(timezone.utc)
+    if request and request.client:
+        db_token.ip_address = request.client.host
+    db.add(db_token)
+    db.commit()
+    return db_token.user_id
+
+
 # ─── Register ─────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -386,14 +451,13 @@ def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db
         db.refresh(user)
         log_audit(db, user.id, "USER_REGISTER", request, {"organization": org_name})
 
-    # Send verification email (non-blocking)
+    # Send verification email using secure DB token (non-blocking)
     if not user.is_verified:
-        token = create_access_token(user.id, expires_delta=timedelta(days=1))
-        verify_url = f"{settings.FRONTEND_URL}/auth/verify-email?token={token}"
         try:
+            raw_token = _create_email_verification_token(db, user.id)
+            verify_url = f"{settings.FRONTEND_URL}/auth/verify-email?token={raw_token}"
             send_verification_email(user.email, user.full_name, verify_url)
         except Exception as e:
-            # Non-fatal: log but don't fail registration
             import logging
             logging.getLogger("eaimos.auth").warning(f"Failed to send verification email: {e}")
 
@@ -424,8 +488,17 @@ def login(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect email or password")
 
     if not user.is_active:
-        log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Inactive account"})
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user account")
+        scheduled = user.scheduled_deletion_at
+        if scheduled and scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        is_pending_deletion = (
+            user.deletion_requested_at is not None
+            and scheduled is not None
+            and scheduled > datetime.now(timezone.utc)
+        )
+        if not is_pending_deletion:
+            log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Inactive account"})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user account")
 
     # Check if MFA is enabled
     if user.mfa_enabled:
@@ -467,6 +540,17 @@ def login(
         "refresh_token": refresh_token_str,
         "token_type": "bearer",
     }
+
+
+@router.post("/restore-account", status_code=status.HTTP_200_OK)
+def auth_restore_account(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_allow_inactive),
+) -> Any:
+    """Proxy route to restore inactive account using auth routing prefix."""
+    from api.routes.users import restore_account
+    return restore_account(request=request, db=db, current_user=current_user)
 
 
 # ─── Get Me ───────────────────────────────────────────────────────────────────
@@ -675,7 +759,7 @@ def verify_email(
     token: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> Any:
-    """Verify user's email address using the token from verification email."""
+    """Verify user's email address using the secure single-use DB token."""
     target_token = token
     if body and body.token:
         target_token = body.token
@@ -683,14 +767,22 @@ def verify_email(
     if not target_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token is required")
 
-    try:
-        payload = jwt.decode(target_token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("sub")
-        user_uuid = uuid.UUID(str(user_id))
-    except (JWTError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+    # Try DB token first (new secure flow)
+    user_id = _validate_and_consume_verification_token(db, target_token, request)
 
-    user = db.query(User).filter(User.id == user_uuid, User.is_active == True).first()
+    if not user_id:
+        # Fallback: try legacy JWT token (backwards compat for tokens already in-flight)
+        try:
+            payload = jwt.decode(target_token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+            sub = payload.get("sub")
+            user_id = uuid.UUID(str(sub))
+        except (JWTError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired verification token. Please request a new one.",
+            )
+
+    user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User not found or inactive")
 
@@ -701,7 +793,14 @@ def verify_email(
     user.email_verified_at = datetime.now(timezone.utc)
     db.commit()
     log_audit(db, user.id, "EMAIL_VERIFICATION_SUCCESS", request)
-    return {"success": True, "message": "Email successfully verified"}
+
+    # Send welcome email
+    try:
+        send_welcome_email(user.email, user.full_name)
+    except Exception:
+        pass
+
+    return {"success": True, "message": "Email successfully verified. Welcome to EAIMOS!"}
 
 
 # ─── Resend Verification ─────────────────────────────────────────────────────
@@ -723,9 +822,9 @@ def resend_verification(
 
     user = db.query(User).filter(User.email == target_email, User.is_active == True).first()
     if user and not user.is_verified:
-        token = create_access_token(user.id, expires_delta=timedelta(days=1))
-        verify_url = f"{settings.FRONTEND_URL}/auth/verify-email?token={token}"
         try:
+            raw_token = _create_email_verification_token(db, user.id)
+            verify_url = f"{settings.FRONTEND_URL}/auth/verify-email?token={raw_token}"
             send_verification_email(user.email, user.full_name, verify_url)
         except Exception as e:
             import logging
@@ -1141,7 +1240,7 @@ def oauth_token_exchange(
 def _validate_oauth_token(provider: str, access_token: str, id_token: Optional[str] = None) -> Optional[dict]:
     """Validate OAuth token with the provider and return user info."""
     # Local development bypass for testing & UI compatibility
-    if settings.ENVIRONMENT == "development" and access_token.startswith("mock_"):
+    if settings.ENVIRONMENT in ("development", "test") and access_token.startswith("mock_"):
         email = f"{access_token.replace('mock_', '')}@example.com"
         name = access_token.replace('mock_', '').replace('_', ' ').title()
         return {
