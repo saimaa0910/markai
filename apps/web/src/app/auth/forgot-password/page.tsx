@@ -22,6 +22,7 @@ export default function ForgotPassword() {
   const router = useRouter();
   const [loading, setLoading] = React.useState(false);
   const [success, setSuccess] = React.useState(false);
+  const [email, setEmail] = React.useState('');
 
   const {
     register,
@@ -33,10 +34,11 @@ export default function ForgotPassword() {
 
   const onSubmit = async (data: ForgotPasswordFormValues) => {
     setLoading(true);
+    setEmail(data.email);
     try {
       await apiClient.post(`/auth/forgot-password?email=${encodeURIComponent(data.email)}`);
       setSuccess(true);
-      toast.success('Reset link sent', 'Check your console logs or inbox for recovery instructions.');
+      toast.success('Reset link sent', 'Check your inbox for recovery instructions.');
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.message || 'An error occurred. Please try again.';
       toast.error('Request Failed', msg);
@@ -45,25 +47,62 @@ export default function ForgotPassword() {
     }
   };
 
+  const handleResend = async () => {
+    if (!email) return;
+    setLoading(true);
+    try {
+      await apiClient.post(`/auth/forgot-password?email=${encodeURIComponent(email)}`);
+      toast.success('Reset link resent', 'A fresh recovery link has been sent to your inbox.');
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || err.message || 'An error occurred. Please try again.';
+      toast.error('Resend Failed', msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold tracking-tight text-white">
-          Reset your password
-        </h1>
-        <p className="text-sm text-neutral-400">
-          Enter your email address and we'll send you a password recovery link.
-        </p>
-      </div>
+      {!success && (
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-bold tracking-tight text-white">
+            Reset your password
+          </h1>
+          <p className="text-sm text-neutral-400">
+            Enter your email address and we'll send you a password recovery link.
+          </p>
+        </div>
+      )}
 
       {success ? (
-        <div className="p-4 rounded-xl bg-violet-500/10 border border-violet-500/20 text-center">
-          <p className="text-sm text-neutral-200">
-            We have printed a password recovery URL to the backend logs.
-          </p>
-          <Button variant="outline" className="mt-4 w-full" onClick={() => router.push('/auth/login')}>
-            Back to Sign In
-          </Button>
+        <div className="flex flex-col items-center gap-6 py-4 text-center">
+          <div className="relative">
+            <div className="w-16 h-16 rounded-full bg-violet-500/20 border-2 border-violet-500/40 flex items-center justify-center">
+              <Mail className="w-8 h-8 text-violet-400 animate-pulse" />
+            </div>
+            <div className="absolute inset-0 rounded-full bg-violet-500/10 animate-ping" style={{ animationDuration: '3s' }} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <h2 className="text-xl font-bold text-white">Reset Link Sent! ✉️</h2>
+            <p className="text-sm text-neutral-400 max-w-sm">
+              We have sent recovery instructions to <span className="text-white font-medium">{email}</span>. Please check your inbox.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 w-full">
+            <Button
+              variant="outline"
+              isLoading={loading}
+              onClick={handleResend}
+              className="w-full border-white/10 hover:bg-white/5 hover:text-white"
+            >
+              Resend Link
+            </Button>
+            <Link href="/auth/login" className="w-full">
+              <Button variant="violet" className="w-full">
+                Back to Sign In
+              </Button>
+            </Link>
+          </div>
         </div>
       ) : (
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
@@ -83,11 +122,13 @@ export default function ForgotPassword() {
         </form>
       )}
 
-      <div className="text-center text-xs text-neutral-400">
-        <Link href="/auth/login" className="inline-flex items-center gap-1.5 text-neutral-400 hover:text-white transition-colors">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to sign in
-        </Link>
-      </div>
+      {!success && (
+        <div className="text-center text-xs text-neutral-400">
+          <Link href="/auth/login" className="inline-flex items-center gap-1.5 text-neutral-400 hover:text-white transition-colors">
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to sign in
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

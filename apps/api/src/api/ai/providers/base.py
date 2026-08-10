@@ -6,7 +6,7 @@ class BaseLLMProvider(abc.ABC):
     @abc.abstractmethod
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         **kwargs,
@@ -26,7 +26,7 @@ class BaseLLMProvider(abc.ABC):
     @abc.abstractmethod
     def stream(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         **kwargs,
@@ -58,7 +58,7 @@ class BaseLLMProvider(abc.ABC):
 
     @abc.abstractmethod
     def json_output(
-        self, messages: List[Dict[str, str]], schema: Dict[str, Any], model: str
+        self, messages: List[Dict[str, Any]], schema: Dict[str, Any], model: str
     ) -> Dict[str, Any]:
         """
         Retrieve structured JSON output matching target Pydantic/JSON schema.

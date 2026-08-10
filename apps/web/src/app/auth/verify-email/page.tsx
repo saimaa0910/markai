@@ -53,7 +53,14 @@ function VerifyEmailContent() {
       })
       .catch(err => {
         const msg = err.response?.data?.detail || 'Verification failed. The link may have expired.';
-        setVerifyError(msg);
+        const msgLower = msg.toLowerCase();
+        if (msgLower.includes('already verified') || msgLower.includes('already')) {
+          setVerifyError('already_verified');
+        } else if (msgLower.includes('expired') || msgLower.includes('expire')) {
+          setVerifyError('expired');
+        } else {
+          setVerifyError('invalid');
+        }
       })
       .finally(() => setVerifying(false));
   }, [token, router]);
@@ -111,57 +118,80 @@ function VerifyEmailContent() {
     );
   }
 
-  // ── Verification error (expired token) ──
+  // ── Verification error (expired/already verified/invalid token) ──
   if (verifyError) {
+    const isAlreadyVerified = verifyError === 'already_verified';
+    const isExpired = verifyError === 'expired';
+
     return (
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-bold text-white">Verification Failed</h1>
+          <h1 className="text-2xl font-bold text-white">
+            {isAlreadyVerified ? 'Already Verified' : isExpired ? 'Link Expired' : 'Verification Failed'}
+          </h1>
         </div>
 
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 flex gap-3 items-start">
-          <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+        <div className={`p-4 rounded-xl border flex gap-3 items-start ${
+          isAlreadyVerified 
+            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+            : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+        }`}>
+          {isAlreadyVerified ? (
+            <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+          ) : (
+            <XCircle className="w-5 h-5 shrink-0 mt-0.5" />
+          )}
           <div>
-            <p className="text-rose-400 font-semibold text-sm">Link Expired or Invalid</p>
-            <p className="text-rose-400/70 text-xs mt-1">{verifyError}</p>
+            <p className="font-semibold text-sm">
+              {isAlreadyVerified ? 'Email Already Verified' : isExpired ? 'Verification Link Expired' : 'Invalid Verification Link'}
+            </p>
+            <p className="text-xs mt-1 opacity-80">
+              {isAlreadyVerified 
+                ? 'Your email address is already verified. You can sign in using your credentials.' 
+                : isExpired 
+                  ? 'This link has expired. Verification links are only valid for 24 hours.' 
+                  : 'The verification token is invalid or has already been used.'}
+            </p>
           </div>
         </div>
 
-        <div className="flex flex-col gap-4">
-          <p className="text-neutral-400 text-sm">
-            Request a new verification link below.
-          </p>
-          <form onSubmit={handleSubmit(onResend)} className="flex flex-col gap-3">
-            <Input
-              label="Email Address"
-              type="email"
-              placeholder="name@company.com"
-              error={errors.email?.message}
-              leftIcon={<Mail className="w-4 h-4" />}
-              {...register('email')}
-            />
-            <Button
-              id="resend-verification-btn"
-              type="submit"
-              variant="violet"
-              isLoading={resending}
-              disabled={cooldown > 0}
-              className="w-full"
-            >
-              {cooldown > 0 ? (
-                <span className="flex items-center gap-2">
-                  <RefreshCcw className="w-4 h-4" />
-                  Resend in {cooldown}s
-                </span>
-              ) : (
-                'Send New Verification Link'
-              )}
-            </Button>
-          </form>
-        </div>
+        {!isAlreadyVerified && (
+          <div className="flex flex-col gap-4">
+            <p className="text-neutral-400 text-sm">
+              Request a new verification link below.
+            </p>
+            <form onSubmit={handleSubmit(onResend)} className="flex flex-col gap-3">
+              <Input
+                label="Email Address"
+                type="email"
+                placeholder="name@company.com"
+                error={errors.email?.message}
+                leftIcon={<Mail className="w-4 h-4" />}
+                {...register('email')}
+              />
+              <Button
+                id="resend-verification-btn"
+                type="submit"
+                variant="violet"
+                isLoading={resending}
+                disabled={cooldown > 0}
+                className="w-full"
+              >
+                {cooldown > 0 ? (
+                  <span className="flex items-center gap-2">
+                    <RefreshCcw className="w-4 h-4" />
+                    Resend in {cooldown}s
+                  </span>
+                ) : (
+                  'Send New Verification Link'
+                )}
+              </Button>
+            </form>
+          </div>
+        )}
 
         <Link href="/auth/login" className="text-neutral-500 hover:text-neutral-300 text-xs text-center">
-          ← Back to Sign In
+          {isAlreadyVerified ? 'Go to Sign In' : '← Back to Sign In'}
         </Link>
       </div>
     );

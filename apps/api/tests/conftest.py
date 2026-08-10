@@ -11,7 +11,9 @@ if worker_id:
 else:
     db_name = "eaimos_test"
 
-os.environ["DATABASE_URL"] = f"postgresql://postgres:postgres@localhost:5432/{db_name}"
+# Allow overriding DB host for Docker (db) vs local (localhost)
+_test_db_host = os.environ.get("TEST_DB_HOST", "localhost")
+os.environ["DATABASE_URL"] = f"postgresql://postgres:postgres@{_test_db_host}:5432/{db_name}"
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
@@ -44,7 +46,7 @@ def pytest_configure(config):
         from alembic.config import Config
         from alembic import command
         
-        num_workers = config.option.numprocesses
+        num_workers = getattr(config.option, "numprocesses", None)
         if num_workers == "auto":
             import multiprocessing
             num_workers = multiprocessing.cpu_count()
@@ -135,7 +137,7 @@ def create_test_db():
 
     # Sequential run fallback database creation and migration
     from sqlalchemy import create_engine as pg_create_engine, text
-    system_engine = pg_create_engine("postgresql://postgres:postgres@localhost:5432/postgres", isolation_level="AUTOCOMMIT")
+    system_engine = pg_create_engine(f"postgresql://postgres:postgres@{_test_db_host}:5432/postgres", isolation_level="AUTOCOMMIT")
     with system_engine.connect() as conn:
         db_exists = conn.execute(
             text("SELECT 1 FROM pg_database WHERE datname = :dbname"),
@@ -403,8 +405,10 @@ def mock_minio_client():
                     host_id="mock-host",
                     response=MockResponse()
                 )
-            bio = io.BytesIO(content)
-            bio.release_conn = lambda: None
+            class MockBytesIO(io.BytesIO):
+                def release_conn(self) -> None:
+                    pass
+            bio = MockBytesIO(content)
             return bio
 
         def remove_object(self, bucket_name, object_name):

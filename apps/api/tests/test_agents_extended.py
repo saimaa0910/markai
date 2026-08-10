@@ -24,6 +24,11 @@ def auth_headers(db_session: Session):
             "org_name": "Agent Organization",
         },
     )
+    from api.models.user import User
+    user = db_session.query(User).filter(User.email == email).first()
+    if user:
+        user.is_verified = True
+        db_session.commit()
     login = client.post(
         "/api/v1/auth/login",
         data={"username": email, "password": "strongpassword"},
@@ -225,7 +230,7 @@ def test_workflow_tool_execution(auth_headers, db_session: Session):
     )
     res_bad = tool.execute(bad_input, db_session)
     assert res_bad.success is False
-    assert "not found" in res_bad.error
+    assert res_bad.error is not None and "not found" in res_bad.error
 
     # Test tool execution with real ID, queuing asynchronously
     good_input = ToolInput(
@@ -236,4 +241,4 @@ def test_workflow_tool_execution(auth_headers, db_session: Session):
     )
     res_good = tool.execute(good_input, db_session)
     assert res_good.success is True
-    assert res_good.output["status"] == "QUEUED"
+    assert res_good.output is not None and res_good.output["status"] == "QUEUED"

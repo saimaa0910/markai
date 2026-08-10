@@ -35,6 +35,7 @@ from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
 import enum
+from sqlalchemy.ext.hybrid import hybrid_property
 
 if TYPE_CHECKING:
     from api.models.user import User
@@ -123,6 +124,22 @@ class Permission(Base):
         Index("idx_permissions_resource", "resource"),
         Index("idx_permissions_action", "action"),
     )
+
+    @hybrid_property
+    def name(self) -> str:
+        return f"{self.action}_{self.resource}"
+
+    @name.setter
+    def name(self, value: str) -> None:
+        if "_" in value:
+            self.action, self.resource = value.split("_", 1)
+        else:
+            self.action = value
+            self.resource = "global"
+
+    @name.expression
+    def name(cls):
+        return cls.action + "_" + cls.resource
 
     resource: Mapped[str] = mapped_column(
         String(100), nullable=False,

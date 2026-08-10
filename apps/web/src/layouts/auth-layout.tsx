@@ -3,16 +3,20 @@
 import * as React from 'react';
 import { Sparkles } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { BrandLogo } from '@/components/ui/brand-logo';
 
 export function AuthLayout({ children }: { children: React.ReactNode }) {
   const { accessToken } = useAuthStore();
   const router = useRouter();
+  const pathname = usePathname();
 
   React.useEffect(() => {
-    if (accessToken) router.push('/dashboard');
-  }, [accessToken, router]);
+    const restrictedPaths = ['/auth/login', '/auth/register', '/auth/forgot-password'];
+    if (accessToken && restrictedPaths.includes(pathname)) {
+      router.push('/dashboard');
+    }
+  }, [accessToken, pathname, router]);
 
   return (
     <div className="flex min-h-screen bg-background text-foreground font-sans">

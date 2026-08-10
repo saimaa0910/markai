@@ -224,7 +224,7 @@ def get_audit_stats(
 
     return {
         "total": total,
-        "by_risk": dict(risk_counts),
-        "by_action": dict(action_counts),
+        "by_risk": {k: v for k, v in risk_counts},
+        "by_action": {k: v for k, v in action_counts},
         "recent_high_risk": recent_high,
     }

@@ -386,7 +386,7 @@ class TestRetryLogic:
 
         result = _send_email("user@test.com", "Test", "<p>Test</p>")
 
-        assert result is True  # Console fallback succeeds
+        assert result is False  # Console fallback does not return True
         assert mock_send_smtp.call_count == 3
         assert mock_sleep.call_count == 2  # sleep(1), sleep(2)
 
@@ -402,7 +402,7 @@ class TestRetryLogic:
 
         result = _send_email("user@test.com", "Test", "<p>Test</p>")
 
-        assert result is True  # Console fallback succeeds
+        assert result is False  # Console fallback does not return True
         assert mock_send_smtp.call_count == 1  # No retry
 
     @patch("api.services.email_service._send_smtp")
@@ -417,7 +417,7 @@ class TestRetryLogic:
 
         result = _send_email("bad@test.com", "Test", "<p>Test</p>")
 
-        assert result is True  # Console fallback succeeds
+        assert result is False  # Console fallback does not return True
         assert mock_send_smtp.call_count == 1  # No retry
 
 
@@ -434,7 +434,7 @@ class TestConsoleFallback:
 
         result = _send_email("user@test.com", "Console Test", "<p>Fallback</p>")
 
-        assert result is True
+        assert result is False
         captured = capsys.readouterr()
         assert "EMAIL (DEV MODE" in captured.out
         assert "user@test.com" in captured.out
@@ -523,7 +523,7 @@ class TestAuthFlowEmails:
         assert len(sent_emails) == 1
         assert "reset-password" in sent_emails[0]["url"]
 
-    def test_login_sends_security_alert(self, monkeypatch):
+    def test_login_sends_security_alert(self, monkeypatch, db_session):
         """Login should send a security alert email."""
         alerts = []
 
@@ -543,6 +543,13 @@ class TestAuthFlowEmails:
             "full_name": "Login Alert User",
             "org_name": f"Login Org {uuid.uuid4()}",
         })
+
+        # Verify the user in the database to allow login
+        from api.models.user import User
+        user = db_session.query(User).filter(User.email == email).first()
+        if user:
+            user.is_verified = True
+            db_session.commit()
 
         resp = client.post("/api/v1/auth/login", data={"username": email, "password": password})
         assert resp.status_code == 200
@@ -647,3 +654,535 @@ class TestTemplateHTMLValidity:
             template_fn()
             # _send_smtp is called, meaning SMTP dispatch was attempted
             assert mock_smtp.called, f"Template {template_fn.__name__} did not call _send_smtp"
+
+
+# ─── Production Resend, Logging, and Token Security Tests ────────────────────
+
+class TestProductionEmailInfrastructure:
+    """Test Suite for Resend API, DB logging, and Hashed Tokens."""
+
+    @patch("api.services.email_service._http_client.post")
+    def test_resend_api_success_logs_to_db(self, mock_post, monkeypatch):
+        """Test successful Resend delivery writes an EmailLog record."""
+        monkeypatch.setattr("api.services.email_service.settings.RESEND_API_KEY", "re_testkey123")
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_FROM", "noreply@eaimos.ai")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = "Success"
+        mock_post.return_value = mock_resp
+
+        # Call send_email_background to trigger sending
+        from api.services.email_service import _send_email
+        result = _send_email("test_resend@example.com", "Hello Resend", "<p>Body</p>", "test-template")
+
+        assert result is True
+        mock_post.assert_called_once()
+        assert "api.resend.com/emails" in mock_post.call_args[0][0]
+
+        # Verify EmailLog in database
+        from api.database.session import SessionLocal
+        from api.models.email_log import EmailLog
+        with SessionLocal() as db:
+            log = db.query(EmailLog).filter(EmailLog.recipient == "test_resend@example.com").first()
+            assert log is not None
+            assert log.subject == "Hello Resend"
+            assert log.status == "SENT"
+            assert log.provider == "resend"
+
+    @patch("api.services.email_service.time.sleep")
+    @patch("api.services.email_service._http_client.post")
+    def test_resend_api_retry_on_failure(self, mock_post, mock_sleep, monkeypatch):
+        """Test Resend client retries on transient connection error."""
+        monkeypatch.setattr("api.services.email_service.settings.RESEND_API_KEY", "re_testkey123")
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_FROM", "noreply@eaimos.ai")
+
+        # Mock failures then success
+        mock_fail = MagicMock()
+        mock_fail.status_code = 502
+        mock_fail.text = "Gateway Error"
+
+        mock_ok = MagicMock()
+        mock_ok.status_code = 200
+        mock_post.side_effect = [RuntimeError("Timeout"), mock_fail, mock_ok]
+
+        from api.services.email_service import _send_email
+        result = _send_email("retry_user@example.com", "Retry Test", "<p>Body</p>")
+
+        assert result is True
+        assert mock_post.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    def test_new_template_functions_render_correctly(self, monkeypatch):
+        """Verify all new transactional template functions call dispatch correctly."""
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "localhost")
+        sent_emails = []
+
+        def mock_send(to, subject, body, template_name, correlation_id=None):
+            sent_emails.append({"to": to, "subject": subject, "template": template_name})
+            return True
+
+        monkeypatch.setattr("api.services.email_service.send_email_background", mock_send)
+
+        from api.services.email_service import (
+            send_password_reset_success_email,
+            send_new_login_email,
+            send_new_device_email,
+            send_invitation_accepted_email,
+            send_invitation_rejected_email,
+            send_invitation_revoked_email,
+            send_ownership_transfer_email,
+            send_resend_verification_email,
+        )
+
+        send_password_reset_success_email("u1@x.com", "U1")
+        send_new_login_email("u1@x.com", "U1", "127.0.0.1", "Chrome", "Friday")
+        send_new_device_email("u1@x.com", "U1", "Macbook", "127.0.0.1", "Friday")
+        send_invitation_accepted_email("u1@x.com", "U2", "u2@x.com", "Org")
+        send_invitation_rejected_email("u1@x.com", "u2@x.com", "Org")
+        send_invitation_revoked_email("u1@x.com", "u2@x.com", "Org")
+        send_ownership_transfer_email("u1@x.com", "U1", "Org", "U2")
+        send_resend_verification_email("u1@x.com", "U1", "http://verify")
+
+        assert len(sent_emails) == 8
+        assert sent_emails[0]["template"] == "password-reset-success"
+        assert sent_emails[1]["template"] == "new-login"
+        assert sent_emails[2]["template"] == "new-device"
+        assert sent_emails[3]["template"] == "org-invite-accepted"
+
+    def test_password_reset_token_hashing_and_single_use(self, db_session):
+        """Verify password reset helper stores SHA-256 hash and enforces single-use policy."""
+        import uuid
+        from api.routes.auth import _create_password_reset_token, _validate_and_consume_password_reset_token
+        from api.models.iam import PasswordResetToken
+        from api.models.user import User
+
+        # Create real user first to satisfy foreign key constraint
+        user = User(
+            email=f"test_reset_{uuid.uuid4()}@example.com",
+            full_name="Reset User",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+        user_id = user.id
+
+        raw_token = _create_password_reset_token(db_session, user_id, ip_address="1.1.1.1")
+
+        # Verify plaintext token is NOT stored in DB
+        db_reset = db_session.query(PasswordResetToken).filter(PasswordResetToken.user_id == user_id).first()
+        assert db_reset is not None
+        assert db_reset.token_hash != raw_token
+        assert len(db_reset.token_hash) == 64  # SHA-256 hash length
+
+        # Verify validation and consumption works
+        valid_user_id = _validate_and_consume_password_reset_token(db_session, raw_token)
+        assert valid_user_id == user_id
+
+        # Verify single-use policy (second consumption attempt fails)
+        invalidated_user_id = _validate_and_consume_password_reset_token(db_session, raw_token)
+        assert invalidated_user_id is None
+
+
+class TestNewLifecycleAndInvitationFlows:
+    """Test verification enforcement, invitation user pre-creation, and background purging."""
+
+    def _make_mock_request(self):
+        mock_req = MagicMock()
+        mock_req.client = MagicMock()
+        mock_req.client.host = "127.0.0.1"
+        mock_req.headers = MagicMock()
+        mock_req.headers.get.return_value = "Mozilla/5.0"
+        return mock_req
+
+    def test_login_requires_verified_email(self, db_session):
+        """Test that login fails when the user is not verified."""
+        import uuid
+        from fastapi import HTTPException
+        from fastapi.security import OAuth2PasswordRequestForm
+        from api.routes.auth import login
+        from api.models.user import User
+        from api.core.security import get_password_hash
+
+        email = f"unverified_{uuid.uuid4()}@example.com"
+        password = "securepassword123"
+        user = User(
+            email=email,
+            full_name="Unverified User",
+            hashed_password=get_password_hash(password),
+            is_active=True,
+            is_verified=False,
+        )
+        db_session.add(user)
+        db_session.commit()
+
+        # Simulate form request
+        form_data = OAuth2PasswordRequestForm(username=email, password=password, scope="", grant_type="password")
+        mock_request = self._make_mock_request()
+
+        try:
+            import pytest
+            with pytest.raises(HTTPException) as exc_info:
+                login(request=mock_request, db=db_session, form_data=form_data)
+            assert exc_info.value.status_code == 400
+            assert "Email not verified" in exc_info.value.detail
+        finally:
+            # Cleanup
+            db_session.delete(user)
+            db_session.commit()
+
+    def test_invite_pre_creates_user_and_registration_reuses_it(self, db_session):
+        """Test that inviting a non-existent email pre-creates the user and register updates it."""
+        import uuid
+        import secrets
+        from api.routes.organizations import invite_member, InviteMemberRequest
+        from api.routes.auth import register
+        from api.schemas.user import UserCreate
+        from api.models.user import User
+        from api.models.organization import Organization
+        from api.models.membership import UserRole
+
+        # 1. Setup inviter and org
+        inviter = User(
+            email=f"inviter_{uuid.uuid4()}@example.com",
+            full_name="Inviter",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+        )
+        org = Organization(name="Test Org", slug=f"test-org-{uuid.uuid4()}")
+        db_session.add(inviter)
+        db_session.add(org)
+        db_session.commit()
+
+        invited_email = f"invited_{uuid.uuid4()}@example.com"
+
+        # 2. Call invite_member
+        invite_req = InviteMemberRequest(email=invited_email, role=UserRole.MEMBER)
+        mock_request = self._make_mock_request()
+        
+        invite_res = invite_member(
+            organization_id=org.id,
+            body=invite_req,
+            db=db_session,
+            current_user=inviter,
+        )
+        
+        # Verify user was pre-created in database
+        pre_created_user = db_session.query(User).filter(User.email == invited_email).first()
+        assert pre_created_user is not None
+        assert pre_created_user.is_verified is False
+        assert pre_created_user.metadata_json.get("is_temporary_password") is True
+        assert pre_created_user.metadata_json.get("change_password_required") is True
+
+        # Extract invitation token from the result link
+        token = invite_res["invite_link"].split("token=")[-1]
+
+        # 3. Call register with invitation token to update pre-created user
+        reg_in = UserCreate(
+            email=invited_email,
+            password="my_custom_password_123",
+            full_name="Invited User Real Name",
+            invitation_token=token,
+        )
+
+        reg_res = register(user_in=reg_in, request=mock_request, db=db_session)
+        assert reg_res.email == invited_email
+        assert reg_res.full_name == "Invited User Real Name"
+
+        # Verify database record updated
+        updated_user = db_session.query(User).filter(User.email == invited_email).first()
+        assert updated_user.full_name == "Invited User Real Name"
+        assert updated_user.metadata_json.get("is_temporary_password") is None
+        assert updated_user.metadata_json.get("change_password_required") is None
+
+        # Clean up
+        db_session.delete(updated_user)
+        db_session.delete(inviter)
+        db_session.delete(org)
+        db_session.commit()
+
+    @patch("api.worker.celery_app.send_email_task")
+    def test_purge_deleted_accounts_task(self, mock_send_email_task, db_session):
+        """Test that the purge_deleted_accounts_task soft-deletes expired accounts."""
+        import uuid
+        import datetime
+        from api.models.user import User
+        from api.worker.celery_app import purge_deleted_accounts_task
+
+        # Create user scheduled for deletion in the past
+        past_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=8)
+        user = User(
+            email=f"to_purge_{uuid.uuid4()}@example.com",
+            full_name="Purge User",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+            scheduled_deletion_at=past_time,
+        )
+        db_session.add(user)
+        db_session.commit()
+
+        # Run task mock
+        mock_self = MagicMock()
+        # Mock track_task_execution context manager to yield our db_session
+        from api.worker.celery_app import track_task_execution
+        
+        class MockTrackTaskExecution:
+            def __init__(self, name, task_id, args_str=None):
+                pass
+            def __enter__(self):
+                return db_session
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        with patch("api.worker.celery_app.track_task_execution", MockTrackTaskExecution):
+            res = purge_deleted_accounts_task.run()
+
+        assert res["success"] is True
+        assert res["purged_count"] >= 1
+
+        # Check DB that the user is now soft deleted and inactive
+        db_session.refresh(user)
+        assert user.deleted_at is not None
+        assert user.is_active is False
+
+        # Clean up
+        db_session.delete(user)
+        db_session.commit()
+
+
+class TestNewSecurityAndOrgAlerts:
+    """Test suite for new login alerts, member removal, org deletion/restore, and email reuse."""
+
+    def _make_mock_request(self, user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0", client_ip="192.168.1.10"):
+        mock_request = MagicMock()
+        mock_request.client = MagicMock()
+        mock_request.client.host = client_ip
+        mock_request.headers = {"user-agent": user_agent}
+        return mock_request
+
+    @patch("api.routes.auth.send_security_alert")
+    def test_login_alert_new_browser_device_ip_country(self, mock_send_alert, db_session):
+        from api.routes.auth import store_refresh_token, create_refresh_token, UserSession
+        from api.models.user import User
+        from api.models.membership import UserOrganization, UserRole
+        from api.models.organization import Organization
+
+        user = User(
+            email=f"login_alert_{uuid.uuid4()}@example.com",
+            full_name="Login Alert User",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+        )
+        db_session.add(user)
+        db_session.commit()
+
+        # First login from IP 1
+        req1 = self._make_mock_request(user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0", client_ip="8.8.8.8")
+        token1 = create_refresh_token(user.id)
+        mock_send_alert.reset_mock()
+        store_refresh_token(db_session, token1, user.id, req1)
+        
+        # Verify first login sends a security alert
+        assert mock_send_alert.called
+        assert "New Login Detected" in mock_send_alert.call_args[0][2]
+
+        # Second login from SAME IP and browser
+        req2 = self._make_mock_request(user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0", client_ip="8.8.8.8")
+        token2 = create_refresh_token(user.id)
+        mock_send_alert.reset_mock()
+        store_refresh_token(db_session, token2, user.id, req2)
+
+        # Verify no new alert is triggered for identical login details
+        assert not mock_send_alert.called
+
+        # Third login from a NEW browser/device
+        req3 = self._make_mock_request(user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1", client_ip="8.8.8.8")
+        token3 = create_refresh_token(user.id)
+        mock_send_alert.reset_mock()
+        store_refresh_token(db_session, token3, user.id, req3)
+
+        # Verify new browser/device triggers alert
+        assert mock_send_alert.called
+        assert "New browser" in mock_send_alert.call_args[0][2] or "New device" in mock_send_alert.call_args[0][2]
+
+        # Fourth login from a NEW IP address
+        req4 = self._make_mock_request(user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0", client_ip="9.9.9.9")
+        token4 = create_refresh_token(user.id)
+        mock_send_alert.reset_mock()
+        store_refresh_token(db_session, token4, user.id, req4)
+
+        # Verify new IP triggers alert
+        assert mock_send_alert.called
+        assert "New IP address" in mock_send_alert.call_args[0][2]
+
+        # Clean up
+        db_session.query(UserSession).filter(UserSession.user_id == user.id).delete()
+        db_session.delete(user)
+        db_session.commit()
+
+    @patch("api.services.email_service.send_org_removed_email")
+    def test_member_removed_sends_email(self, mock_send_email, db_session):
+        from api.routes.organizations import remove_member
+        from api.models.user import User
+        from api.models.organization import Organization
+        from api.models.membership import UserOrganization, UserRole
+
+        owner = User(
+            email=f"owner_{uuid.uuid4()}@example.com",
+            full_name="Owner User",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+        )
+        member = User(
+            email=f"member_{uuid.uuid4()}@example.com",
+            full_name="Member User",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+        )
+        org = Organization(name="Kicked Org", slug=f"kicked-org-{uuid.uuid4()}")
+        db_session.add_all([owner, member, org])
+        db_session.commit()
+
+        # Add memberships
+        owner_membership = UserOrganization(user_id=owner.id, organization_id=org.id, role=UserRole.OWNER)
+        member_membership = UserOrganization(user_id=member.id, organization_id=org.id, role=UserRole.MEMBER)
+        db_session.add_all([owner_membership, member_membership])
+        db_session.commit()
+
+        # Call remove_member
+        remove_member(organization_id=org.id, user_id=member.id, db=db_session, membership=owner_membership)
+
+        # Verify send_org_removed_email was called for member
+        mock_send_email.assert_called_once_with(member.email, member.full_name, org.name)
+
+        # Clean up
+        db_session.delete(owner)
+        db_session.delete(member)
+        db_session.delete(org)
+        db_session.commit()
+
+    @patch("api.services.email_service.send_org_removed_email")
+    @patch("api.services.email_service.send_org_restored_email")
+    def test_org_deletion_soft_deletes_and_restoration_sends_email(self, mock_send_restored, mock_send_removed, db_session):
+        from api.routes.organizations import delete_organization, restore_organization
+        from api.models.user import User
+        from api.models.organization import Organization
+        from api.models.membership import UserOrganization, UserRole
+
+        owner = User(
+            email=f"owner_{uuid.uuid4()}@example.com",
+            full_name="Owner User",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+        )
+        org = Organization(name="Lifecycle Org", slug=f"lifecycle-org-{uuid.uuid4()}")
+        db_session.add_all([owner, org])
+        db_session.commit()
+
+        # Add owner membership
+        owner_membership = UserOrganization(user_id=owner.id, organization_id=org.id, role=UserRole.OWNER)
+        db_session.add(owner_membership)
+        db_session.commit()
+
+        # Delete (soft delete) org
+        mock_send_removed.reset_mock()
+        delete_organization(organization_id=org.id, db=db_session, membership=owner_membership)
+
+        # Verify org is soft deleted (is_active=False and deleted_at is set)
+        db_session.refresh(org)
+        assert not org.is_active
+        assert org.deleted_at is not None
+        # Verify removed notification sent to owner
+        mock_send_removed.assert_called_once_with(owner.email, owner.full_name, org.name)
+
+        # Restore org
+        mock_send_restored.reset_mock()
+        mock_req = self._make_mock_request()
+        restore_organization(organization_id=org.id, request=mock_req, db=db_session, current_user=owner)
+
+        # Verify org is restored (is_active=True and deleted_at is None)
+        db_session.refresh(org)
+        assert org.is_active
+        assert org.deleted_at is None
+        # Verify restored notification sent to owner
+        mock_send_restored.assert_called_once_with(owner.email, owner.full_name, org.name)
+
+        # Clean up
+        db_session.delete(owner_membership)
+        db_session.delete(owner)
+        db_session.delete(org)
+        db_session.commit()
+
+    def test_soft_deleted_email_reusable_for_new_registration(self, db_session):
+        from api.worker.celery_app import purge_deleted_accounts_task
+        from api.routes.auth import register
+        from api.schemas.user import UserCreate
+        from api.models.user import User
+        from api.models.platform_events import AuditLog
+        import datetime
+
+        orig_email = f"reuse_{uuid.uuid4()}@example.com"
+        past_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=8)
+
+        # Create user scheduled for deletion in the past
+        user = User(
+            email=orig_email,
+            full_name="Stale User",
+            hashed_password="somepassword",
+            is_active=True,
+            is_verified=True,
+            scheduled_deletion_at=past_time,
+        )
+        db_session.add(user)
+        db_session.commit()
+
+        # Run purging background worker
+        from api.worker.celery_app import track_task_execution
+        class MockTrackTaskExecution:
+            def __init__(self, name, task_id, args_str=None):
+                pass
+            def __enter__(self):
+                return db_session
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        with patch("api.worker.celery_app.track_task_execution", MockTrackTaskExecution):
+            res = purge_deleted_accounts_task.run()
+
+        assert res["success"] is True
+        db_session.refresh(user)
+        assert user.deleted_at is not None
+        assert user.email != orig_email  # verified it was renamed!
+
+        # Try to register a new user using the original email address
+        mock_request = self._make_mock_request()
+        reg_in = UserCreate(
+            email=orig_email,
+            password="new_password_abc_123",
+            full_name="New Owner of Email",
+        )
+
+        reg_res = register(user_in=reg_in, request=mock_request, db=db_session)
+        assert reg_res.email == orig_email
+        assert reg_res.full_name == "New Owner of Email"
+
+        # Verify the new user is created in database
+        new_user = db_session.query(User).filter(User.email == orig_email, User.deleted_at.is_(None)).first()
+        assert new_user is not None
+        assert new_user.id != user.id
+
+        # Clean up
+        db_session.delete(new_user)
+        db_session.delete(user)
+        db_session.query(AuditLog).filter(AuditLog.actor_id == new_user.id).delete()
+        db_session.commit()
+

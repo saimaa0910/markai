@@ -9,7 +9,7 @@ import uuid
 import time
 import datetime
 import contextlib
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from celery import Celery
 from celery.schedules import crontab
 from api.core.config import settings
@@ -311,6 +311,43 @@ def quota_reset_worker_task(self) -> Dict[str, Any]:
         return {"success": True, "message": "Quotas reset completed successfully"}
 
 
+@celery_app.task(name="worker.tasks.purge_deleted_accounts_task", bind=True)
+def purge_deleted_accounts_task(self) -> Dict[str, Any]:
+    """Query users scheduled for deletion in the past, soft delete them, and send confirmation email."""
+    task_id = self.request.id or str(uuid.uuid4())
+    with track_task_execution("purge_deleted_accounts_task", task_id) as db:
+        from api.models.user import User
+        from api.services.email_service import send_account_permanently_deleted_email
+        
+        now = datetime.datetime.utcnow()
+        stale_users = (
+            db.query(User)
+            .filter(
+                User.scheduled_deletion_at.is_not(None),
+                User.scheduled_deletion_at <= now,
+                User.deleted_at.is_(None),
+            )
+            .all()
+        )
+        
+        count = 0
+        for u in stale_users:
+            orig_email = u.email
+            u.deleted_at = now
+            u.is_active = False
+            # Free up the unique email address constraint for new registrations
+            u.email = f"deleted_{uuid.uuid4()}_{orig_email}"
+            db.add(u)
+            try:
+                send_account_permanently_deleted_email(orig_email, u.full_name)
+            except Exception as e:
+                logger.error(f"Failed to send permanent deletion email for {orig_email}: {e}")
+            count += 1
+            
+        db.commit()
+        return {"success": True, "purged_count": count}
+
+
 @celery_app.task(name="worker.tasks.process_document_pipeline_task", bind=True, max_retries=3, default_retry_delay=5)
 def process_document_pipeline_task(
     self,
@@ -361,18 +398,44 @@ def process_document_pipeline_task(
 
 
 @celery_app.task(name="worker.tasks.send_email_task", bind=True, max_retries=3, default_retry_delay=10)
-def send_email_task(self, to_email: str, subject: str, html_body: str) -> Dict[str, Any]:
-    """Background task to send transactional email via SMTP."""
+def send_email_task(
+    self,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    template_name: str = "custom",
+    log_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Background task to send transactional email via primary/fallback providers."""
     import logging
     _logger = logging.getLogger("eaimos.email.worker")
     try:
         from api.services.email_service import _send_email
-        success = _send_email(to_email, subject, html_body)
+        success = _send_email(
+            to_email,
+            subject,
+            html_body,
+            template_name=template_name,
+            correlation_id=correlation_id,
+            log_id=log_id,
+        )
         if success:
-            _logger.info(f"Background email sent: to={to_email}, subject={subject}")
-        return {"success": success, "to_email": to_email, "subject": subject}
+            _logger.info(f"Background email sent: to={to_email}, subject={subject}, log_id={log_id}")
+        else:
+            raise RuntimeError("Email delivery returned False")
+        return {"success": True, "to_email": to_email, "subject": subject, "log_id": log_id}
     except Exception as exc:
         _logger.error(f"Background email task failed (attempt {self.request.retries + 1}): {exc}")
+        if self.request.retries >= self.max_retries:
+            try:
+                from api.services.email_service import _write_email_log
+                _write_email_log(
+                    to_email, subject, template_name, "FAILED", "resend",
+                    self.request.retries, None, correlation_id, f"Max retries reached: {exc}", log_id
+                )
+            except Exception:
+                pass
         raise self.retry(exc=exc)
 
 
@@ -436,5 +499,9 @@ celery_app.conf.beat_schedule = {
     "daily-quota-reset-at-midnight": {
         "task": "worker.tasks.quota_reset_worker_task",
         "schedule": crontab(hour=0, minute=0),
+    },
+    "purge-deleted-accounts-every-hour": {
+        "task": "worker.tasks.purge_deleted_accounts_task",
+        "schedule": crontab(minute=0),
     },
 }

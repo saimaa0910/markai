@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import ForeignKey, String, Boolean, Integer, Numeric, DateTime, Text, Index, JSON
 from sqlalchemy.dialects.postgresql import UUID
@@ -108,7 +108,7 @@ class AIProviderHealth(Base):
     )
     latency: Mapped[float] = mapped_column(Numeric(10, 2), default=0.00, nullable=False)
     is_healthy: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    last_checked: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    last_checked: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships

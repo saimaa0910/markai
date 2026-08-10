@@ -88,6 +88,9 @@ def on_startup():
     from api.core.telemetry import init_telemetry
     init_telemetry(app)
 
+    from api.services.email_service import validate_email_config
+    validate_email_config()
+
     from api.database.session import SessionLocal
     from api.models.organization import Organization
     from api.models.user import User

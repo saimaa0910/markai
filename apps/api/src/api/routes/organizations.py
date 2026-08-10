@@ -131,6 +131,7 @@ owner_checker = RoleChecker([UserRole.OWNER])
 class InviteMemberRequest(BaseModel):
     email: EmailStr
     role: UserRole = UserRole.MEMBER
+    temporary_password: Optional[str] = None
 
 
 @router.patch("/{organization_id}", response_model=OrganizationResponse)
@@ -172,8 +173,24 @@ def delete_organization(
             detail="Organization not found",
         )
     
-    db.delete(org)
+    # Notify members of organization removal
+    try:
+        memberships = db.query(UserOrganization).filter(UserOrganization.organization_id == organization_id).all()
+        from api.services.email_service import send_org_removed_email
+        for m in memberships:
+            member = db.query(User).filter(User.id == m.user_id).first()
+            if member:
+                send_org_removed_email(member.email, member.full_name, org.name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send org removed emails: {exc}")
+
+    org.deleted_at = datetime.now(timezone.utc)
+    org.is_active = False
     db.commit()
+
+
+
 
 
 @router.patch("/{organization_id}/members/{user_id}", response_model=OrganizationMemberResponse)
@@ -212,6 +229,19 @@ def update_member_role(
     db.refresh(target_membership)
 
     user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    try:
+        org = db.query(Organization).filter(Organization.id == organization_id).first()
+        if user and org:
+            from api.services.email_service import send_role_changed_email
+            send_role_changed_email(user.email, user.full_name, org.name, role.value if hasattr(role, "value") else str(role))
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send role changed email: {exc}")
     return {
         "id": user.id,
         "email": user.email,
@@ -259,8 +289,17 @@ def remove_member(
             detail="Only the Owner can remove an Owner.",
         )
 
+    target_user = db.query(User).filter(User.id == user_id).first()
+    org = db.query(Organization).filter(Organization.id == organization_id).first()
     db.delete(target_membership)
     db.commit()
+
+    if target_user and org:
+        from api.services.email_service import send_org_removed_email
+        try:
+            send_org_removed_email(target_user.email, target_user.full_name, org.name)
+        except Exception:
+            pass
 
 
 @router.post("/{organization_id}/invitations/")
@@ -278,6 +317,7 @@ def invite_member(
     role = body.role
 
     user = db.query(User).filter(User.email == email).first()
+    temp_password = None
     if user:
         existing_membership = (
             db.query(UserOrganization)
@@ -292,6 +332,21 @@ def invite_member(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User is already a member of this organization",
             )
+    else:
+        # Pre-create inactive user with temporary password (admin-set or system-generated)
+        from api.core.security import get_password_hash
+        temp_password = body.temporary_password or secrets.token_urlsafe(12)
+        hashed_password = get_password_hash(temp_password)
+        user = User(
+            email=email,
+            hashed_password=hashed_password,
+            full_name="Invited User",
+            is_active=True,
+            is_verified=False,
+            metadata_json={"is_temporary_password": True, "change_password_required": True}
+        )
+        db.add(user)
+        db.flush()
 
     existing_invite = (
         db.query(OrganizationInvitation)
@@ -310,14 +365,16 @@ def invite_member(
             detail="A pending invitation already exists for this email.",
         )
 
-    token = secrets.token_urlsafe(32)
+    import hashlib
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     invitation = OrganizationInvitation(
         organization_id=organization_id,
         invited_by=current_user.id,
         email=email,
         role=role,
-        token=token,
+        token=token_hash,
         expires_at=expires_at,
         is_accepted=False,
         is_rejected=False,
@@ -328,7 +385,7 @@ def invite_member(
 
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     org_name = org.name if org else "EAIMOS"
-    invite_link = f"{settings.FRONTEND_URL}/auth/accept-invitation?token={token}"
+    invite_link = f"{settings.FRONTEND_URL}/auth/invitation?token={raw_token}"
     try:
         send_invitation_email(
             email,
@@ -336,6 +393,7 @@ def invite_member(
             org_name,
             role.value if hasattr(role, "value") else str(role),
             invite_link,
+            temp_password=temp_password,
         )
     except Exception as exc:
         import logging
@@ -375,7 +433,7 @@ def list_invitations(
             "email": i.email,
             "role": i.role.value if hasattr(i.role, "value") else str(i.role),
             "expires_at": i.expires_at,
-            "invite_link": f"{settings.FRONTEND_URL}/auth/accept-invitation?token={i.token}",
+            "invite_link": None,
         }
         for i in invites
     ]
@@ -422,6 +480,18 @@ def accept_invitation(
     db.add(invitation)
     db.commit()
 
+    # Notify inviter of acceptance
+    try:
+        org = db.query(Organization).filter(Organization.id == invitation.organization_id).first()
+        org_name = org.name if org else "EAIMOS"
+        inviter = db.query(User).filter(User.id == invitation.invited_by).first()
+        if inviter:
+            from api.services.email_service import send_invitation_accepted_email
+            send_invitation_accepted_email(inviter.email, current_user.full_name, current_user.email, org_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send acceptance notification: {exc}")
+
     return {"success": True, "message": "Invitation accepted successfully"}
 
 
@@ -459,6 +529,18 @@ def reject_invitation(
     db.add(invitation)
     db.commit()
 
+    # Notify inviter of rejection
+    try:
+        org = db.query(Organization).filter(Organization.id == invitation.organization_id).first()
+        org_name = org.name if org else "EAIMOS"
+        inviter = db.query(User).filter(User.id == invitation.invited_by).first()
+        if inviter:
+            from api.services.email_service import send_invitation_rejected_email
+            send_invitation_rejected_email(inviter.email, current_user.email, org_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send rejection notification: {exc}")
+
     return {"success": True, "message": "Invitation declined successfully"}
 
 
@@ -484,6 +566,11 @@ def resend_invitation(
         )
         .first()
     )
+    if not invitation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invitation not found or already accepted/rejected",
+        )
     expires_at = invitation.expires_at
     if expires_at and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
@@ -497,13 +584,18 @@ def resend_invitation(
             detail="Maximum resend limit reached. Revoke and create a new invitation.",
         )
 
+    import hashlib
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+    invitation.token = token_hash
     invitation.resent_count = (invitation.resent_count or 0) + 1
     invitation.last_resent_at = datetime.now(timezone.utc)
     db.commit()
 
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     org_name = org.name if org else "EAIMOS"
-    invite_link = f"{settings.FRONTEND_URL}/auth/accept-invitation?token={invitation.token}"
+    invite_link = f"{settings.FRONTEND_URL}/auth/invitation?token={raw_token}"
 
     try:
         send_invitation_email(
@@ -557,6 +649,16 @@ def revoke_invitation(
     invitation.revoked_by = current_user.id
     invitation.revoked_at = datetime.now(timezone.utc)
     db.commit()
+
+    # Notify invitee of revocation
+    try:
+        org = db.query(Organization).filter(Organization.id == organization_id).first()
+        org_name = org.name if org else "EAIMOS"
+        from api.services.email_service import send_invitation_revoked_email
+        send_invitation_revoked_email(invitation.email, invitation.email, org_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send revocation email: {exc}")
 
     log_audit(db, current_user.id, "INVITATION_REVOKED", request, {
         "invitation_id": str(invitation_id), "email": invitation.email
@@ -671,12 +773,13 @@ def transfer_ownership(
 
     target_user = db.query(User).filter(User.id == body.new_owner_user_id).first()
     try:
-        from api.services.email_service import send_role_changed_email
+        from api.services.email_service import send_ownership_transfer_email
         org = db.query(Organization).filter(Organization.id == organization_id).first()
         if target_user and org:
-            send_role_changed_email(target_user.email, target_user.full_name, org.name, "Owner")
-    except Exception:
-        pass
+            send_ownership_transfer_email(target_user.email, target_user.full_name, org.name, current_user.full_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send ownership transfer email: {exc}")
 
     return {"success": True, "message": "Ownership transferred successfully"}
 
@@ -726,7 +829,20 @@ def restore_organization(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="OWNER access required")
 
     org.is_active = True
+    org.deleted_at = None
     db.commit()
+
+    # Notify members of organization restoration
+    try:
+        memberships = db.query(UserOrganization).filter(UserOrganization.organization_id == organization_id).all()
+        from api.services.email_service import send_org_restored_email
+        for m in memberships:
+            member = db.query(User).filter(User.id == m.user_id).first()
+            if member:
+                send_org_restored_email(member.email, member.full_name, org.name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.organizations").error(f"Failed to send org restored emails: {exc}")
 
     log_audit(db, current_user.id, "ORG_RESTORED", request, {"org_id": str(organization_id)})
     return {"success": True, "message": f"Organization '{org.name}' restored"}

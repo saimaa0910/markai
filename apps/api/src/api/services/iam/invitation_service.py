@@ -8,6 +8,7 @@ reject, cancel, resend (new token + reset expiry), and paginated listing.
 
 import logging
 import secrets
+import hashlib
 import uuid
 from base64 import urlsafe_b64encode
 from datetime import datetime, timedelta, timezone
@@ -114,7 +115,8 @@ class InvitationService:
 
             org_uuid = uuid.UUID(str(org_id))
             clean_email = dto.email.lower().strip()
-            token = _generate_invitation_token()
+            raw_token = _generate_invitation_token()
+            token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
             expires_at = datetime.now(timezone.utc) + timedelta(hours=dto.expiry_hours)
 
             async with self.uow_service:
@@ -137,7 +139,7 @@ class InvitationService:
                     "invited_by": ctx.get_user_id_str(),
                     "email": clean_email,
                     "role": dto.role,
-                    "token": token,
+                    "token": token_hash,
                     "message": dto.message,
                     "is_accepted": False,
                     "is_rejected": False,
@@ -163,10 +165,11 @@ class InvitationService:
                     )
                 )
 
-            # Cache the new invitation by token and ID
+            # Cache the new invitation by token hash and ID
             response = invitation_to_response_dto(invitation)
+            response.token = raw_token
             await self.cache.set(
-                invitation_by_token_cache_key(token),
+                invitation_by_token_cache_key(token_hash),
                 response.model_dump(mode="json"),
                 ttl=INVITATION_KEY_TTL,
             )
@@ -197,10 +200,11 @@ class InvitationService:
             InvitationPolicy.can_accept(self.authorizer, ctx)
 
             async with self.uow_service:
-                inv_repo = _InvitationRepository()
-                invitation = await inv_repo.find_one(
+                repo = _InvitationRepository()
+                token_hash = hashlib.sha256(dto.token.encode()).hexdigest()
+                invitation = await repo.find_one(
                     session=self.uow_service.session,
-                    filters=[FilterParam(field="token", operator=FilterOperator.EQ, value=dto.token)],
+                    filters=[FilterParam(field="token", operator=FilterOperator.EQ, value=token_hash)],
                 )
                 if not invitation:
                     return ServiceResult.fail(
@@ -216,7 +220,7 @@ class InvitationService:
                 now = datetime.now(timezone.utc)
 
                 # Mark invitation as accepted
-                accepted = await inv_repo.update(
+                accepted = await repo.update(
                     session=self.uow_service.session,
                     id=invitation.id,
                     obj_in={
@@ -258,7 +262,7 @@ class InvitationService:
                 )
 
             # Invalidate caches
-            await self.cache.delete(invitation_by_token_cache_key(dto.token))
+            await self.cache.delete(invitation_by_token_cache_key(token_hash))
             await self.cache.delete(invitation_by_id_cache_key(invitation.id))
             await self.cache.delete(org_invitations_list_key(invitation.organization_id))
 
@@ -279,11 +283,12 @@ class InvitationService:
         try:
             InvitationPolicy.can_accept(self.authorizer, ctx)  # Any authenticated user can reject their own invite
 
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
             async with self.uow_service:
                 repo = _InvitationRepository()
                 invitation = await repo.find_one(
                     session=self.uow_service.session,
-                    filters=[FilterParam(field="token", operator=FilterOperator.EQ, value=token)],
+                    filters=[FilterParam(field="token", operator=FilterOperator.EQ, value=token_hash)],
                 )
                 if not invitation:
                     return ServiceResult.fail(
@@ -314,7 +319,7 @@ class InvitationService:
                     )
                 )
 
-            await self.cache.delete(invitation_by_token_cache_key(token))
+            await self.cache.delete(invitation_by_token_cache_key(token_hash))
             await self.cache.delete(invitation_by_id_cache_key(invitation.id))
             await self.cache.delete(org_invitations_list_key(invitation.organization_id))
 
@@ -415,13 +420,14 @@ class InvitationService:
                 validate_invitation_not_rejected(invitation.is_rejected, str(invitation_id))
 
                 new_token = _generate_invitation_token()
+                new_token_hash = hashlib.sha256(new_token.encode()).hexdigest()
                 new_expires = datetime.now(timezone.utc) + timedelta(hours=INVITE_EXPIRY_HOURS)
 
-                old_token = invitation.token
+                old_token_hash = invitation.token
                 updated = await repo.update(
                     session=self.uow_service.session,
                     id=invitation_id,
-                    obj_in={"token": new_token, "expires_at": new_expires},
+                    obj_in={"token": new_token_hash, "expires_at": new_expires},
                     actor_id=ctx.get_user_id_uuid(),
                 )
 
@@ -438,11 +444,13 @@ class InvitationService:
                 )
 
             # Invalidate old token cache and set new one
-            await self.cache.delete(invitation_by_token_cache_key(old_token))
+            await self.cache.delete(invitation_by_token_cache_key(old_token_hash))
             await self.cache.delete(invitation_by_id_cache_key(invitation_id))
             await self.cache.delete(org_invitations_list_key(invitation.organization_id))
 
-            return ServiceResult.ok(data=invitation_to_response_dto(updated))
+            res_dto = invitation_to_response_dto(updated)
+            res_dto.token = new_token
+            return ServiceResult.ok(data=res_dto)
 
         except Exception as exc:
             logger.error(f"resend_invitation failed for {invitation_id}: {exc}", exc_info=True)
@@ -457,7 +465,8 @@ class InvitationService:
     ) -> ServiceResult[InvitationResponseDTO]:
         """Look up an invitation by its secure token (for claim-link views)."""
         try:
-            cache_key = invitation_by_token_cache_key(token)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            cache_key = invitation_by_token_cache_key(token_hash)
             cached = await self.cache.get(cache_key)
             if cached is not None:
                 return ServiceResult.ok(
@@ -469,7 +478,7 @@ class InvitationService:
                 repo = _InvitationRepository()
                 invitation = await repo.find_one(
                     session=self.uow_service.session,
-                    filters=[FilterParam(field="token", operator=FilterOperator.EQ, value=token)],
+                    filters=[FilterParam(field="token", operator=FilterOperator.EQ, value=token_hash)],
                 )
 
             if not invitation:

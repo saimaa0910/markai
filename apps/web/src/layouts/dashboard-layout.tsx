@@ -39,8 +39,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (!accessToken) {
       router.push('/auth/login');
+    } else if (user?.deletion_requested_at) {
+      router.push('/auth/restore-account');
     }
-  }, [accessToken, router]);
+  }, [accessToken, user, router]);
 
   // Command palette hotkey handler (Cmd+K)
   React.useEffect(() => {

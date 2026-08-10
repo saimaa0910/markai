@@ -12,10 +12,11 @@ class GroqProvider(BaseLLMProvider):
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
         self.client = httpx.AsyncClient(timeout=30.0)
+        self.sync_client = httpx.Client(timeout=30.0)
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         **kwargs,
@@ -73,7 +74,7 @@ class GroqProvider(BaseLLMProvider):
 
     def stream(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         **kwargs,
@@ -84,7 +85,7 @@ class GroqProvider(BaseLLMProvider):
 
         valid_model = model if model and ("llama" in model or "mixtral" in model or "gemma" in model or "qwen" in model) else "llama-3.3-70b-versatile"
 
-        with self.client.stream(
+        with self.sync_client.stream(
             "POST",
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
@@ -155,7 +156,7 @@ class GroqProvider(BaseLLMProvider):
         return self.chat(messages=messages, model=model or "llama-3.2-11b-vision-instruct")
 
     def json_output(
-        self, messages: List[Dict[str, str]], schema: Dict[str, Any], model: str
+        self, messages: List[Dict[str, Any]], schema: Dict[str, Any], model: str
     ) -> Dict[str, Any]:
         return self.chat(
             messages=messages,

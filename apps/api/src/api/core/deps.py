@@ -140,7 +140,7 @@ class RoleChecker:
             )
         else:
             try:
-                org_uuid = uuid.UUID(str(org_id))
+                org_uuid = uuid.UUID(org_id)
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -192,7 +192,7 @@ class PermissionChecker:
             )
         else:
             try:
-                org_uuid = uuid.UUID(str(org_id))
+                org_uuid = uuid.UUID(org_id)
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

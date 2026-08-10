@@ -49,6 +49,7 @@ from api.schemas.token import Token
 from api.schemas.user import UserCreate, UserResponse
 from api.services.email_service import (
     send_password_reset_email,
+    send_password_reset_success_email,
     send_verification_email,
     send_security_alert,
     send_welcome_email,
@@ -153,6 +154,165 @@ def log_audit(
     db.commit()
 
 
+import httpx
+
+def parse_user_agent(user_agent: str):
+    user_agent = user_agent.lower()
+    # OS
+    if "windows" in user_agent:
+        os = "Windows"
+    elif "macintosh" in user_agent or "mac os" in user_agent:
+        os = "macOS"
+    elif "linux" in user_agent:
+        os = "Linux"
+    elif "iphone" in user_agent or "ipad" in user_agent:
+        os = "iOS"
+    elif "android" in user_agent:
+        os = "Android"
+    else:
+        os = "Unknown OS"
+
+    # Browser
+    if "chrome" in user_agent or "chromium" in user_agent:
+        browser = "Chrome"
+    elif "firefox" in user_agent:
+        browser = "Firefox"
+    elif "safari" in user_agent:
+        browser = "Safari"
+    elif "edge" in user_agent:
+        browser = "Edge"
+    elif "opr/" in user_agent or "opera" in user_agent:
+        browser = "Opera"
+    else:
+        browser = "Unknown Browser"
+
+    # Device
+    if "mobile" in user_agent or "iphone" in user_agent or "android" in user_agent:
+        device = "Mobile"
+    elif "tablet" in user_agent or "ipad" in user_agent:
+        device = "Tablet"
+    else:
+        device = "Desktop"
+
+    return device, browser, os
+
+
+def resolve_location(ip: str) -> dict:
+    default_loc = {
+        "city": "Unknown City",
+        "country": "Unknown Country",
+        "country_code": "UN"
+    }
+    if not ip or ip in ("127.0.0.1", "::1", "localhost"):
+        return {
+            "city": "Localhost",
+            "country": "Localhost",
+            "country_code": "LH"
+        }
+    try:
+        # Fetch from http://ip-api.com/json/ (free, no API key needed)
+        resp = httpx.get(f"http://ip-api.com/json/{ip}", timeout=1.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "success":
+                return {
+                    "city": data.get("city", "Unknown City"),
+                    "country": data.get("country", "Unknown Country"),
+                    "country_code": (data.get("countryCode", "UN"))[:2]
+                }
+    except Exception:
+        pass
+    return default_loc
+
+
+def check_for_login_alerts(db: Session, user: User, current_session: UserSession) -> None:
+    ip = current_session.ip_address or "Unknown"
+    ua = current_session.user_agent or "Unknown"
+    device, browser, os = parse_user_agent(ua)
+    
+    loc = resolve_location(ip)
+    current_session.city = loc["city"]
+    current_session.country_code = (loc["country_code"] or "UN")[:2]
+    db.add(current_session)
+    db.flush()
+    
+    # Query past successful login sessions (exclude the current one)
+    past_sessions = db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.id != current_session.id,
+    ).all()
+    
+    if not past_sessions:
+        # First login - send a standard login alert
+        detail_msg = (
+            f"Device: {device}\n"
+            f"Browser: {browser}\n"
+            f"OS: {os}\n"
+            f"IP Address: {ip}\n"
+            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"Location: {loc['city']}, {loc['country']}"
+        )
+        try:
+            send_security_alert(
+                user.email,
+                user.full_name,
+                "New Login Detected",
+                detail_msg
+            )
+        except Exception:
+            pass
+        return
+        
+    past_ips = {s.ip_address for s in past_sessions if s.ip_address}
+    past_countries = {s.country_code for s in past_sessions if s.country_code}
+    past_user_agents = [s.user_agent for s in past_sessions if s.user_agent]
+    
+    past_browsers = set()
+    past_devices = set()
+    for p_ua in past_user_agents:
+        p_dev, p_brow, _ = parse_user_agent(p_ua)
+        past_browsers.add(p_brow)
+        past_devices.add(p_dev)
+        
+    new_ip = ip not in past_ips and ip != "127.0.0.1"
+    new_country = current_session.country_code not in past_countries and current_session.country_code not in ("Unknown", "LH")
+    new_browser = browser not in past_browsers and browser != "Unknown Browser"
+    new_device = device not in past_devices and device != "Unknown Device"
+    suspicious = (new_ip and new_country) or (new_country and new_device)
+    
+    trigger_alert = new_ip or new_country or new_browser or new_device or suspicious
+    
+    if trigger_alert:
+        reasons = []
+        if suspicious: reasons.append("Suspicious login pattern detected")
+        if new_country: reasons.append(f"New country ({loc['country']})")
+        if new_ip: reasons.append(f"New IP address ({ip})")
+        if new_browser: reasons.append(f"New browser ({browser})")
+        if new_device: reasons.append(f"New device ({device})")
+        
+        reason_str = ", ".join(reasons)
+        
+        detail_msg = (
+            f"Alert Reason: {reason_str}\n\n"
+            f"Device: {device}\n"
+            f"Browser: {browser}\n"
+            f"OS: {os}\n"
+            f"IP Address: {ip}\n"
+            f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            f"Location: {loc['city']}, {loc['country']}"
+        )
+        
+        try:
+            send_security_alert(
+                user.email,
+                user.full_name,
+                f"Security Alert: New Login Detected ({reason_str})",
+                detail_msg
+            )
+        except Exception:
+            pass
+
+
 def store_refresh_token(db: Session, token: str, user_id: uuid.UUID, request: Optional[Request] = None) -> uuid.UUID:
     """Store refresh token in DB and create UserSession. Returns session_id."""
     try:
@@ -192,6 +352,10 @@ def store_refresh_token(db: Session, token: str, user_id: uuid.UUID, request: Op
         )
         db.add(session)
         db.flush()
+        
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            check_for_login_alerts(db, user, session)
 
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     db_token = RefreshToken(
@@ -362,24 +526,86 @@ def _validate_and_consume_verification_token(
     return db_token.user_id
 
 
+def _create_password_reset_token(db: Session, user_id: uuid.UUID, ip_address: Optional[str] = None) -> str:
+    """
+    Create a single-use password reset token.
+    Invalidates any previously unused reset tokens for this user.
+    Returns the raw token (to be sent via email, not stored).
+    """
+    from api.models.iam import PasswordResetToken
+
+    # Invalidate all existing unused reset tokens for this user
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user_id,
+        PasswordResetToken.is_used == False,
+    ).update({"is_used": True})
+
+    # Generate new 128-bit secure token
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+    db_token = PasswordResetToken(
+        user_id=user_id,
+        token_hash=token_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=2),
+        is_used=False,
+        ip_address=ip_address,
+    )
+    db.add(db_token)
+    db.commit()
+    return raw_token
+
+
+def _validate_and_consume_password_reset_token(
+    db: Session, raw_token: str
+) -> Optional[uuid.UUID]:
+    """
+    Validate a raw password reset token.
+    Returns user_id if valid, None otherwise.
+    Marks token as used on success.
+    """
+    from api.models.iam import PasswordResetToken
+
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    db_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.is_used == False,
+    ).first()
+
+    if not db_token:
+        return None
+
+    # Check expiry
+    expires_at = db_token.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < datetime.now(timezone.utc):
+        return None
+
+    # Consume token
+    db_token.is_used = True
+    db_token.used_at = datetime.now(timezone.utc)
+    db.add(db_token)
+    db.commit()
+    return db_token.user_id
+
+
 # ─── Register ─────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db)) -> Any:
     """Register a new user. Creates default org, or joins org via invitation token."""
-    existing_user = db.query(User).filter(User.email == user_in.email).first()
-    if existing_user:
-        log_audit(db, None, "USER_REGISTER_FAILED", request, {"email": user_in.email, "reason": "Email already exists"})
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The user with this email already exists.")
+    existing_user = db.query(User).filter(User.email == user_in.email, User.deleted_at.is_(None)).first()
 
     # Resolve invitation
     invitation = None
     if user_in.invitation_token:
         from api.models.membership import OrganizationInvitation
+        invitation_token_hash = hashlib.sha256(user_in.invitation_token.encode()).hexdigest()
         invitation = (
             db.query(OrganizationInvitation)
             .filter(
-                OrganizationInvitation.token == user_in.invitation_token,
+                OrganizationInvitation.token == invitation_token_hash,
                 OrganizationInvitation.is_accepted == False,
                 OrganizationInvitation.is_rejected == False,
                 OrganizationInvitation.expires_at > datetime.now(timezone.utc),
@@ -389,16 +615,40 @@ def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db
         if not invitation:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired invitation token.")
 
+    # Check if we can update a pre-created temporary user
+    is_temp_user = False
+    if existing_user:
+        metadata = existing_user.metadata_json or {}
+        if metadata.get("is_temporary_password"):
+            is_temp_user = True
+        else:
+            log_audit(db, None, "USER_REGISTER_FAILED", request, {"email": user_in.email, "reason": "Email already exists"})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The user with this email already exists.")
+
     hashed_password = get_password_hash(user_in.password)
-    user = User(
-        email=user_in.email,
-        hashed_password=hashed_password,
-        full_name=user_in.full_name,
-        is_active=True,
-        is_superuser=False,
-        is_verified=True if invitation else False,
-    )
-    db.add(user)
+
+    if is_temp_user:
+        user = existing_user
+        user.full_name = user_in.full_name
+        user.hashed_password = hashed_password
+        user.is_active = True
+        user.is_verified = True if invitation else False
+        # Clean up metadata
+        metadata = user.metadata_json or {}
+        new_metadata = {k: v for k, v in metadata.items() if k not in ("is_temporary_password", "change_password_required")}
+        user.metadata_json = new_metadata
+        db.add(user)
+    else:
+        user = User(
+            email=user_in.email,
+            hashed_password=hashed_password,
+            full_name=user_in.full_name,
+            is_active=True,
+            is_superuser=False,
+            is_verified=True if invitation else False,
+        )
+        db.add(user)
+
     db.flush()
 
     if invitation:
@@ -487,6 +737,13 @@ def login(
         log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Incorrect password"})
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect email or password")
 
+    if not user.is_verified:
+        log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Email not verified"})
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email not verified. Please verify your email first.",
+        )
+
     if not user.is_active:
         scheduled = user.scheduled_deletion_at
         if scheduled and scheduled.tzinfo is None:
@@ -521,17 +778,7 @@ def login(
     session_id = store_refresh_token(db, refresh_token_str, user.id, request)
     access_token = create_access_token(user.id, token_id=session_id)
 
-    # Send login alert security email
-    try:
-        send_security_alert(
-            user.email,
-            user.full_name,
-            "New Login Detected",
-            f"A successful login was detected on your account from IP {request.client.host if request.client else 'Unknown'} using {request.headers.get('user-agent', 'Unknown')}."
-        )
-    except Exception as e:
-        import logging
-        logging.getLogger("eaimos.auth").error(f"Failed to send login alert email: {e}")
+
 
     log_audit(db, user.id, "USER_LOGIN", request)
 
@@ -679,8 +926,8 @@ def forgot_password(
 
     user = db.query(User).filter(User.email == target_email, User.is_active == True).first()
     if user:
-        token = create_access_token(user.id, expires_delta=timedelta(hours=2))
-        reset_url = f"{settings.FRONTEND_URL}/auth/reset-password?token={token}"
+        raw_token = _create_password_reset_token(db, user.id, ip_address=request.client.host if request.client else None)
+        reset_url = f"{settings.FRONTEND_URL}/auth/reset-password?token={raw_token}"
         try:
             send_password_reset_email(user.email, user.full_name, reset_url)
         except Exception as e:
@@ -713,12 +960,17 @@ def reset_password(
     if not target_token or not target_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Token and new password are required")
 
-    try:
-        payload = jwt.decode(target_token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("sub")
-        user_uuid = uuid.UUID(str(user_id))
-    except (JWTError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
+    # Try DB-backed hashed token first
+    user_uuid = _validate_and_consume_password_reset_token(db, target_token)
+
+    if not user_uuid:
+        # Fallback to legacy JWT token decoding (backward compatibility)
+        try:
+            payload = jwt.decode(target_token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+            user_id = payload.get("sub")
+            user_uuid = uuid.UUID(str(user_id))
+        except (JWTError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
 
     user = db.query(User).filter(User.id == user_uuid, User.is_active == True).first()
     if not user:
@@ -737,15 +989,10 @@ def reset_password(
     ).update({RefreshToken.is_revoked: True})
     db.commit()
     try:
-        send_security_alert(
-            user.email,
-            user.full_name,
-            "Password Reset Successful",
-            "Your password has been successfully reset. All active sessions have been revoked. If you did not request this, secure your account immediately."
-        )
+        send_password_reset_success_email(user.email, user.full_name)
     except Exception as e:
         import logging
-        logging.getLogger("eaimos.auth").error(f"Failed to send password reset success alert email: {e}")
+        logging.getLogger("eaimos.auth").error(f"Failed to send password reset success email: {e}")
     log_audit(db, user.id, "PASSWORD_RESET_SUCCESS", request)
     return {"success": True, "message": "Password successfully updated. Please sign in with your new password."}
 
@@ -1090,17 +1337,7 @@ def mfa_login(
     session_id = store_refresh_token(db, refresh_token_str, user.id, request)
     access_token = create_access_token(user.id, token_id=session_id)
 
-    # Send login alert security email
-    try:
-        send_security_alert(
-            user.email,
-            user.full_name,
-            "New Login Detected (MFA Verified)",
-            f"A successful login was verified with MFA on your account from IP {request.client.host if request.client else 'Unknown'} using {request.headers.get('user-agent', 'Unknown')}."
-        )
-    except Exception as e:
-        import logging
-        logging.getLogger("eaimos.auth").error(f"Failed to send MFA login alert email: {e}")
+
 
     log_audit(db, user.id, "USER_LOGIN_MFA_SUCCESS", request)
     return {
@@ -1147,10 +1384,11 @@ def oauth_token_exchange(
         invitation = None
         if body.invitation_token:
             from api.models.membership import OrganizationInvitation
+            invitation_token_hash = hashlib.sha256(body.invitation_token.encode()).hexdigest()
             invitation = (
                 db.query(OrganizationInvitation)
                 .filter(
-                    OrganizationInvitation.token == body.invitation_token,
+                    OrganizationInvitation.token == invitation_token_hash,
                     OrganizationInvitation.is_accepted == False,
                     OrganizationInvitation.is_rejected == False,
                     OrganizationInvitation.expires_at > datetime.now(timezone.utc)
@@ -1320,10 +1558,11 @@ def _validate_oauth_token(provider: str, access_token: str, id_token: Optional[s
 def get_invitation(token: str, db: Session = Depends(get_db)) -> Any:
     """Get invitation details by token (public endpoint for invitation preview)."""
     from api.models.membership import OrganizationInvitation
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
     invitation = (
         db.query(OrganizationInvitation)
         .filter(
-            OrganizationInvitation.token == token,
+            OrganizationInvitation.token == token_hash,
             OrganizationInvitation.is_accepted == False,
             OrganizationInvitation.is_rejected == False,
         )
@@ -1355,10 +1594,11 @@ def accept_invitation(
 ) -> Any:
     """Accept an organization invitation for the currently authenticated user."""
     from api.models.membership import OrganizationInvitation
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     invitation = (
         db.query(OrganizationInvitation)
         .filter(
-            OrganizationInvitation.token == body.token,
+            OrganizationInvitation.token == token_hash,
             OrganizationInvitation.is_accepted == False,
             OrganizationInvitation.is_rejected == False,
         )
@@ -1389,6 +1629,18 @@ def accept_invitation(
     db.add(invitation)
     db.commit()
 
+    # Notify inviter of acceptance
+    try:
+        org = db.query(Organization).filter(Organization.id == invitation.organization_id).first()
+        org_name = org.name if org else "the organization"
+        inviter = db.query(User).filter(User.id == invitation.invited_by).first()
+        if inviter:
+            from api.services.email_service import send_invitation_accepted_email
+            send_invitation_accepted_email(inviter.email, current_user.full_name, current_user.email, org_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.auth").error(f"Failed to send acceptance email: {exc}")
+
     org = db.query(Organization).filter(Organization.id == invitation.organization_id).first()
     log_audit(db, current_user.id, "INVITATION_ACCEPTED", request, {"organization_id": str(invitation.organization_id)})
     return {
@@ -1407,10 +1659,11 @@ def reject_invitation(
 ) -> Any:
     """Reject an organization invitation."""
     from api.models.membership import OrganizationInvitation
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
     invitation = (
         db.query(OrganizationInvitation)
         .filter(
-            OrganizationInvitation.token == body.token,
+            OrganizationInvitation.token == token_hash,
             OrganizationInvitation.is_accepted == False,
             OrganizationInvitation.is_rejected == False,
         )
@@ -1421,4 +1674,16 @@ def reject_invitation(
 
     invitation.is_rejected = True
     db.commit()
+
+    # Notify inviter of rejection
+    try:
+        org = db.query(Organization).filter(Organization.id == invitation.organization_id).first()
+        org_name = org.name if org else "the organization"
+        inviter = db.query(User).filter(User.id == invitation.invited_by).first()
+        if inviter:
+            from api.services.email_service import send_invitation_rejected_email
+            send_invitation_rejected_email(inviter.email, invitation.email, org_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger("eaimos.auth").error(f"Failed to send rejection email: {exc}")
     return {"success": True, "message": "Invitation declined"}

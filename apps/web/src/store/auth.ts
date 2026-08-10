@@ -9,6 +9,8 @@ export interface UserProfile {
   is_superuser: boolean;
   role?: string | null;
   permissions?: string[];
+  deletion_requested_at?: string | null;
+  metadata_json?: Record<string, any> | null;
 }
 
 export interface Organization {

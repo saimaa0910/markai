@@ -212,6 +212,18 @@ services:
     ports:
       - "9100:9100"
 
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: eaimos-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP — all app emails land here
+      - "8025:8025"   # Web UI — open http://localhost:8025 to browse inbox
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
 volumes:
   postgres_data:
   redis_data:

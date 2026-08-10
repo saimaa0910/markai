@@ -32,10 +32,13 @@ function ResetPasswordContent() {
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<ResetPasswordFormValues>({
     resolver: zodResolver(resetPasswordSchema),
   });
+
+  const passwordVal = watch('password', '');
 
   const onSubmit = async (data: ResetPasswordFormValues) => {
     if (!token) {
@@ -54,6 +57,28 @@ function ResetPasswordContent() {
       setLoading(false);
     }
   };
+
+  const getPasswordStrength = (val: string) => {
+    if (!val) return { score: 0, label: '', color: 'bg-neutral-800' };
+    let score = 0;
+    if (val.length >= 8) score++;
+    if (/[a-z]/.test(val) && /[A-Z]/.test(val)) score++;
+    if (/\d/.test(val)) score++;
+    if (/[^A-Za-z0-9]/.test(val)) score++;
+
+    const scoreMap = [
+      { label: 'Very Weak', color: 'bg-rose-500' },
+      { label: 'Weak', color: 'bg-orange-500' },
+      { label: 'Medium', color: 'bg-amber-500' },
+      { label: 'Strong', color: 'bg-emerald-500' },
+    ];
+    return {
+      score,
+      ...scoreMap[Math.min(score - 1, 3)],
+    };
+  };
+
+  const strength = getPasswordStrength(passwordVal);
 
   if (!token) {
     return (
@@ -99,6 +124,30 @@ function ResetPasswordContent() {
             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           </button>
         </div>
+
+        {passwordVal && (
+          <div className="flex flex-col gap-1.5 mt-0.5">
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-neutral-500">Password Strength:</span>
+              <span className={
+                strength.score === 1 ? 'text-rose-400 font-semibold' :
+                strength.score === 2 ? 'text-orange-400 font-semibold' :
+                strength.score === 3 ? 'text-amber-400 font-semibold' :
+                'text-emerald-400 font-semibold'
+              }>{strength.label}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5 h-1">
+              {[1, 2, 3, 4].map((index) => (
+                <div
+                  key={index}
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    index <= strength.score ? strength.color : 'bg-white/5'
+                  }`}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         <Input
           label="Confirm New Password"

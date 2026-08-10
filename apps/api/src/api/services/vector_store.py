@@ -122,18 +122,6 @@ class VectorStore:
         results.sort(key=lambda x: x[0], reverse=True)
         return results[:limit]
 
-        chunks = db.scalars(stmt.limit(limit * 2)).all()
-        
-        # Grade matches by term occurrences
-        results = []
-        for chunk in chunks:
-            count = sum(1 for term in search_terms if term.lower() in chunk.content.lower())
-            score = 0.5 + (count / max(1, len(search_terms))) * 0.5
-            results.append((score, chunk))
-            
-        results.sort(key=lambda x: x[0], reverse=True)
-        return results[:limit]
-
     @classmethod
     def hybrid_search(
         cls,
@@ -207,12 +195,12 @@ class VectorStore:
             for cand_score, cand_chunk in remaining:
                 # Calculate maximum similarity with already selected chunks
                 max_sim_selected = 0.0
-                cand_vec = cand_chunk.embedding
+                cand_vec = cand_chunk.embedding or []
                 if isinstance(cand_vec, str):
                     cand_vec = json.loads(cand_vec)
                     
                 for sel_score, sel_chunk in selected:
-                    sel_vec = sel_chunk.embedding
+                    sel_vec = sel_chunk.embedding or []
                     if isinstance(sel_vec, str):
                         sel_vec = json.loads(sel_vec)
                     sim = cls._cosine_similarity(cand_vec, sel_vec)

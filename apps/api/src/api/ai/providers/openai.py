@@ -13,10 +13,11 @@ class OpenAIProvider(BaseLLMProvider):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.base_url = (base_url or "https://api.openai.com/v1").rstrip("/")
         self.client = httpx.AsyncClient(timeout=30.0)
+        self.sync_client = httpx.Client(timeout=30.0)
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         **kwargs,
@@ -70,7 +71,7 @@ class OpenAIProvider(BaseLLMProvider):
 
     def stream(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.7,
         **kwargs,
@@ -79,7 +80,7 @@ class OpenAIProvider(BaseLLMProvider):
         if not api_key:
             raise RuntimeError("OpenAI API key is not configured.")
 
-        with self.client.stream(
+        with self.sync_client.stream(
             "POST",
             f"{self.base_url}/chat/completions",
             headers={
@@ -118,7 +119,7 @@ class OpenAIProvider(BaseLLMProvider):
         if not api_key:
             raise RuntimeError("OpenAI API key is not configured.")
 
-        response = self.client.post(
+        response = self.sync_client.post(
             f"{self.base_url}/embeddings",
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -145,7 +146,7 @@ class OpenAIProvider(BaseLLMProvider):
         return self.chat(messages=messages, model=model)
 
     def json_output(
-        self, messages: List[Dict[str, str]], schema: Dict[str, Any], model: str
+        self, messages: List[Dict[str, Any]], schema: Dict[str, Any], model: str
     ) -> Dict[str, Any]:
         return self.chat(
             messages=messages,

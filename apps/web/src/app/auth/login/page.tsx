@@ -193,7 +193,15 @@ function LoginContent() {
       if (orgs.length > 0) setActiveOrg(orgs[0]);
 
       toast.success('Successfully Signed In', `Welcome back, ${profileRes.data.full_name || 'User'}!`);
-      router.push('/dashboard');
+      if (profileRes.data.deletion_requested_at) {
+        toast.error('Account Deletion Pending', 'Your account is scheduled for deletion. Please restore it first.');
+        router.push('/auth/restore-account');
+      } else if (profileRes.data.metadata_json?.change_password_required) {
+        toast.info('Change Password Required', 'Please change your temporary password to continue.');
+        router.push('/dashboard/settings?change_password=true');
+      } else {
+        router.push('/dashboard');
+      }
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.message || 'Incorrect email or password.';
       setError(msg);
@@ -230,7 +238,15 @@ function LoginContent() {
       if (orgs.length > 0) setActiveOrg(orgs[0]);
 
       toast.success('Successfully Signed In', `MFA verified. Welcome back, ${profileRes.data.full_name || 'User'}!`);
-      router.push('/dashboard');
+      if (profileRes.data.deletion_requested_at) {
+        toast.error('Account Deletion Pending', 'Your account is scheduled for deletion. Please restore it first.');
+        router.push('/auth/restore-account');
+      } else if (profileRes.data.metadata_json?.change_password_required) {
+        toast.info('Change Password Required', 'Please change your temporary password to continue.');
+        router.push('/dashboard/settings?change_password=true');
+      } else {
+        router.push('/dashboard');
+      }
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.message || 'Invalid or expired MFA code.';
       setError(msg);
