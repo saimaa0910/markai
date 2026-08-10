@@ -34,6 +34,7 @@ def slugify(text: str) -> str:
 )
 async def create_organization(
     org_in: OrganizationCreate,
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1: Auth enforcement
     current_user: User = Depends(get_current_user),
     org_service: OrganizationService = Depends(get_organization_service),
 ) -> Any:

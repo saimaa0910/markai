@@ -48,6 +48,7 @@ class RevokeSessionRequest(BaseModel):
 
 @router.get("/", response_model=List[SessionResponse])
 def list_sessions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     include_revoked: bool = False,
     request: Request = None,
     db: Session = Depends(get_db),
@@ -83,6 +84,7 @@ def list_sessions(
 
 @router.get("/{session_id}", response_model=SessionResponse)
 def get_session(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     session_id: uuid.UUID,
     request: Request = None,
     db: Session = Depends(get_db),
@@ -115,6 +117,7 @@ def get_session(
 
 @router.delete("/{session_id}", status_code=status.HTTP_200_OK)
 def revoke_session(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     session_id: uuid.UUID,
     body: RevokeSessionRequest = None,
     db: Session = Depends(get_db),
@@ -149,6 +152,7 @@ def revoke_session(
 
 @router.delete("/", status_code=status.HTTP_200_OK)
 def revoke_all_sessions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     keep_current: bool = True,
     request: Request = None,
     db: Session = Depends(get_db),
@@ -194,6 +198,7 @@ def _get_current_session_id(request: Optional[Request]) -> Optional[str]:
         return None
     from api.core.security import ALGORITHM
     from api.core.config import settings
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     from jose import jwt, JWTError
     try:
         auth = request.headers.get("Authorization", "")

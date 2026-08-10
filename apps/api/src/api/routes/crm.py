@@ -11,6 +11,7 @@ from api.models.contact import Contact
 from api.models.lead import Lead
 from api.models.activity import Activity
 from api.schemas.crm import (
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     CompanyCreate,
     CompanyResponse,
     ContactCreate,

@@ -120,6 +120,7 @@ class QuotaUsageResponse(BaseModel):
 
 @router.get("/policies", response_model=List[SecurityPolicyResponse])
 def get_security_policies(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -132,6 +133,7 @@ def get_security_policies(
     ).all()
     if not policies:
         from api.ai.security.pipeline import AISecurityPipeline
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
         pipeline = AISecurityPipeline()
         pipeline._get_active_policy(db, membership.organization_id)
         policies = db.scalars(
@@ -146,6 +148,7 @@ def get_security_policies(
 
 @router.post("/policies", response_model=SecurityPolicyResponse, status_code=status.HTTP_201_CREATED)
 def create_security_policy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: PolicyRuleCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -176,6 +179,7 @@ def create_security_policy(
 
 @router.put("/policies/{id}", response_model=SecurityPolicyResponse)
 def update_security_policy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     id: uuid.UUID,
     req: PolicyRuleUpdate,
     db: Session = Depends(get_db),
@@ -199,6 +203,7 @@ def update_security_policy(
 
 @router.delete("/policies/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_security_policy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -216,6 +221,7 @@ def delete_security_policy(
 
 @router.get("/events", response_model=List[SecurityEventResponse])
 def get_security_events(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -230,6 +236,7 @@ def get_security_events(
 
 @router.get("/audit", response_model=List[ScanLogResponse])
 def get_audit_scans(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -244,6 +251,7 @@ def get_audit_scans(
 
 @router.get("/quotas", response_model=List[QuotaUsageResponse])
 def get_quota_usages(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -256,6 +264,7 @@ def get_quota_usages(
 
 @router.get("/moderation")
 def get_moderation_stats(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -277,6 +286,7 @@ def get_moderation_stats(
 
 @router.get("/pii")
 def get_pii_leaks_stats(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:

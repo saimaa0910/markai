@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toast';
 import { KeyRound, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { apiClient } from '@/services/api-client';
+import { authLifecycleService } from '@/services/auth-lifecycle.service';
 
 const resetPasswordSchema = z.object({
   password: z.string().min(8, { message: "Password must be at least 8 characters" }),
@@ -27,6 +28,8 @@ function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const [loading, setLoading] = React.useState(false);
+  const [verifyingToken, setVerifyingToken] = React.useState(true);
+  const [tokenValid, setTokenValid] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(false);
 
   const {
@@ -40,6 +43,26 @@ function ResetPasswordContent() {
 
   const passwordVal = watch('password', '');
 
+  // Verify token on mount
+  React.useEffect(() => {
+    if (!token) {
+      setVerifyingToken(false);
+      return;
+    }
+    authLifecycleService.verifyPasswordResetToken(token)
+      .then(() => {
+        setTokenValid(true);
+      })
+      .catch((err) => {
+        setTokenValid(false);
+        const msg = err.response?.data?.detail || 'Invalid or expired reset token.';
+        toast.error('Token Verification Failed', msg);
+      })
+      .finally(() => {
+        setVerifyingToken(false);
+      });
+  }, [token]);
+
   const onSubmit = async (data: ResetPasswordFormValues) => {
     if (!token) {
       toast.error('Invalid Request', 'Reset token is missing from the URL.');
@@ -47,7 +70,7 @@ function ResetPasswordContent() {
     }
     setLoading(true);
     try {
-      await apiClient.post(`/auth/reset-password?token=${encodeURIComponent(token)}&new_password=${encodeURIComponent(data.password)}`);
+      await authLifecycleService.completePasswordReset(token, data.password);
       toast.success('Password updated', 'You can now sign in with your new password.');
       router.push('/auth/login');
     } catch (err: any) {
@@ -80,7 +103,16 @@ function ResetPasswordContent() {
 
   const strength = getPasswordStrength(passwordVal);
 
-  if (!token) {
+  if (verifyingToken) {
+    return (
+      <div className="flex flex-col gap-4 text-center">
+        <div className="mx-auto w-12 h-12 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-neutral-400">Verifying reset token...</p>
+      </div>
+    );
+  }
+
+  if (!token || !tokenValid) {
     return (
       <div className="flex flex-col gap-4 text-center">
         <h1 className="text-xl font-bold text-white">Invalid Reset Link</h1>

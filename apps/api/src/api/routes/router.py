@@ -12,6 +12,7 @@ from api.models.membership import UserOrganization, UserRole
 from api.models.router import AIRoutingPolicy, AIRoutingLog, AIFailoverEvent
 from api.models.ai_registry import AIModelRegistry
 from api.ai.router.engine import ModelRouter
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 logger = logging.getLogger("api.routes.router")
 router = APIRouter(prefix="/ai/router", tags=["ai-router"])
@@ -98,6 +99,7 @@ class FailoverEventResponse(BaseModel):
 
 @router.get("/strategies")
 def get_routing_strategies(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
     return [
@@ -113,6 +115,7 @@ def get_routing_strategies(
 
 @router.get("/rules", response_model=List[RoutingPolicyResponse])
 def list_routing_policies(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -129,6 +132,7 @@ def list_routing_policies(
 
 @router.post("/rules", response_model=RoutingPolicyResponse, status_code=status.HTTP_201_CREATED)
 def create_routing_policy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: PolicyRuleCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -152,6 +156,7 @@ def create_routing_policy(
 
 @router.put("/rules/{id}", response_model=RoutingPolicyResponse)
 def update_routing_policy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     id: uuid.UUID,
     req: PolicyRuleUpdate,
     db: Session = Depends(get_db),
@@ -176,6 +181,7 @@ def update_routing_policy(
 
 @router.delete("/rules/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_routing_policy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -193,6 +199,7 @@ def delete_routing_policy(
 
 @router.post("/simulate")
 def simulate_routing(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: SimulationRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -241,6 +248,7 @@ def simulate_routing(
 
 @router.get("/analytics")
 def get_router_analytics(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -289,6 +297,7 @@ def get_router_analytics(
 
 @router.get("/failovers", response_model=List[FailoverEventResponse])
 def get_failover_logs(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -303,6 +312,7 @@ def get_failover_logs(
 
 @router.get("/health")
 def get_router_health(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:

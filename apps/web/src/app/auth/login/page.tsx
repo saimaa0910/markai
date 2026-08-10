@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toast';
 import { KeyRound, Mail, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { apiClient } from '@/services/api-client';
+import { securityService } from '@/services/security.service';
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address' }),
@@ -19,7 +20,7 @@ const loginSchema = z.object({
 });
 
 const mfaSchema = z.object({
-  code: z.string().length(6, { message: 'Code must be exactly 6 digits' }).regex(/^\d+$/, { message: 'Code must be digits only' }),
+  code: z.string().min(6, { message: 'Code is required' }),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
@@ -114,6 +115,8 @@ function LoginContent() {
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [mfaToken, setMfaToken] = React.useState<string | null>(null);
+  const [trustDevice, setTrustDevice] = React.useState(false);
+  const [useRecoveryCode, setUseRecoveryCode] = React.useState(false);
 
   // Load Google Identity Services script
   React.useEffect(() => {
@@ -216,10 +219,21 @@ function LoginContent() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiClient.post('/auth/mfa/verify', {
-        mfa_token: mfaToken,
-        code: data.code,
-      });
+      let res;
+      if (useRecoveryCode) {
+        // Use recovery code flow
+        const recoveryRes = await securityService.verifyRecoveryCode(data.code);
+        if (!recoveryRes.valid || !recoveryRes.access_token) {
+          throw new Error('Invalid recovery code');
+        }
+        res = { data: { access_token: recoveryRes.access_token, refresh_token: '' } };
+      } else {
+        // Use regular MFA code
+        res = await apiClient.post('/auth/mfa/verify', {
+          mfa_token: mfaToken,
+          code: data.code,
+        });
+      }
 
       const { access_token, refresh_token } = res.data;
 
@@ -389,6 +403,17 @@ function LoginContent() {
             Forgot password?
           </Link>
         </div>
+
+        <label className="flex items-center gap-2 cursor-pointer text-neutral-400 hover:text-white transition-colors select-none text-xs">
+          <input 
+            id="login-trust-device"
+            type="checkbox" 
+            checked={trustDevice}
+            onChange={(e) => setTrustDevice(e.target.checked)}
+            className="rounded bg-neutral-900 border-white/10" 
+          />
+          <span>Trust this device for 30 days (skip MFA)</span>
+        </label>
 
         <Button 
           id="login-submit-btn"

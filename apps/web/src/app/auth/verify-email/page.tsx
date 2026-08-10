@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toast';
 import { apiClient } from '@/services/api-client';
+import { authLifecycleService } from '@/services/auth-lifecycle.service';
 
 const resendSchema = z.object({
   email: z.string().email('Please enter a valid email'),
@@ -45,7 +46,7 @@ function VerifyEmailContent() {
   React.useEffect(() => {
     if (!token) return;
     setVerifying(true);
-    apiClient.post('/auth/verify-email', { token })
+    authLifecycleService.verifyEmail(token)
       .then(() => {
         setVerified(true);
         toast.success('Email Verified!', 'Your account is now fully active. Welcome to EAIMOS!');
@@ -68,7 +69,7 @@ function VerifyEmailContent() {
   const onResend = async (data: ResendValues) => {
     setResending(true);
     try {
-      await apiClient.post('/auth/resend-verification', { email: data.email });
+      await authLifecycleService.resendVerification(data.email);
       toast.success('Verification Email Sent', 'Check your inbox for a new verification link.');
       setCooldown(60);
     } catch (err: any) {

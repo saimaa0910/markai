@@ -9,6 +9,7 @@ from api.core.security import verify_password
 from api.core.config import settings
 from api.database.session import get_db
 from api.core.deps import get_current_user
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 from api.models.user import User
 from api.models.membership import UserOrganization
 from api.models.auth import Role
@@ -58,6 +59,7 @@ def resolve_user_response(user: User, db: Session, org_id: Optional[uuid.UUID] =
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_profile(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     current_user: User = Depends(get_current_user),
     x_organization_id: Optional[str] = Header(None),
     db: Session = Depends(get_db),
@@ -76,6 +78,7 @@ def get_current_user_profile(
 
 @router.get("/", response_model=List[UserResponse])
 def list_users(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     x_organization_id: Optional[str] = Header(None),
@@ -96,6 +99,7 @@ def list_users(
 
 @router.patch("/me", response_model=UserResponse)
 def update_my_profile(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_in: UserUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -127,6 +131,7 @@ def update_my_profile(
 
 @router.post("/me/avatar", response_model=UserResponse)
 def upload_avatar(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -155,6 +160,7 @@ def upload_avatar(
 
 @router.patch("/me/preferences", response_model=UserResponse)
 def update_preferences(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     preferences_in: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -193,6 +199,7 @@ class ConfirmEmailChangeRequest(BaseModel):
 
 @router.patch("/email", response_model=dict)
 def change_email(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     body: ChangeEmailRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -240,6 +247,7 @@ def change_email(
 
 @router.post("/email/confirm", response_model=dict)
 def confirm_email_change(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     request_body: ConfirmEmailChangeRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -282,6 +290,7 @@ def confirm_email_change(
 
 @router.patch("/{user_id}", response_model=UserResponse)
 def update_user(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     user_in: UserUpdate,
     db: Session = Depends(get_db),
@@ -327,6 +336,7 @@ class DeleteAccountRequest(BaseModel):
 
 @router.delete("/me", status_code=status.HTTP_200_OK)
 def delete_my_account(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     body: DeleteAccountRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -356,6 +366,7 @@ def delete_my_account(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -381,6 +392,7 @@ class DeleteAccountRequest(BaseModel):
 
 @router.post("/me/delete", status_code=status.HTTP_200_OK)
 def request_account_deletion(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     body: DeleteAccountRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -467,6 +479,7 @@ from api.core.deps import get_current_user, get_current_user_allow_inactive
 
 @router.post("/me/restore", status_code=status.HTTP_200_OK)
 def restore_account(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_allow_inactive),
@@ -523,6 +536,7 @@ def restore_account(
 
 @router.get("/me/deletion-status", status_code=status.HTTP_200_OK)
 def get_deletion_status(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     current_user: User = Depends(get_current_user_allow_inactive),
 ) -> Any:
     """Get current account deletion status."""
@@ -552,6 +566,7 @@ def get_deletion_status(
 
 @router.post("/{user_id}/suspend", status_code=status.HTTP_200_OK)
 def admin_suspend_user(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     db: Session = Depends(get_db),
@@ -585,6 +600,7 @@ def admin_suspend_user(
 
 @router.post("/{user_id}/restore-admin", status_code=status.HTTP_200_OK)
 def admin_restore_user(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     db: Session = Depends(get_db),
@@ -620,6 +636,7 @@ def admin_restore_user(
 
 @router.post("/{user_id}/reset-password-admin", status_code=status.HTTP_200_OK)
 def admin_reset_user_password(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     db: Session = Depends(get_db),
@@ -661,6 +678,7 @@ def admin_reset_user_password(
 
 @router.get("/{user_id}/activity", status_code=status.HTTP_200_OK)
 def get_user_activity(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

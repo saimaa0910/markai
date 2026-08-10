@@ -9,6 +9,7 @@ from api.models.membership import UserOrganization, UserRole
 from api.models.user import User
 from api.services.campaign_service import CampaignService
 from api.schemas.campaign import (
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     CampaignCreate,
     CampaignUpdate,
     CampaignResponse,

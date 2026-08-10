@@ -155,6 +155,38 @@ class User(Base):
     deletion_reason: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True, comment="Optional reason provided by user"
     )
+    
+    # ── Sprint 8.3.1 Phase 3: Account Lifecycle & Data Management ────────────
+    deactivated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="When user deactivated their own account (temporary suspension)",
+    )
+    deactivation_reason: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True,
+        comment="User-provided reason for self-deactivation",
+    )
+    last_export_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Last GDPR data export timestamp",
+    )
+    export_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+        comment="Number of times user has exported their data",
+    )
+    
+    # ── Sprint 8.3.1 Phase 4: Security Hardening ────────────────────────
+    mfa_recovery_codes_generated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="When MFA recovery codes were last generated",
+    )
+    trusted_devices_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="TRUE",
+        comment="Whether user has device trust feature enabled",
+    )
+    trust_device_duration_days: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, server_default="30",
+        comment="How many days a trusted device remains trusted",
+    )
 
     # ── Preferences ───────────────────────────────────────────────────────────
     preferences: Mapped[Optional[dict]] = mapped_column(

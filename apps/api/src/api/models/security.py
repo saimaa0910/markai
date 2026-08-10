@@ -112,3 +112,128 @@ class AIQuotaUsage(Base):
     last_reset_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
     )
+
+
+# =============================================================================
+# Sprint 8.3.1 Phase 4: Authentication Security Models
+# =============================================================================
+
+
+class TrustedDevice(Base):
+    """Trusted Device - Sprint 8.3.1 Phase 4
+    
+    Stores devices that have been marked as trusted by users, allowing MFA bypass
+    for a configured duration.
+    """
+    __tablename__ = "trusted_devices"
+    
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    device_fingerprint: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Unique device identifier"
+    )
+    device_name: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="User-friendly device name"
+    )
+    device_type: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="mobile, desktop, tablet"
+    )
+    browser: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="Browser name and version"
+    )
+    os: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="Operating system"
+    )
+    ip_address: Mapped[Optional[str]] = mapped_column(
+        String(45), nullable=True, comment="IP address when trusted"
+    )
+    location: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Geo-location when trusted"
+    )
+    trusted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="When device was trusted"
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="When trust expires (NULL = never)"
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="Last time this device was used"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, comment="Whether trust is still active"
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="When trust was revoked"
+    )
+    revoked_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User who revoked (for admin revocations)",
+    )
+    revoke_reason: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Reason for revocation"
+    )
+
+
+class MFARecoveryCode(Base):
+    """MFA Recovery Code - Sprint 8.3.1 Phase 4
+    
+    Backup authentication codes for MFA recovery.
+    Codes are stored as SHA-256 hashes and are single-use.
+    """
+    __tablename__ = "mfa_recovery_codes"
+    
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    code_hash: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="SHA-256 hash of recovery code"
+    )
+    is_used: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, comment="Whether code has been used"
+    )
+    used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="When code was used"
+    )
+    used_from_ip: Mapped[Optional[str]] = mapped_column(
+        String(45), nullable=True, comment="IP address where code was used"
+    )
+
+
+class RateLimitLog(Base):
+    """Rate Limit Log - Sprint 8.3.1 Phase 4
+    
+    Tracks rate limit attempts and blocks for security monitoring and forensics.
+    """
+    __tablename__ = "rate_limit_log"
+    
+    endpoint: Mapped[str] = mapped_column(
+        String(255), nullable=False, comment="API endpoint that was rate limited"
+    )
+    ip_address: Mapped[str] = mapped_column(
+        String(45), nullable=False, comment="IP address of request"
+    )
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="User ID if authenticated",
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, comment="Number of attempts in this window"
+    )
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="Start of rate limit window"
+    )
+    window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, comment="End of rate limit window"
+    )
+    blocked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, comment="Whether request was blocked"
+    )

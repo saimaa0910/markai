@@ -6,7 +6,9 @@ from api.core.config import settings
 from api.routes import (
     auth, users, organizations, crm, ai, generator, campaigns, files,
     agents, memory, workflows, integrations, notifications, analytics,
-    infrastructure, router, security, observability, prompts
+    infrastructure, router, security, observability, prompts,
+    auth_session, auth_lifecycle, account_lifecycle,  # Sprint 8.3.1: Auth & account lifecycle routes
+    device_trust, mfa_recovery, audit_logs  # Sprint 8.3.1 Phase 4: Security hardening routes
 )
 from api.routes.chat import chat_router
 from api.routes.sessions import router as sessions_router
@@ -47,6 +49,9 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
+app.include_router(auth_session.router, prefix=settings.API_V1_STR)  # Sprint 8.3.1: Session management
+app.include_router(auth_lifecycle.router, prefix=settings.API_V1_STR)  # Sprint 8.3.1: Lifecycle management
+app.include_router(account_lifecycle.router, prefix=settings.API_V1_STR)  # Sprint 8.3.1 Phase 3: Account lifecycle
 app.include_router(users.router, prefix=settings.API_V1_STR)
 app.include_router(organizations.router, prefix=settings.API_V1_STR)
 app.include_router(crm.companies_router, prefix=settings.API_V1_STR)

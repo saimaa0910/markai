@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/toast';
 import { Mail, ArrowLeft } from 'lucide-react';
 import { apiClient } from '@/services/api-client';
+import { authLifecycleService } from '@/services/auth-lifecycle.service';
 
 const forgotPasswordSchema = z.object({
   email: z.string().email({ message: "Invalid email address" }),
@@ -36,7 +37,7 @@ export default function ForgotPassword() {
     setLoading(true);
     setEmail(data.email);
     try {
-      await apiClient.post(`/auth/forgot-password?email=${encodeURIComponent(data.email)}`);
+      await authLifecycleService.requestPasswordReset(data.email);
       setSuccess(true);
       toast.success('Reset link sent', 'Check your inbox for recovery instructions.');
     } catch (err: any) {
@@ -51,7 +52,7 @@ export default function ForgotPassword() {
     if (!email) return;
     setLoading(true);
     try {
-      await apiClient.post(`/auth/forgot-password?email=${encodeURIComponent(email)}`);
+      await authLifecycleService.requestPasswordReset(email);
       toast.success('Reset link resent', 'A fresh recovery link has been sent to your inbox.');
     } catch (err: any) {
       const msg = err.response?.data?.detail || err.message || 'An error occurred. Please try again.';

@@ -847,6 +847,7 @@ async def upload_voice_and_transcribe(
     if not groq_key:
         from api.models.ai_platform import AIProvider, AIProviderKey
         from api.core.encryption import decrypt_key
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
         from sqlalchemy import func
         prov = db.query(AIProvider).filter(func.lower(AIProvider.name) == "groq").first()
         if prov:

@@ -9,6 +9,7 @@ from api.models.membership import UserOrganization, UserRole
 from api.models.file_asset import FileAsset
 from api.schemas.file_asset import FileAssetResponse
 from api.services.storage_service import MinIOService
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -17,6 +18,7 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
 
 @router.post("/", response_model=FileAssetResponse, status_code=status.HTTP_201_CREATED)
 async def upload_file(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -58,6 +60,7 @@ async def upload_file(
 
 @router.get("/", response_model=List[FileAssetResponse])
 def list_files(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -70,6 +73,7 @@ def list_files(
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_file(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -100,6 +104,7 @@ def delete_file(
 
 @router.get("/{file_id}/download")
 def download_file(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),

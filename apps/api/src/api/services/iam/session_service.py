@@ -56,6 +56,8 @@ from api.services.iam.validators import (
     validate_session_not_expired,
     validate_session_not_revoked,
 )
+# Sprint 8.3.1 Phase 2 - Session Enhancement
+from api.services.session_enhancement import enhance_session_metadata
 
 logger = logging.getLogger("eaimos.iam.session")
 
@@ -142,6 +144,19 @@ class SessionService:
                     session=self.uow_service.session,
                     obj_in=session_data,
                     actor_id=ctx.get_user_id_uuid(),
+                )
+
+                # Sprint 8.3.1 Phase 2: Enhance session with device detection
+                enhance_session_metadata(
+                    session,
+                    user_agent=dto.user_agent,
+                    ip_address=dto.ip_address,
+                    city=dto.city,
+                    country_code=dto.country_code,
+                    # Optional: Add region, latitude, longitude if available in dto
+                    # region=dto.region if hasattr(dto, 'region') else None,
+                    # latitude=dto.latitude if hasattr(dto, 'latitude') else None,
+                    # longitude=dto.longitude if hasattr(dto, 'longitude') else None,
                 )
 
                 self.uow_service.add_event(

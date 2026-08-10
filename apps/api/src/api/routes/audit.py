@@ -69,6 +69,7 @@ def _require_admin_or_superuser(current_user: User) -> None:
 
 @router.get("/logs", response_model=List[AuditLogResponse])
 def list_audit_logs(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -146,6 +147,7 @@ def list_audit_logs(
 
 @router.get("/logs/{log_id}", response_model=AuditLogResponse)
 def get_audit_log(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     log_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -170,6 +172,7 @@ def get_audit_log(
 
 @router.get("/stats")
 def get_audit_stats(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -186,6 +189,7 @@ def get_audit_stats(
         org_ctx = organization_id
         if not org_ctx:
             from api.models.membership import UserOrganization
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
             m = db.query(UserOrganization).filter(
                 UserOrganization.user_id == current_user.id
             ).first()

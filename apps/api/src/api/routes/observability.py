@@ -114,6 +114,7 @@ def get_detailed_system_health(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 @router.get("/traces")
 def get_traces_list(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     trace_id: Optional[str] = None,
@@ -157,6 +158,7 @@ def get_traces_list(
 
 @router.get("/logs")
 def get_logs_list(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     trace_id: Optional[str] = None,
@@ -205,6 +207,7 @@ def get_logs_list(
 
 @router.get("/incidents")
 def get_incidents_list(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     component: Optional[str] = None,
@@ -244,6 +247,7 @@ def get_incidents_list(
 
 @router.get("/alerts")
 def get_alerts_list(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     alert_type: Optional[str] = None,
@@ -284,6 +288,7 @@ def get_alerts_list(
 
 @router.get("/performance")
 def get_performance_analytics(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     days: int = Query(7, ge=1, le=90)
@@ -340,6 +345,7 @@ def get_performance_analytics(
 
     # Cache hit metrics from AICacheMetadata
     from api.models.infrastructure import AICacheMetadata
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     cache_row = db.execute(
         select(func.sum(AICacheMetadata.hits), func.sum(AICacheMetadata.misses))
         .where(AICacheMetadata.timestamp >= since_date)
@@ -372,6 +378,7 @@ def get_performance_analytics(
 
 @router.get("/live")
 def get_live_observability_feed(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member)
 ) -> Dict[str, Any]:
@@ -444,6 +451,7 @@ def get_live_observability_feed(
 
 @router.post("/alerts/test")
 def trigger_test_alert(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(admin_only),
     severity: str = Query("warning", enum=["warning", "critical", "info"])

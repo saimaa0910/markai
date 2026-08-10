@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from api.database.session import get_db
 from api.core.deps import RoleChecker, get_current_user
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 from api.models.membership import UserOrganization, UserRole
 from api.models.user import User
 from api.models.agent import AgentDefinition, AgentSession, AgentRun, AgentLog, AgentStatus
@@ -74,6 +75,7 @@ def create_agent_definition(
 
 @router.get("/definitions", response_model=PaginatedResponse[AgentDefinitionResponse])
 def list_agent_definitions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1: Auth enforcement
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     page: int = Query(1, ge=1),

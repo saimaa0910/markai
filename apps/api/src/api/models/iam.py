@@ -28,8 +28,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, DateTime, Enum, ForeignKey,
-    Index, Integer, String, Table, Text, UniqueConstraint
+    Boolean, CheckConstraint, Column, DateTime, Enum, Float, ForeignKey,
+    Index, Integer, JSON, String, Table, Text, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -268,6 +268,61 @@ class UserSession(Base):
     # ── Geo ───────────────────────────────────────────────────────────────────
     country_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
     city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    region: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="State/region name"
+    )
+    location: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True,
+        comment='Formatted location (e.g. "San Francisco, CA, US")'
+    )
+    latitude: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, comment="Approximate latitude for geo anomaly detection"
+    )
+    longitude: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, comment="Approximate longitude for geo anomaly detection"
+    )
+
+    # ── Device Enhancement (Sprint 8.3.1 Phase 2) ─────────────────────────────
+    device_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True,
+        comment='User-friendly device name (e.g. "My iPhone", "Work Laptop")'
+    )
+    device_type: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True,
+        comment="Device category: mobile, tablet, desktop, bot, unknown"
+    )
+    browser: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, comment="Browser name (Chrome, Safari, Firefox, etc.)"
+    )
+    browser_version: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="Browser version"
+    )
+    os: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True,
+        comment="Operating system (Windows, macOS, iOS, Android, etc.)"
+    )
+    os_version: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="OS version"
+    )
+
+    # ── Activity Tracking (Sprint 8.3.1 Phase 2) ──────────────────────────────
+    request_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+        comment="Total API requests made in this session"
+    )
+    last_request_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Timestamp of last API request (more granular than last_activity_at)"
+    )
+
+    # ── Security Monitoring (Sprint 8.3.1 Phase 2) ────────────────────────────
+    is_suspicious: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="FALSE",
+        comment="Flagged for suspicious activity (geo anomaly, unusual behavior, etc.)"
+    )
+    suspicious_flags: Mapped[Optional[dict]] = mapped_column(
+        JSON, nullable=True, comment="Array of suspicious activity reasons"
+    )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

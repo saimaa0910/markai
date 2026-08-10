@@ -67,6 +67,7 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 
 @router.post("/collections", response_model=CollectionResponse, status_code=status.HTTP_201_CREATED)
 def create_collection(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     col_in: CollectionCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -89,6 +90,7 @@ def create_collection(
 
 @router.get("/collections", response_model=List[CollectionResponse])
 def list_collections(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -105,6 +107,7 @@ def list_collections(
 
 @router.get("/collections/{collection_id}", response_model=CollectionResponse)
 def get_collection(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -125,6 +128,7 @@ def get_collection(
 
 @router.patch("/collections/{collection_id}", response_model=CollectionResponse)
 def update_collection(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     collection_id: uuid.UUID,
     col_in: CollectionUpdate,
     db: Session = Depends(get_db),
@@ -154,6 +158,7 @@ def update_collection(
 
 @router.delete("/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_collection(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -175,6 +180,7 @@ def delete_collection(
 
 @router.post("/collections/{collection_id}/archive", response_model=CollectionResponse)
 def archive_collection(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -190,6 +196,7 @@ def archive_collection(
 
 @router.post("/collections/{collection_id}/favorite", response_model=CollectionResponse)
 def favorite_collection(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -205,6 +212,7 @@ def favorite_collection(
 
 @router.post("/collections/{collection_id}/pin", response_model=CollectionResponse)
 def pin_collection(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -223,6 +231,7 @@ def pin_collection(
 
 @router.post("/folders", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
 def create_folder(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     folder_in: FolderCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -244,6 +253,7 @@ def create_folder(
 
 @router.get("/folders", response_model=List[FolderResponse])
 def list_folders(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -259,6 +269,7 @@ def list_folders(
 
 @router.patch("/folders/{folder_id}", response_model=FolderResponse)
 def update_folder(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     folder_id: uuid.UUID,
     fld_in: FolderUpdate,
     db: Session = Depends(get_db),
@@ -288,6 +299,7 @@ def update_folder(
 
 @router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_folder(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     folder_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -312,6 +324,7 @@ def delete_folder(
 
 @router.get("/documents", response_model=List[KnowledgeDocumentResponse])
 def list_documents(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -327,6 +340,7 @@ def list_documents(
 
 @router.get("/documents/{document_id}", response_model=KnowledgeDocumentResponse)
 def get_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -347,6 +361,7 @@ def get_document(
 
 @router.patch("/documents/{document_id}", response_model=KnowledgeDocumentResponse)
 def update_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     doc_in: KnowledgeDocumentUpdate,
     db: Session = Depends(get_db),
@@ -376,6 +391,7 @@ def update_document(
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -397,6 +413,7 @@ def delete_document(
 
 @router.post("/documents/{document_id}/archive", response_model=KnowledgeDocumentResponse)
 def archive_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -412,6 +429,7 @@ def archive_document(
 
 @router.post("/documents/{document_id}/favorite", response_model=KnowledgeDocumentResponse)
 def favorite_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -427,6 +445,7 @@ def favorite_document(
 
 @router.post("/documents/{document_id}/pin", response_model=KnowledgeDocumentResponse)
 def pin_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -442,6 +461,7 @@ def pin_document(
 
 @router.post("/documents/{document_id}/duplicate", response_model=KnowledgeDocumentResponse)
 def duplicate_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -487,6 +507,7 @@ def duplicate_document(
 
 @router.post("/upload", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_202_ACCEPTED)
 def upload_and_index_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     file: UploadFile = File(...),
     collection_id: Optional[uuid.UUID] = Form(None),
     folder_id: Optional[uuid.UUID] = Form(None),
@@ -586,6 +607,7 @@ def upload_and_index_document(
 
 @router.post("/bulk-upload", status_code=status.HTTP_202_ACCEPTED)
 def bulk_upload_documents(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     files: List[UploadFile] = File(...),
     collection_id: Optional[uuid.UUID] = Form(None),
     folder_id: Optional[uuid.UUID] = Form(None),
@@ -620,6 +642,7 @@ def bulk_upload_documents(
 
 @router.get("/queue", response_model=List[ProcessingJobResponse])
 def list_processing_queue(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -633,6 +656,7 @@ def list_processing_queue(
 
 @router.post("/queue/{job_id}/cancel", status_code=status.HTTP_200_OK)
 def cancel_processing_job(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -665,6 +689,7 @@ def cancel_processing_job(
 
 @router.post("/queue/{job_id}/retry", status_code=status.HTTP_200_OK)
 def retry_processing_job(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -711,6 +736,7 @@ def retry_processing_job(
 
 @router.get("/documents/{document_id}/versions", response_model=List[DocumentVersionResponse])
 def get_document_versions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -727,6 +753,7 @@ def get_document_versions(
 @router.get("/documents/{document_id}/content")
 @router.get("/documents/{document_id}/preview")
 def get_document_content_and_preview(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -777,6 +804,7 @@ def get_document_content_and_preview(
 
 @router.post("/documents/{document_id}/versions/{version}/restore", response_model=KnowledgeDocumentResponse)
 def restore_document_version(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     version: int,
     db: Session = Depends(get_db),
@@ -841,6 +869,7 @@ def restore_document_version(
 
 @router.get("/documents/{document_id}/versions/compare", response_model=VersionCompareResponse)
 def compare_document_versions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     version_a: int,
     version_b: int,
@@ -879,6 +908,7 @@ def compare_document_versions(
 
 @router.post("/search", response_model=List[SearchResultItem])
 def search_vector_base(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: KnowledgeSearchRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -923,6 +953,7 @@ def search_vector_base(
 
 @router.post("/rag", response_model=RAGQueryResponse)
 def execute_rag_pipeline(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: RAGQueryRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -950,6 +981,7 @@ def execute_rag_pipeline(
 
 @router.get("/search/history", response_model=List[SearchHistoryResponse])
 def get_search_history(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     current_user: User = Depends(get_current_user),
@@ -968,6 +1000,7 @@ def get_search_history(
 
 @router.post("/search/saved", response_model=SavedSearchResponse)
 def save_search_query(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: SavedSearchCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -989,6 +1022,7 @@ def save_search_query(
 
 @router.get("/search/saved", response_model=List[SavedSearchResponse])
 def list_saved_searches(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     current_user: User = Depends(get_current_user),
@@ -1008,6 +1042,7 @@ def list_saved_searches(
 
 @router.get("/dashboard/stats", response_model=KnowledgeDashboardResponse)
 def get_dashboard_summary(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -1080,6 +1115,7 @@ def get_dashboard_summary(
 
 @router.post("/", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_201_CREATED)
 def upload_document_legacy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     doc_in: Any = Body(...), # Use generic to avoid import compile order issues, parsed dynamically
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1155,6 +1191,7 @@ def upload_document_legacy(
 
 @router.post("/query", response_model=Any)
 def query_similar_chunks_legacy(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     query_in: Any = Body(...),
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1184,6 +1221,7 @@ def query_similar_chunks_legacy(
 
 @router.post("/documents/{document_id}/rebuild", response_model=KnowledgeDocumentResponse)
 def rebuild_document_embeddings(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1250,6 +1288,7 @@ def rebuild_document_embeddings(
 
 @router.post("/collections/{collection_id}/rebuild", response_model=Dict[str, Any])
 def rebuild_collection_embeddings(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1318,6 +1357,7 @@ def rebuild_collection_embeddings(
 
 @router.get("/search/autocomplete", response_model=List[str])
 def search_autocomplete_suggestions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     q: str,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1346,6 +1386,7 @@ def search_autocomplete_suggestions(
 
 @router.post("/documents/{document_id}/replace", response_model=KnowledgeDocumentResponse)
 def replace_document_file(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -1436,6 +1477,7 @@ def replace_document_file(
 
 @router.post("/documents/{document_id}/move", response_model=KnowledgeDocumentResponse)
 def move_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     collection_id: Optional[uuid.UUID] = Body(None, embed=True),
     folder_id: Optional[uuid.UUID] = Body(None, embed=True),
@@ -1462,6 +1504,7 @@ def move_document(
 
 @router.post("/documents/{document_id}/restore", response_model=KnowledgeDocumentResponse)
 def restore_soft_deleted_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1481,6 +1524,7 @@ def restore_soft_deleted_document(
 
 @router.delete("/documents/{document_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
 def purge_permanent_delete_document(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1516,6 +1560,7 @@ def purge_permanent_delete_document(
 
 @router.patch("/documents/{document_id}/tags", response_model=KnowledgeDocumentResponse)
 def update_document_tags(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     tags: List[str] = Body(...),
     db: Session = Depends(get_db),
@@ -1540,6 +1585,7 @@ def update_document_tags(
 
 @router.get("/documents/{document_id}/preview")
 def preview_document_content(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1587,6 +1633,7 @@ def preview_document_content(
 
 @router.get("/search/autocomplete", response_model=List[str])
 def search_autocomplete_suggestions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     q: str,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1616,6 +1663,7 @@ class SaveAgentImageRequest(BaseModel):
 
 @router.post("/save-agent-image", response_model=KnowledgeDocumentResponse)
 def save_agent_image(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: SaveAgentImageRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -1683,6 +1731,7 @@ def save_agent_image(
     
     # Try to find a FileAsset matching this url to get actual file size
     from api.models.file_asset import FileAsset
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     file_asset = db.scalars(
         select(FileAsset).where(
             FileAsset.organization_id == membership.organization_id,

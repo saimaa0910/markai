@@ -16,6 +16,7 @@ from api.schemas.integration import (
 )
 from api.schemas.common import PaginatedResponse
 from api.services.integration_service import IntegrationService, OAuthService
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
@@ -27,6 +28,7 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
     status_code=status.HTTP_201_CREATED,
 )
 def create_or_connect_integration(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     integration_in: IntegrationCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -43,6 +45,7 @@ def create_or_connect_integration(
 
 @router.get("/", response_model=PaginatedResponse[IntegrationResponse])
 def list_integrations(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     page: int = Query(1, ge=1),
@@ -74,6 +77,7 @@ def list_integrations(
 
 @router.get("/oauth/url", response_model=Dict[str, str])
 def get_oauth_authorization_url(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     provider: IntegrationProvider,
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -83,6 +87,7 @@ def get_oauth_authorization_url(
 
 @router.post("/{integration_id}/sync", response_model=SyncJobResponse)
 def trigger_integration_sync(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     integration_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -111,6 +116,7 @@ def trigger_integration_sync(
 
 @router.get("/{integration_id}/sync-jobs", response_model=PaginatedResponse[SyncJobResponse])
 def list_sync_jobs(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     integration_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -154,6 +160,7 @@ def list_sync_jobs(
 
 @router.delete("/{integration_id}", status_code=status.HTTP_204_NO_CONTENT)
 def disconnect_integration(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     integration_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),

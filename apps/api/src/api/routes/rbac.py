@@ -107,6 +107,7 @@ def _serialize_permission(perm: Permission) -> dict:
 
 @router.get("/roles")
 def list_roles(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     organization_id: Optional[uuid.UUID] = Query(None),
@@ -126,6 +127,7 @@ def list_roles(
 
 @router.post("/roles", status_code=status.HTTP_201_CREATED)
 def create_role(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     body: CreateRoleRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -171,6 +173,7 @@ def create_role(
 
 @router.get("/roles/{role_id}")
 def get_role(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     role_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -184,6 +187,7 @@ def get_role(
 
 @router.get("/roles/{role_id}/permissions")
 def get_role_permissions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     role_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -197,6 +201,7 @@ def get_role_permissions(
 
 @router.post("/roles/{role_id}/permissions", status_code=status.HTTP_200_OK)
 def add_permission_to_role(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     role_id: uuid.UUID,
     body: AddPermissionRequest,
     request: Request,
@@ -228,6 +233,7 @@ def add_permission_to_role(
 
 @router.delete("/roles/{role_id}/permissions/{perm_id}", status_code=status.HTTP_200_OK)
 def remove_permission_from_role(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     role_id: uuid.UUID,
     perm_id: uuid.UUID,
     request: Request,
@@ -256,6 +262,7 @@ def remove_permission_from_role(
 
 @router.get("/permissions")
 def list_permissions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     resource: Optional[str] = Query(None),
@@ -273,6 +280,7 @@ def list_permissions(
 
 @router.post("/users/{user_id}/roles", status_code=status.HTTP_201_CREATED)
 def assign_role_to_user(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     body: AssignRoleRequest,
     request: Request,
@@ -341,6 +349,7 @@ def assign_role_to_user(
 
 @router.delete("/users/{user_id}/roles/{role_id}", status_code=status.HTTP_200_OK)
 def remove_role_from_user(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     role_id: uuid.UUID,
     request: Request,
@@ -374,6 +383,7 @@ def remove_role_from_user(
 
 @router.get("/users/{user_id}/permissions")
 def get_user_effective_permissions(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     organization_id: Optional[uuid.UUID] = Query(None),
@@ -385,6 +395,7 @@ def get_user_effective_permissions(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     from api.middleware.rbac import _get_user_permissions, _get_org_id_from_request
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
     org_id = organization_id or _get_org_id_from_request(request, current_user, db)
     if not org_id:

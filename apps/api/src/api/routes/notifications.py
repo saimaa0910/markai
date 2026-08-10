@@ -16,6 +16,7 @@ from api.schemas.notification import (
 )
 from api.schemas.common import PaginatedResponse
 from api.services.notification_service import NotificationService
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
@@ -23,6 +24,7 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
 
 @router.get("/", response_model=PaginatedResponse[NotificationResponse])
 def list_notifications(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     is_read: Optional[bool] = Query(None),
@@ -61,6 +63,7 @@ def list_notifications(
 
 @router.post("/{notification_id}/read", response_model=NotificationResponse)
 def mark_notification_as_read(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     notification_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -88,6 +91,7 @@ def mark_notification_as_read(
 
 @router.post("/read-all", status_code=status.HTTP_200_OK)
 def mark_all_notifications_as_read(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -109,6 +113,7 @@ def mark_all_notifications_as_read(
 
 @router.get("/preferences", response_model=List[NotificationPreferenceResponse])
 def get_notification_preferences(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -119,6 +124,7 @@ def get_notification_preferences(
 
 @router.patch("/preferences/{pref_id}", response_model=NotificationPreferenceResponse)
 def update_notification_preference(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     pref_id: uuid.UUID,
     pref_in: NotificationPreferenceUpdate,
     db: Session = Depends(get_db),

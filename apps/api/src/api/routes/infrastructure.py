@@ -29,6 +29,7 @@ class JobRunRequest(BaseModel):
 
 @router.get("/health")
 def get_infra_health(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -54,6 +55,7 @@ def get_infra_health(
 
 @router.get("/redis")
 def get_redis_metrics(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -65,6 +67,7 @@ def get_redis_metrics(
 
 @router.post("/redis/reconnect")
 def reconnect_redis(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -78,6 +81,7 @@ def reconnect_redis(
 
 @router.get("/cache")
 def get_cache_metrics(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -89,6 +93,7 @@ def get_cache_metrics(
 
 @router.post("/cache/clear")
 def clear_cache_route(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: CacheClearRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -112,6 +117,7 @@ def clear_cache_route(
 
 @router.get("/workers")
 def get_workers_status(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -138,6 +144,7 @@ def get_workers_status(
 
 @router.get("/jobs")
 def get_jobs_list(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
@@ -149,6 +156,7 @@ def get_jobs_list(
 
 @router.post("/jobs/run")
 def trigger_job(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     req: JobRunRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
@@ -157,6 +165,7 @@ def trigger_job(
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
     from api.worker.celery_app import celery_app
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     
     args = req.args or []
     kwargs = req.kwargs or {}
@@ -181,6 +190,7 @@ def trigger_job(
 
 @router.get("/queues")
 def get_queues_metrics(
+    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:

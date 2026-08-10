@@ -2509,6 +2509,7 @@ def compare_models(
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
                 
                 from api.ai.agents.image.asset_manager import AssetManager
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
                 import uuid
                 file_asset = AssetManager.save_image_asset(
                     db=db,
