@@ -25,14 +25,19 @@ DEFAULT_EMBEDDING_MODEL: str = "text-embedding-3-small"
 DEFAULT_EMBEDDING_DIMENSION: int = 1536
 
 # ─── Token Pricing (USD per 1k tokens) ──────────────────────────────────────
+# Values aligned (P2-4) with AIModelRegistry per-1M prices in ai/registry/manager.py:
+# per-1k price = per-1M price / 1000.
 
 MODEL_PRICING_PER_1K: Dict[str, Dict[str, float]] = {
     "gpt-4o": {"input": 0.0025, "output": 0.0100},
     "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
     "gemini-1.5-pro": {"input": 0.00125, "output": 0.0050},
     "gemini-1.5-flash": {"input": 0.000075, "output": 0.0003},
-    "claude-3-5-sonnet-20241022": {"input": 0.0030, "output": 0.0150},
+    "claude-3-5-sonnet-20240620": {"input": 0.0030, "output": 0.0150},
     "llama-3.3-70b-versatile": {"input": 0.00059, "output": 0.00079},
+    "llama3-70b-8192": {"input": 0.00059, "output": 0.00079},
+    "llama3-8b-8192": {"input": 0.00005, "output": 0.0001},
+    "openai/gpt-oss-120b": {"input": 0.00015, "output": 0.0002},
     "deepseek-chat": {"input": 0.00014, "output": 0.00028},
     "text-embedding-3-small": {"input": 0.00002, "output": 0.0},
     "text-embedding-3-large": {"input": 0.00013, "output": 0.0},

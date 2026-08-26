@@ -215,6 +215,13 @@ class RoleService:
                         status_code=404,
                     )
 
+                # Tenant isolation — org-custom roles belong to the caller's organization
+                if role.organization_id and role.organization_id != ctx.organization_id:
+                    return ServiceResult.fail(
+                        error=f"Role '{role_id}' does not belong to your organization.",
+                        error_code="FORBIDDEN",
+                        status_code=403,
+                    )
                 # Tenant isolation — org-custom roles require membership check
                 if role.organization_id:
                     RolePolicy.can_read(self.authorizer, ctx, org_id=role.organization_id)

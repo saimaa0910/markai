@@ -13,6 +13,11 @@ class OrganizationCreate(BaseModel):
     slug: Optional[str] = None  # Slug will be auto-generated from name if not provided
 
 
+class OrganizationUpdate(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+
+
 class OrganizationResponse(OrganizationBase):
     id: uuid.UUID
 

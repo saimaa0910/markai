@@ -16,12 +16,9 @@ import {
 // ─── Small sparkle mini-chart bar ────────────────────────────────────────────
 function MiniBar({ height, active }: { height: number; active?: boolean }) {
   return (
-    <motion.div
-      className={`w-4 rounded-sm ${active ? 'bg-violet-500' : 'bg-neutral-700'}`}
+    <div
+      className={`w-4 rounded-sm transition-all duration-300 origin-bottom ${active ? 'bg-violet-500' : 'bg-neutral-700'}`}
       style={{ height }}
-      initial={{ scaleY: 0 }}
-      animate={{ scaleY: 1 }}
-      transition={{ duration: 0.6, ease: 'easeOut' }}
     />
   );
 }
@@ -70,19 +67,30 @@ export function DashboardMockup() {
   const prompt = 'Write a LinkedIn ad for our Q4 SaaS campaign...';
 
   React.useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
     let i = 0;
-    const id = setInterval(() => {
-      if (i < prompt.length) {
-        setTypedText(prompt.slice(0, i + 1));
-        i++;
+    let isDeleting = false;
+
+    const step = () => {
+      if (!isDeleting) {
+        if (i <= prompt.length) {
+          setTypedText(prompt.slice(0, i));
+          i++;
+          timeoutId = setTimeout(step, 60);
+        } else {
+          isDeleting = true;
+          timeoutId = setTimeout(step, 2500);
+        }
       } else {
-        setTimeout(() => {
-          setTypedText('');
-          i = 0;
-        }, 2500);
+        setTypedText('');
+        i = 0;
+        isDeleting = false;
+        timeoutId = setTimeout(step, 600);
       }
-    }, 55);
-    return () => clearInterval(id);
+    };
+
+    timeoutId = setTimeout(step, 400);
+    return () => clearTimeout(timeoutId);
   }, []);
 
   const bars = [28, 42, 36, 56, 48, 62, 52, 72, 60, 80, 68, 76];
@@ -90,13 +98,13 @@ export function DashboardMockup() {
   return (
     <div className="relative w-full max-w-[520px] mx-auto lg:mx-0">
       {/* Ambient glow behind */}
-      <div className="absolute inset-0 -z-10 bg-violet-600/10 blur-[80px] rounded-full" />
+      <div className="absolute inset-0 -z-10 bg-violet-600/10 blur-[80px] rounded-full pointer-events-none" />
 
       {/* Main panel */}
       <motion.div
-        initial={{ opacity: 0, x: 60 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
         className="relative rounded-2xl border border-white/10 bg-neutral-950/80 backdrop-blur-xl overflow-hidden shadow-2xl shadow-black/50"
       >
         {/* Window chrome */}
@@ -187,28 +195,18 @@ export function DashboardMockup() {
         </div>
       </motion.div>
 
-      {/* Floating metric chips */}
-      <motion.div
-        className="animate-float absolute -top-4 -right-4 bg-neutral-900 border border-emerald-500/20 rounded-xl px-3 py-2 shadow-xl"
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.8 }}
-      >
+      {/* Floating metric chips using pure CSS float animation without JS transform conflict */}
+      <div className="animate-float absolute -top-4 -right-4 bg-neutral-900 border border-emerald-500/20 rounded-xl px-3 py-2 shadow-xl z-10 pointer-events-none">
         <div className="text-[10px] text-emerald-400 font-bold">↑ 127% ROI</div>
         <div className="text-[9px] text-neutral-500">Q4 Campaign</div>
-      </motion.div>
+      </div>
 
-      <motion.div
-        className="animate-float-delayed absolute -bottom-3 -left-4 bg-neutral-900 border border-violet-500/20 rounded-xl px-3 py-2 shadow-xl"
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 1.1 }}
-      >
+      <div className="animate-float-delayed absolute -bottom-3 -left-4 bg-neutral-900 border border-violet-500/20 rounded-xl px-3 py-2 shadow-xl z-10 pointer-events-none">
         <div className="text-[10px] text-violet-400 font-bold flex items-center gap-1">
           <Sparkles className="w-3 h-3" /> AI Generated
         </div>
         <div className="text-[9px] text-neutral-500">48 assets this week</div>
-      </motion.div>
+      </div>
     </div>
   );
 }

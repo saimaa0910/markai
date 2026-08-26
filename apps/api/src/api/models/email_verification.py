@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 from api.database.base import Base
 
@@ -60,3 +61,13 @@ class EmailVerificationToken(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(
         String(45), nullable=True, comment="IP of the verification request"
     )
+
+    @hybrid_property
+    def token(self) -> str:
+        """Raw token value. Stored hashed; the raw value is only exposed
+        so that fixtures/tests can create tokens directly."""
+        return self.token_hash
+
+    @token.setter
+    def token(self, value: str) -> None:
+        self.token_hash = value

@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 import { useModels, useProviders } from '../hooks';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,7 @@ import {
   Terminal, Sparkles, RefreshCw, Play, Square, Download, Upload,
   Copy, Save, FileText, Code, Table, Eye, Settings2, Sliders, Info, Activity,
   Plus, Trash2, Edit3, Check, X, ChevronDown, ChevronUp, Cpu, Bot, Settings,
-  MessageSquare, User, Loader2, Send, Bookmark, BarChart2
+  MessageSquare, User, Loader2, Send, Bookmark, BarChart2, Image, Share2
 } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -44,6 +45,7 @@ interface PlaygroundSession {
 }
 
 export function PlaygroundPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const { models } = useModels();
   const { providers } = useProviders();
@@ -439,6 +441,16 @@ export function PlaygroundPage() {
           run_evaluation: true
         };
 
+    // Graceful vision check if image references or base64 or markdown image tags are in currentPrompt
+    const containsImageInput = /!\[.*?\]\(.*?\)|data:image\/|https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp)/i.test(currentPrompt);
+    const selectedModelMeta = models.find((m) => m.model_name === selModel || m.id === selModel);
+    if (containsImageInput && selectedModelMeta && !selectedModelMeta.supports_vision) {
+      toast.info(
+        'Image Input Notice',
+        'This model does not support image input. Text-only chat is available. Please switch to a vision model (e.g. GPT-4o, Claude 3.5) to inspect images.'
+      );
+    }
+
     try {
       const apiBase = apiClient.defaults.baseURL || '/api/v1';
       const response = await fetch(`${apiBase}${urlPath}`, {
@@ -453,7 +465,8 @@ export function PlaygroundPage() {
       });
 
       if (!response.ok) {
-        throw new Error(`Connection error: ${response.statusText}`);
+        const errorBody = await response.text().catch(() => '');
+        throw new Error(errorBody || `Connection error: ${response.statusText}`);
       }
 
       const reader = response.body?.getReader();
@@ -490,14 +503,21 @@ export function PlaygroundPage() {
                 if (activeTab === 'models') {
                   // Direct models streaming parsing
                   if (parsed.error) {
-                    toast.error('Error', parsed.error);
-                    textAccumulator = `Error from AI Gateway: ${parsed.error}. Please fix that, then come back later.`;
+                    let errText = parsed.error;
+                    if (/image|vision/i.test(errText) && /support|unsupported/i.test(errText)) {
+                      errText = 'This model does not support image input. Text-only chat is available.';
+                    }
+                    toast.error('Inference Notice', errText);
+                    textAccumulator = `Notice: ${errText}`;
                     setLiveStreamOutput(textAccumulator);
                   } else {
                     const token = parsed.content || parsed.token || '';
                     textAccumulator += token;
                     setLiveStreamOutput(textAccumulator);
                   }
+                  if (parsed.latency_ms) metaLatency = parsed.latency_ms;
+                  if (parsed.total_tokens) metaTokens = parsed.total_tokens;
+                  if (parsed.cost_usd) metaCost = parsed.cost_usd;
                 } else {
                   // Agents SSE Pipeline events parsing
                   if (currentEvent === 'token') {
@@ -537,9 +557,13 @@ export function PlaygroundPage() {
                     metaLatency = parsed.latency_ms || 0;
                     metaTokens = parsed.total_tokens || 0;
                   } else if (currentEvent === 'error') {
-                    toast.error('Agent Execution Failed', parsed.message);
-                    setLiveAgentLogs((prev) => [...prev, { type: 'Error', message: parsed.message }]);
-                    textAccumulator = `Error from AI Gateway: ${parsed.message}. Please fix that, then come back later.`;
+                    let errMsg = parsed.message;
+                    if (/image|vision/i.test(errMsg) && /support|unsupported/i.test(errMsg)) {
+                      errMsg = 'This model does not support image input. Text-only chat is available.';
+                    }
+                    toast.error('Agent Notice', errMsg);
+                    setLiveAgentLogs((prev) => [...prev, { type: 'Error', message: errMsg }]);
+                    textAccumulator = `Notice from AI Gateway: ${errMsg}`;
                     setLiveStreamOutput(textAccumulator);
                   }
                 }
@@ -579,9 +603,14 @@ export function PlaygroundPage() {
       toast.success('Execution Complete', 'Output successfully synced to database.');
     } catch (err: any) {
       if (err.name === 'AbortError') return;
-      toast.error('Inference Failed', err.message || 'Gateway connection timeout.');
+
+      let friendlyError = err.message || 'Gateway connection timeout';
+      if (/image|vision/i.test(friendlyError) && /support|unsupported/i.test(friendlyError)) {
+        friendlyError = 'This model does not support image input. Text-only chat is available. Please select a vision model.';
+      }
+      toast.error('Inference Notice', friendlyError);
       
-      const errMsg = `Error from AI Gateway: ${err.message || 'Gateway connection timeout'}. Please fix that, then come back later.`;
+      const errMsg = `Notice from AI Gateway: ${friendlyError}`;
       const assistantMsg: Message = {
         role: 'assistant',
         content: errMsg,
@@ -781,6 +810,22 @@ export function PlaygroundPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={() => router.push('/dashboard/image-studio')} 
+              className="h-8 text-[11px] border-white/5 text-neutral-300 hover:text-white"
+            >
+              <Image className="w-3.5 h-3.5 mr-1 text-pink-400" /> Image Studio
+            </Button>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={() => router.push('/dashboard/social-studio')} 
+              className="h-8 text-[11px] border-white/5 text-neutral-300 hover:text-white"
+            >
+              <Share2 className="w-3.5 h-3.5 mr-1 text-cyan-400" /> Social Studio
+            </Button>
             <Button size="sm" variant="outline" onClick={handleExportMarkdown} className="h-8 text-[11px] border-white/5">
               <Download className="w-3.5 h-3.5 mr-1" /> Export Markdown
             </Button>

@@ -64,7 +64,8 @@ class DeviceTrustService:
         db: AsyncSession,
         user_id: uuid.UUID,
         device_fingerprint: str,
-        device_info: Dict[str, Any],
+        device_name: Optional[str] = None,
+        device_info: Optional[Dict[str, Any]] = None,
         duration_days: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
@@ -74,6 +75,7 @@ class DeviceTrustService:
             db: Database session
             user_id: User ID
             device_fingerprint: Unique device identifier
+            device_name: User-friendly device name
             device_info: Device metadata (name, type, browser, os, ip, location)
             duration_days: Trust duration (None = use user preference)
             
@@ -84,6 +86,10 @@ class DeviceTrustService:
             ValueError: If user not found or device trust disabled
         """
         from api.models.user import User
+        
+        device_info = dict(device_info or {})
+        if device_name and not device_info.get("device_name"):
+            device_info["device_name"] = device_name
         
         # Get user and check if device trust is enabled
         result = await db.execute(
@@ -135,10 +141,17 @@ class DeviceTrustService:
             
             return {
                 "id": str(existing_device.id),
+                "device_id": str(existing_device.id),
+                "device_fingerprint": existing_device.device_fingerprint,
+                "trusted": True,
                 "device_name": existing_device.device_name,
                 "device_type": existing_device.device_type,
+                "browser": existing_device.browser,
+                "os": existing_device.os,
+                "location": existing_device.location,
                 "trusted_at": existing_device.trusted_at.isoformat(),
                 "expires_at": existing_device.expires_at.isoformat() if existing_device.expires_at else None,
+                "last_used_at": existing_device.last_used_at.isoformat() if existing_device.last_used_at else None,
                 "is_active": existing_device.is_active,
             }
         
@@ -168,6 +181,9 @@ class DeviceTrustService:
         
         return {
             "id": str(trusted_device.id),
+            "device_id": str(trusted_device.id),
+            "device_fingerprint": trusted_device.device_fingerprint,
+            "trusted": True,
             "device_name": trusted_device.device_name,
             "device_type": trusted_device.device_type,
             "browser": trusted_device.browser,
@@ -175,6 +191,7 @@ class DeviceTrustService:
             "location": trusted_device.location,
             "trusted_at": trusted_device.trusted_at.isoformat(),
             "expires_at": trusted_device.expires_at.isoformat() if trusted_device.expires_at else None,
+            "last_used_at": trusted_device.last_used_at.isoformat() if trusted_device.last_used_at else None,
             "is_active": trusted_device.is_active,
         }
     
@@ -230,6 +247,56 @@ class DeviceTrustService:
             f"Device not trusted for user {user_id}: "
             f"fingerprint={device_fingerprint[:16]}..."
         )
+        return False
+    
+    @staticmethod
+    async def verify_device(
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        device_fingerprint: str,
+        only_active: bool = True,
+    ) -> bool:
+        """
+        Check if a device is trusted for a user (alias for verify_trusted_device).
+
+        Args:
+            db: Database session
+            user_id: User ID
+            device_fingerprint: Device fingerprint to verify
+            only_active: If True, only return True for active devices
+
+        Returns:
+            True if device is trusted and (if only_active) active, False otherwise
+        """
+        from api.models.security import TrustedDevice
+
+        now = datetime.now(timezone.utc)
+
+        conditions = [
+            TrustedDevice.user_id == user_id,
+            TrustedDevice.device_fingerprint == device_fingerprint,
+        ]
+
+        if only_active:
+            conditions.append(TrustedDevice.is_active == True)
+            conditions.append(
+                or_(
+                    TrustedDevice.expires_at == None,
+                    TrustedDevice.expires_at > now,
+                )
+            )
+
+        result = await db.execute(
+            select(TrustedDevice).where(and_(*conditions))
+        )
+        device = result.scalar_one_or_none()
+
+        if device:
+            device.last_used_at = now
+            device.updated_at = now
+            await db.commit()
+            return True
+
         return False
     
     @staticmethod

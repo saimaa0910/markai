@@ -108,6 +108,23 @@ class StabilityProvider(BaseProvider):
         res.raise_for_status()
         return res.content
 
+    def check_connectivity(self) -> Dict[str, Any]:
+        if not self.api_key:
+            return {"reachable": False, "error": "API key is not configured"}
+        try:
+            url = "https://api.stability.ai/v1/user/account"
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            res = requests.get(url, headers=headers, timeout=10)
+            if res.status_code in [200, 401, 403]:
+                return {"reachable": res.status_code == 200, "error": None if res.status_code == 200 else f"HTTP {res.status_code}"}
+            return {"reachable": False, "error": f"HTTP {res.status_code}"}
+        except Exception as e:
+            return {"reachable": False, "error": str(e)}
+
+    def variation(self, image_bytes: bytes, prompt: Optional[str] = None, **kwargs) -> bytes:
+        p = prompt or "Stable diffusion variation"
+        return self.generate(prompt=p, **kwargs)
+
     def upscale(self, image_bytes: bytes, scale: float = 2.0, **kwargs) -> bytes:
         url = "https://api.stability.ai/v2beta/stable-image/upscale/fast"
         headers = {
@@ -124,3 +141,4 @@ class StabilityProvider(BaseProvider):
 
 # Register provider
 ProviderRegistry.register("stability", StabilityProvider)
+ProviderRegistry.register("stabilityai", StabilityProvider)

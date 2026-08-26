@@ -197,6 +197,7 @@ class RecordUsageDTO(BaseModel):
     error_code: Optional[str] = None
     user_id: Optional[uuid.UUID] = None
     prompt_id: Optional[uuid.UUID] = None
+    request_id: Optional[str] = None
 
 
 class UsageSummaryDTO(BaseModel):

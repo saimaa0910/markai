@@ -59,13 +59,15 @@ class ImageOutpaintRequest(BaseModel):
 
 class ImageResponse(BaseModel):
     id: str
-    storage_url: str
-    provider: str
-    model: str
+    status: Optional[str] = Field("completed", description="Generation lifecycle status.")
+    storage_url: str = ""
+    provider: str = ""
+    model: str = ""
     prompt: str
     compiled_prompt: Optional[str] = None
     reflection: Optional[Dict[str, Any]] = None
     evaluation: Optional[Dict[str, Any]] = None
+    error: Optional[Dict[str, Any]] = None
 
 
 class ImageLibraryItemResponse(BaseModel):

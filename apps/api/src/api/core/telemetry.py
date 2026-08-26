@@ -5,7 +5,7 @@ from typing import Generator, Optional
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -41,13 +41,13 @@ def init_telemetry(app=None) -> trace.Tracer:
             # Use insecure channel or SSL depending on the URL scheme (usually insecure for localhost)
             insecure = otlp_endpoint.startswith("http://")
             exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=insecure)
-            provider.add_span_processor(SimpleSpanProcessor(exporter))
+            provider.add_span_processor(BatchSpanProcessor(exporter))
         except Exception as e:
             logger.warning(f"Failed to initialize OTLP Span Exporter: {e}. Falling back to Console Span Exporter.")
-            provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+            provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
     else:
         logger.info("No OTLP endpoint configured. Using Console Span Exporter.")
-        provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+        provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
         
     trace.set_tracer_provider(provider)
     tracer = trace.get_tracer(service_name)
@@ -124,4 +124,5 @@ def get_current_trace_and_span_ids() -> tuple[Optional[str], Optional[str]]:
         _pseudo_trace_id.set(tid)
         _pseudo_span_id.set(sid)
     return tid, sid
+
 

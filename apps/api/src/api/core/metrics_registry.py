@@ -43,6 +43,58 @@ ai_errors_total = Counter(
     ["organization_id", "provider", "model", "error_code", "layer"]  # layer: gateway, provider, streaming
 )
 
+# Circuit Breaker Metrics
+ai_provider_circuit_breaker_state = Gauge(
+    "ai_provider_circuit_breaker_state",
+    "Current circuit breaker state: 0=closed, 1=half_open, 2=open",
+    ["provider"]
+)
+
+ai_provider_circuit_breaker_failures_total = Counter(
+    "ai_provider_circuit_breaker_failures_total",
+    "Total failure count registered by circuit breaker",
+    ["provider"]
+)
+
+ai_provider_circuit_breaker_open_time_seconds = Gauge(
+    "ai_provider_circuit_breaker_open_time_seconds",
+    "Elapsed duration in seconds circuit breaker has remained continuously open",
+    ["provider"]
+)
+
+ai_provider_circuit_breaker_transitions_total = Counter(
+    "ai_provider_circuit_breaker_transitions_total",
+    "Total circuit breaker state transitions",
+    ["provider", "from_state", "to_state"]
+)
+
+# Granular Latency & Tracing Metrics
+ai_provider_ttfb_seconds = Histogram(
+    "ai_provider_ttfb_seconds",
+    "Time to first byte / first token for AI providers in seconds",
+    ["provider", "model"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0)
+)
+
+ai_routing_strategy_distribution = Counter(
+    "ai_routing_strategy_distribution",
+    "Total routing decisions categorized by strategy",
+    ["strategy", "organization_id"]
+)
+
+ai_tokens_per_request = Histogram(
+    "ai_tokens_per_request",
+    "Distribution of tokens per request completion",
+    ["provider", "model", "type"],
+    buckets=(10, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000)
+)
+
+ai_request_error_class_total = Counter(
+    "ai_request_error_class_total",
+    "Classification of request failures across the AI gateway",
+    ["provider", "error_type"]
+)
+
 # Token & Cost Metrics
 ai_token_usage_total = Counter(
     "ai_token_usage_total",

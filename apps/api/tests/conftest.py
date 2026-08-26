@@ -24,18 +24,39 @@ os.environ["RESEND_API_KEY"] = ""
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 from api.database.session import get_db
+from api.core.database import get_db as get_async_db
 from api.models import Base
 from api.main import app
 from api.core.config import settings
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
+    poolclass=NullPool,
 )
 
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+test_async_db_url = settings.DATABASE_URL
+if test_async_db_url.startswith("postgresql://"):
+    test_async_db_url = test_async_db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+from sqlalchemy.pool import NullPool
+
+async_engine = create_async_engine(
+    test_async_db_url,
+    poolclass=NullPool,
+)
+TestingAsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
+    autocommit=False,
+    autoflush=False,
+    expire_on_commit=False,
+)
 
 
 def pytest_configure(config):
@@ -58,7 +79,7 @@ def pytest_configure(config):
                 
         if num_workers and num_workers > 1:
             print(f"\n[Master] Pre-initializing {num_workers} parallel test databases sequentially...")
-            system_engine = pg_create_engine("postgresql://postgres:postgres@localhost:5432/postgres", isolation_level="AUTOCOMMIT")
+            system_engine = pg_create_engine(f"postgresql://postgres:postgres@{_test_db_host}:5432/postgres", isolation_level="AUTOCOMMIT")
             
             tests_dir = os.path.dirname(os.path.abspath(__file__))
             api_dir = os.path.dirname(tests_dir)
@@ -78,7 +99,7 @@ def pytest_configure(config):
                     if not db_exists:
                         conn.execute(text(f"CREATE DATABASE {worker_db};"))
                 
-                worker_url = f"postgresql://postgres:postgres@localhost:5432/{worker_db}"
+                worker_url = f"postgresql://postgres:postgres@{_test_db_host}:5432/{worker_db}"
                 worker_engine = pg_create_engine(worker_url)
                 
                 with worker_engine.begin() as conn:
@@ -94,18 +115,21 @@ def pytest_configure(config):
                 
                 # Run migrations in a subprocess with DATABASE_URL set to worker_url
                 import subprocess
+                import sys
                 env = os.environ.copy()
                 env["DATABASE_URL"] = worker_url
                 env["ENVIRONMENT"] = "test"
                 res = subprocess.run(
-                    ["poetry", "run", "alembic", "-c", alembic_ini_path, "upgrade", "head"],
+                    [sys.executable, "-m", "alembic", "-c", alembic_ini_path, "upgrade", "head"],
                     env=env,
+                    cwd=api_dir,
                     capture_output=True,
                     text=True
                 )
                 if res.returncode != 0:
-                    print(f"[Master] Migration failed for {worker_db}: {res.stderr}")
-                    raise RuntimeError(f"Migration failed for {worker_db}: {res.stderr}")
+                    err_msg = (res.stderr or "") + "\n" + (res.stdout or "")
+                    print(f"[Master] Migration failed for {worker_db}: {err_msg.strip()}")
+                    raise RuntimeError(f"Migration failed for {worker_db}: {err_msg.strip()}")
                 
             system_engine.dispose()
             print("[Master] All parallel test databases initialized successfully.")
@@ -120,12 +144,15 @@ def create_test_db():
     """
     import api.database.session
     import api.repositories.unit_of_work
+    import api.core.database
     
     orig_db_session_local = api.database.session.SessionLocal
     orig_uow_session_local = api.repositories.unit_of_work.SessionLocal
+    orig_async_session_maker = api.core.database.async_session_maker
     
     api.database.session.SessionLocal = TestingSessionLocal
     api.repositories.unit_of_work.SessionLocal = TestingSessionLocal
+    api.core.database.async_session_maker = TestingAsyncSessionLocal
     
     # If this is a parallel worker, the master has already initialized and migrated the DB
     if os.environ.get("PYTEST_XDIST_WORKER"):
@@ -133,6 +160,7 @@ def create_test_db():
         engine.dispose()
         api.database.session.SessionLocal = orig_db_session_local
         api.repositories.unit_of_work.SessionLocal = orig_uow_session_local
+        api.core.database.async_session_maker = orig_async_session_maker
         return
 
     # Sequential run fallback database creation and migration
@@ -185,44 +213,64 @@ def create_test_db():
         
     api.database.session.SessionLocal = orig_db_session_local
     api.repositories.unit_of_work.SessionLocal = orig_uow_session_local
+    api.core.database.async_session_maker = orig_async_session_maker
 
 
 @pytest.fixture(scope="function")
 def db_session():
     """
-    Function-scoped database session for test isolation.
-    Uses connection-level savepoint/transaction rollback for 100% isolation on PostgreSQL.
+    Function-scoped database session for tests.
     """
-    connection = engine.connect()
-    transaction = connection.begin()
-    
-    # Configure sessionmaker to bind to the active connection for shared transactions
-    TestingSessionLocal.configure(bind=connection)
-    
     session = TestingSessionLocal()
-    
     yield session
-    
     session.close()
-    if transaction.is_active:
-        transaction.rollback()
-    connection.close()
+
+
+@pytest.fixture(scope="function")
+async def db():
+    """
+    Function-scoped AsyncSession for tests.
+    """
+    async with TestingAsyncSessionLocal() as session:
+        yield session
+
+
+_reflected_metadata = None
+
+@pytest.fixture(scope="function", autouse=True)
+def cleanup_db():
+    yield
+    global _reflected_metadata
+    if _reflected_metadata is None:
+        from sqlalchemy import MetaData
+        _reflected_metadata = MetaData()
+        _reflected_metadata.reflect(bind=engine)
     
-    # Restore sessionmaker to use the engine
-    TestingSessionLocal.configure(bind=engine)
+    with engine.begin() as conn:
+        for table in reversed(_reflected_metadata.sorted_tables):
+            if table.name != "alembic_version":
+                conn.execute(table.delete())
 
 
 @pytest.fixture(scope="function", autouse=True)
-def override_db(db_session):
+def override_db(db_session, db):
     """
-    Override get_db FastAPI dependency to use test session.
+    Override both sync and async get_db FastAPI dependencies.
     """
     def _get_db():
         try:
             yield db_session
         finally:
             pass
+
+    async def _get_async_db():
+        try:
+            yield db
+        finally:
+            pass
+
     app.dependency_overrides[get_db] = _get_db
+    app.dependency_overrides[get_async_db] = _get_async_db
     yield
     app.dependency_overrides.clear()
 

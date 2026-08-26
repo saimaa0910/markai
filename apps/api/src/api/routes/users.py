@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from api.core.security import verify_password
 from api.core.config import settings
 from api.database.session import get_db
-from api.core.deps import get_current_user
+from api.core.deps import get_current_user, get_current_admin_user
 from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 from api.models.user import User
 from api.models.membership import UserOrganization
@@ -58,12 +58,10 @@ def resolve_user_response(user: User, db: Session, org_id: Optional[uuid.UUID] =
 
 
 @router.get("/me", response_model=UserResponse)
-def get_current_user_profile(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_current_user_profile(  # Sprint 8.3.1
     current_user: User = Depends(get_current_user),
     x_organization_id: Optional[str] = Header(None),
-    db: Session = Depends(get_db),
-) -> Any:
+    db: Session = Depends(get_db),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Get profile details of the currently authenticated user.
     """
@@ -77,14 +75,14 @@ def get_current_user_profile(
 
 
 @router.get("/", response_model=List[UserResponse])
-def list_users(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_users(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    x_organization_id: Optional[str] = Header(None),
-) -> Any:
+    x_organization_id: Optional[str] = Header(None),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
-    List all users in the system.
+    List users. Phase 17: scope to the current user's organizations unless the
+    caller is a superuser (who may list the entire system). Previously any
+    authenticated user (including guests) could enumerate every account.
     """
     org_uuid = None
     if x_organization_id:
@@ -92,19 +90,30 @@ def list_users(
             org_uuid = uuid.UUID(x_organization_id)
         except ValueError:
             pass
-    
-    users = db.query(User).all()
+
+    if current_user.is_superuser:
+        users = db.query(User).all()
+    else:
+        org_ids = [
+            m.organization_id
+            for m in db.query(UserOrganization).filter(UserOrganization.user_id == current_user.id).all()
+        ]
+        if not org_ids:
+            return []
+        user_ids = [
+            m.user_id
+            for m in db.query(UserOrganization).filter(UserOrganization.organization_id.in_(org_ids)).all()
+        ]
+        users = db.query(User).filter(User.id.in_(user_ids)).all()
     return [resolve_user_response(u, db, org_uuid) for u in users]
 
 
 @router.patch("/me", response_model=UserResponse)
-def update_my_profile(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_my_profile(  # Sprint 8.3.1
     user_in: UserUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    x_organization_id: Optional[str] = Header(None),
-) -> Any:
+    x_organization_id: Optional[str] = Header(None),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Update my own profile.
     """
@@ -130,13 +139,11 @@ def update_my_profile(
 
 
 @router.post("/me/avatar", response_model=UserResponse)
-def upload_avatar(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def upload_avatar(  # Sprint 8.3.1
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    x_organization_id: Optional[str] = Header(None),
-) -> Any:
+    x_organization_id: Optional[str] = Header(None),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Upload profile avatar.
     """
@@ -159,13 +166,11 @@ def upload_avatar(
 
 
 @router.patch("/me/preferences", response_model=UserResponse)
-def update_preferences(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_preferences(  # Sprint 8.3.1
     preferences_in: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    x_organization_id: Optional[str] = Header(None),
-) -> Any:
+    x_organization_id: Optional[str] = Header(None),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Update my profile preferences.
     """
@@ -198,8 +203,7 @@ class ConfirmEmailChangeRequest(BaseModel):
 
 
 @router.patch("/email", response_model=dict)
-def change_email(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def change_email(  # Sprint 8.3.1
     body: ChangeEmailRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -246,14 +250,15 @@ def change_email(
 
 
 @router.post("/email/confirm", response_model=dict)
-def confirm_email_change(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def confirm_email_change(  # Sprint 8.3.1
     request_body: ConfirmEmailChangeRequest,
     request: Request,
     db: Session = Depends(get_db),
 ) -> Any:
     """
     Confirm email change using the token sent to the new address.
+    The emailed JWT is the sole authorization; no extra bearer token is
+    expected here (Phase 10).
     """
     from api.core.security import ALGORITHM
     from api.core.config import settings
@@ -289,16 +294,15 @@ def confirm_email_change(
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
-def update_user(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_user(  # Sprint 8.3.1
     user_id: uuid.UUID,
     user_in: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    x_organization_id: Optional[str] = Header(None),
-) -> Any:
+    current_user: User = Depends(get_current_admin_user),
+    x_organization_id: Optional[str] = Header(None),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
-    Update a specific user profile (e.g. deactivate active status).
+    Update a specific user profile. Phase 17: admin/superuser only. Only
+    non-privileged fields may be modified (identity & role fields are locked).
     """
     org_uuid = None
     if x_organization_id:
@@ -314,6 +318,15 @@ def update_user(
         )
 
     update_data = user_in.model_dump(exclude_unset=True)
+    # Phase 17: deny privilege-escalation fields entirely. `model_extra`
+    # captures any fields Pydantic strips out of `update_data`.
+    forbidden = {"email", "is_superuser", "hashed_password", "password", "role"}
+    extra_fields = user_in.model_extra or {}
+    if any(f in forbidden for f in list(update_data.keys()) + list(extra_fields.keys())):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Field cannot be modified through this endpoint",
+        )
     for field, val in update_data.items():
         if field == "password" and val:
             from api.core.security import get_password_hash
@@ -335,12 +348,10 @@ class DeleteAccountRequest(BaseModel):
 
 
 @router.delete("/me", status_code=status.HTTP_200_OK)
-def delete_my_account(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_my_account(  # Sprint 8.3.1
     body: DeleteAccountRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Self-delete the authenticated user's account.
     Requires password confirmation and the string 'DELETE'.
@@ -365,22 +376,11 @@ def delete_my_account(
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
-    user_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> None:
-    """
-    Delete a specific user account.
-    """
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-    db.delete(user)
-    db.commit()
+# ─── Admin user deletion deprecated: use 7-day recovery window ──────────────
+# The `delete_user` endpoint is deprecated. Permanent deletion is not supported;
+# users must request account deletion via `/auth/me/delete` which schedules
+# permanent deletion after a 7-day recovery window with email notification.
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ─── Account Deletion (7-Day Recovery Window) ────────────────────────────────
@@ -391,13 +391,11 @@ class DeleteAccountRequest(BaseModel):
 
 
 @router.post("/me/delete", status_code=status.HTTP_200_OK)
-def request_account_deletion(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def request_account_deletion(  # Sprint 8.3.1
     body: DeleteAccountRequest,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Initiate account deletion with a 7-day recovery window.
     Account is immediately deactivated (login disabled).
@@ -478,8 +476,7 @@ from api.core.deps import get_current_user, get_current_user_allow_inactive
 
 
 @router.post("/me/restore", status_code=status.HTTP_200_OK)
-def restore_account(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def restore_account(  # Sprint 8.3.1
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_allow_inactive),
@@ -487,6 +484,9 @@ def restore_account(
     """
     Cancel pending account deletion. Must be called within the 7-day window.
     Requires authentication (user must still know their credentials).
+
+    Phase 7: NOT gated by enforce_all_auth_policies — deactivated / inactive
+    users must be able to restore without tripping the account-status block.
     """
     from api.services.email_service import send_account_restored_email
 
@@ -535,10 +535,8 @@ def restore_account(
 
 
 @router.get("/me/deletion-status", status_code=status.HTTP_200_OK)
-def get_deletion_status(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
-    current_user: User = Depends(get_current_user_allow_inactive),
-) -> Any:
+def get_deletion_status(  # Sprint 8.3.1
+    current_user: User = Depends(get_current_user_allow_inactive),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Get current account deletion status."""
     if not current_user.deletion_requested_at:
         return {"pending_deletion": False}
@@ -565,13 +563,11 @@ def get_deletion_status(
 # ─── Admin User Management ────────────────────────────────────────────────────
 
 @router.post("/{user_id}/suspend", status_code=status.HTTP_200_OK)
-def admin_suspend_user(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def admin_suspend_user(  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Suspend a user account (admin only)."""
     if not current_user.is_superuser:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser access required")
@@ -599,13 +595,11 @@ def admin_suspend_user(
 
 
 @router.post("/{user_id}/restore-admin", status_code=status.HTTP_200_OK)
-def admin_restore_user(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def admin_restore_user(  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Restore a suspended user account (admin only)."""
     if not current_user.is_superuser:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser access required")
@@ -635,13 +629,11 @@ def admin_restore_user(
 
 
 @router.post("/{user_id}/reset-password-admin", status_code=status.HTTP_200_OK)
-def admin_reset_user_password(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def admin_reset_user_password(  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Admin-initiated password reset — sends reset email to user."""
     if not current_user.is_superuser:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superuser access required")
@@ -677,13 +669,11 @@ def admin_reset_user_password(
 
 
 @router.get("/{user_id}/activity", status_code=status.HTTP_200_OK)
-def get_user_activity(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_user_activity(  # Sprint 8.3.1
     user_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    limit: int = 50,
-) -> Any:
+    limit: int = 50,  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Get recent audit log activity for a user (admin or self)."""
     if not current_user.is_superuser and current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")

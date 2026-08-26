@@ -30,85 +30,88 @@ class RateLimitService:
     @staticmethod
     async def check_rate_limit(
         db: AsyncSession,
-        endpoint: str,
         identifier: str,
-        limit: int,
-        window_minutes: int,
-    ) -> Tuple[bool, int]:
+        endpoint: str,
+        max_attempts: int = 5,
+        window_seconds: int = 60,
+    ) -> bool:
         """
         Check if an action is within rate limits.
-        
+
         Args:
             db: Database session
-            endpoint: API endpoint path
             identifier: IP address or user_id
-            limit: Maximum attempts allowed
-            window_minutes: Time window in minutes
-            
+            endpoint: API endpoint path
+            max_attempts: Maximum attempts allowed within the window
+            window_seconds: Time window in seconds
+
         Returns:
-            Tuple of (allowed: bool, remaining: int)
+            True if the action is allowed, False if rate limited
         """
         from api.models.security import RateLimitLog
-        
+
         now = datetime.now(timezone.utc)
-        window_start = now - timedelta(minutes=window_minutes)
-        
+        window_start = now - timedelta(seconds=window_seconds)
+
         # Count attempts in current window
         result = await db.execute(
             select(func.sum(RateLimitLog.attempt_count)).where(
                 and_(
                     RateLimitLog.endpoint == endpoint,
                     RateLimitLog.ip_address == identifier,
-                    RateLimitLog.window_end > window_start,
+                    RateLimitLog.window_end > now,
                 )
             )
         )
         current_count = result.scalar() or 0
-        
-        allowed = current_count < limit
-        remaining = max(0, limit - current_count - 1) if allowed else 0
-        
+
+        allowed = current_count < max_attempts
+
         logger.debug(
             f"Rate limit check for {endpoint} from {identifier}: "
-            f"{current_count}/{limit} attempts, allowed={allowed}"
+            f"{current_count}/{max_attempts} attempts, allowed={allowed}"
         )
-        
-        return allowed, remaining
-    
+
+        return allowed
+
     @staticmethod
     async def record_attempt(
         db: AsyncSession,
         endpoint: str,
         ip_address: str,
         user_id: Optional[uuid.UUID] = None,
-        limit: int = None,
-        window_minutes: int = 15,
+        max_attempts: int = None,
+        window_seconds: int = 60,
     ) -> None:
         """
         Record an API attempt for rate limiting.
-        
+
         Args:
             db: Database session
             endpoint: API endpoint path
             ip_address: Client IP address
             user_id: User ID if authenticated
-            limit: Rate limit threshold (for blocking decision)
-            window_minutes: Time window in minutes
+            max_attempts: Rate limit threshold (for blocking decision)
+            window_seconds: Time window in seconds
         """
         from api.models.security import RateLimitLog
-        
+
         now = datetime.now(timezone.utc)
         window_start = now
-        window_end = now + timedelta(minutes=window_minutes)
-        
+        window_end = now + timedelta(seconds=window_seconds)
+
         # Check if we should block this attempt
         blocked = False
-        if limit:
-            allowed, _ = await RateLimitService.check_rate_limit(
-                db, endpoint, ip_address, limit, window_minutes
+        if max_attempts:
+            allowed = await RateLimitService.check_rate_limit(
+                db=db,
+                identifier=ip_address,
+                endpoint=endpoint,
+                max_attempts=max_attempts,
+                window_seconds=window_seconds,
             )
             blocked = not allowed
-        
+
         # Record the attempt
         log_entry = RateLimitLog(
             endpoint=endpoint,
@@ -119,7 +122,7 @@ class RateLimitService:
             window_end=window_end,
             blocked=blocked,
         )
-        
+
         db.add(log_entry)
         await db.commit()
         

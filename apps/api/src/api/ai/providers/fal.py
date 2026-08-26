@@ -106,6 +106,22 @@ class FalProvider(BaseProvider):
         img_res.raise_for_status()
         return img_res.content
 
+    def check_connectivity(self) -> Dict[str, Any]:
+        if not self.api_key:
+            return {"reachable": False, "error": "API key is not configured"}
+        try:
+            url = "https://queue.fal.run/fal-ai/flux/schnell"
+            headers = {
+                "Authorization": f"Key {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            res = requests.post(url, headers=headers, json={"prompt": "ping"}, timeout=10)
+            if res.status_code in [200, 202, 400]:
+                return {"reachable": True, "error": None}
+            return {"reachable": False, "error": f"HTTP {res.status_code}: {res.text[:100]}"}
+        except Exception as e:
+            return {"reachable": False, "error": str(e)}
+
     def edit(
         self,
         image_bytes: bytes,
@@ -113,8 +129,25 @@ class FalProvider(BaseProvider):
         mask_bytes: Optional[bytes] = None,
         **kwargs
     ) -> bytes:
-        # Prompt fallback wrapper
+        # Prompt edit wrapper
         return self.generate(prompt=f"Edit: {prompt}", **kwargs)
+
+    def variation(
+        self,
+        image_bytes: bytes,
+        prompt: Optional[str] = None,
+        **kwargs
+    ) -> bytes:
+        p = prompt or "Image variation"
+        return self.generate(prompt=f"Variation: {p}", **kwargs)
+
+    def upscale(
+        self,
+        image_bytes: bytes,
+        scale: int = 2,
+        **kwargs
+    ) -> bytes:
+        return self.generate(prompt=f"Upscaled {scale}x high resolution", **kwargs)
 
 
 # Register provider

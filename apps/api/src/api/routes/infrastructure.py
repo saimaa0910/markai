@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import sqlalchemy as sa
 from pydantic import BaseModel
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.database.session import get_db
 from api.core.deps import RoleChecker
@@ -28,11 +29,9 @@ class JobRunRequest(BaseModel):
     kwargs: Optional[Dict[str, Any]] = None
 
 @router.get("/health")
-def get_infra_health(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_infra_health(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
@@ -54,11 +53,9 @@ def get_infra_health(
     }
 
 @router.get("/redis")
-def get_redis_metrics(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_redis_metrics(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
@@ -66,11 +63,9 @@ def get_redis_metrics(
     return redis_mgr.get_metrics()
 
 @router.post("/redis/reconnect")
-def reconnect_redis(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def reconnect_redis(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
@@ -80,11 +75,9 @@ def reconnect_redis(
     return {"success": True, "message": "Successfully reinitialized Redis connection pool."}
 
 @router.get("/cache")
-def get_cache_metrics(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_cache_metrics(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
@@ -92,12 +85,10 @@ def get_cache_metrics(
     return cache_svc.get_metrics()
 
 @router.post("/cache/clear")
-def clear_cache_route(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def clear_cache_route(  # Sprint 8.3.1
     req: CacheClearRequest,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
@@ -116,11 +107,9 @@ def clear_cache_route(
     return {"success": True, "message": msg, "cleared_count": cleared_count}
 
 @router.get("/workers")
-def get_workers_status(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_workers_status(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
@@ -143,11 +132,9 @@ def get_workers_status(
     }
 
 @router.get("/jobs")
-def get_jobs_list(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_jobs_list(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
@@ -155,17 +142,14 @@ def get_jobs_list(
     return jobs
 
 @router.post("/jobs/run")
-def trigger_job(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def trigger_job(  # Sprint 8.3.1
     req: JobRunRequest,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
     from api.worker.celery_app import celery_app
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     
     args = req.args or []
     kwargs = req.kwargs or {}
@@ -189,11 +173,9 @@ from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 
         raise HTTPException(status_code=500, detail=f"Task trigger failed: {str(e)}")
 
 @router.get("/queues")
-def get_queues_metrics(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_queues_metrics(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         

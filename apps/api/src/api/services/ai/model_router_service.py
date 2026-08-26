@@ -133,6 +133,86 @@ class ModelRouterService:
             logger.error(f"route_request failed: {exc}", exc_info=True)
             return ServiceResult.from_exception(exc)
 
+    async def execute_prompt(
+        self,
+        dto: Any,
+        rendered_text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute a rendered prompt through the real AI Gateway (P2-3).
+        Returns a structured payload including the model response and an AGUI
+        UI schema derived from the response rather than a mock payload.
+        """
+        try:
+            from api.ai.gateway.coordinator import AIGateway
+
+            # Resolve provider/model overrides.
+            model_override = getattr(dto, "model_override", None)
+
+            conversation_id = getattr(dto, "conversation_id", None)
+            request_id = str(conversation_id or uuid.uuid4())
+
+            org_id = self.uow_service.organization_id if self.uow_service else None
+            user_id = self.uow_service.user_id if self.uow_service else None
+
+            messages = [{"role": "user", "content": rendered_text or ""}]
+            if not rendered_text:
+                messages = [{"role": "user", "content": "Execute the request."}]
+
+            gateway = AIGateway()
+
+            def _run():
+                from api.database.session import SessionLocal
+                kwargs = {}
+                if model_override:
+                    kwargs["model_name"] = model_override
+                with SessionLocal() as db:
+                    return gateway.chat(
+                        db=db,
+                        messages=messages,
+                        organization_id=uuid.UUID(str(org_id)) if org_id else uuid.uuid4(),
+                        user_id=uuid.UUID(str(user_id)) if user_id else uuid.uuid4(),
+                        temperature=0.7,
+                        request_id=request_id,
+                        **kwargs,
+                    )
+
+            import asyncio
+            response = await asyncio.to_thread(_run)
+
+            # Build AGUI UI schema from the real model response (P2-3).
+            content = response.get("content", "")
+            ui_schema = self._build_agui_ui_schema(content)
+
+            return {
+                "content": content,
+                "prompt_tokens": response.get("prompt_tokens", 0),
+                "completion_tokens": response.get("completion_tokens", 0),
+                "cost_usd": response.get("cost_usd", 0),
+                "model": response.get("model"),
+                "provider": response.get("provider"),
+                "latency_ms": response.get("latency_ms", 0),
+                "request_id": request_id,
+                "ui_schema": ui_schema,
+            }
+        except Exception as exc:
+            logger.error(f"execute_prompt failed: {exc}", exc_info=True)
+            raise
+
+    @staticmethod
+    def _build_agui_ui_schema(content: str) -> Dict[str, Any]:
+        """Derive a lightweight AGUI render schema from a model response (P2-3)."""
+        text = (content or "").strip()
+        paragraphs = [p for p in text.split("\n\n") if p.strip()]
+        if not paragraphs:
+            return {"type": "text", "value": text}
+        if text.startswith(("```json", "{", "[")):
+            return {"type": "json", "value": text}
+        return {
+            "type": "markdown",
+            "blocks": [{"type": "paragraph", "content": p} for p in paragraphs[:10]],
+        }
+
     async def record_failover(
         self,
         ctx: ServiceContext,

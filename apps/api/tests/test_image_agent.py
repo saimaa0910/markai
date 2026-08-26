@@ -11,6 +11,8 @@ from api.ai.agents.image.prompts import ImagePromptEngine
 from api.ai.agents.image.prompt_optimizer import PromptOptimizer
 from api.ai.agents.image.provider_router import ImageProviderRouter
 from api.ai.agents.image.asset_manager import AssetManager
+from api.ai.agents.image.router import _get_available_image_providers, _get_available_image_models
+from api.ai.agents.image.executor import ImageExecutor
 from api.ai.agents.image.reflection import image_reflector, ImageReflectionResult, ImageReflectionScores
 from api.ai.agents.image.evaluation import image_evaluator
 from api.ai.agents.image.constants import ASPECT_RATIOS, STYLE_LIBRARY
@@ -169,6 +171,51 @@ class TestSmartRouterFailover:
                 assert img_bytes == b"dalle_image_bytes"
                 assert provider == "openai"
                 assert prov_together.generate.called
+
+
+class TestImageExecutionFailures:
+    """Verifies that generation failures return structured status payloads."""
+
+    @patch("api.ai.agents.image.executor.ImagePromptEngine.compile_prompt", return_value="compiled prompt")
+    @patch("api.ai.agents.image.executor.ImagePromptEngine.get_negative_prompt", return_value=None)
+    @patch("api.ai.agents.image.executor.MemoryManager.get_org_memory", return_value=[])
+    def test_generate_returns_structured_failure_when_provider_fails(self, mock_mem, mock_neg, mock_prompt):
+        db = MagicMock()
+        session = MagicMock()
+        session.organization_id = uuid.uuid4()
+        session.user_id = uuid.uuid4()
+
+        executor = ImageExecutor(db, session.organization_id, session.user_id)
+        executor.provider_router = MagicMock()
+        executor.provider_router.generate_image.side_effect = RuntimeError("No supported image providers")
+
+        result = executor.generate(prompt="A modern product mockup", style="minimal")
+
+        assert result["status"] == "failed"
+        assert result["error"]["code"] == "GENERATION_FAILED"
+        assert "No supported image providers" in result["error"]["message"]
+
+
+class TestImageRouterFallbacks:
+    """Verifies the router exposes fallback provider/model metadata when the DB registry is empty."""
+
+    def test_default_providers_are_available_without_db_registry(self):
+        db = MagicMock()
+        db.query.return_value.all.return_value = []
+
+        providers = _get_available_image_providers(db)
+
+        assert any(provider["name"] == "google" for provider in providers)
+        assert any(provider["name"] == "pollinations" for provider in providers)
+
+    def test_default_models_are_available_without_db_registry(self):
+        db = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = []
+
+        models = _get_available_image_models(db)
+
+        assert any(model["name"] == "imagen-3.0-generate-002" for model in models)
+        assert any(model["name"] == "sdxl" for model in models)
 
 
 class TestToolRegistryAlias:

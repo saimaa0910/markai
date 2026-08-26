@@ -57,6 +57,14 @@ class AIUsageService:
                 # Check status
                 status_val = dto.status if hasattr(dto, "status") else "success"
 
+                # Idempotency (P2-4): dedupe on request-level key when provided
+                if getattr(dto, "request_id", None):
+                    existing = await repo.find_by_request_id(
+                        session=self.uow_service.session, request_id=dto.request_id, status=status_val
+                    )
+                    if existing:
+                        return ServiceResult.ok(data=True, status_code=200)
+
                 await repo.create(
                     session=self.uow_service.session,
                     obj_in={
@@ -70,6 +78,7 @@ class AIUsageService:
                         "cost_usd": Decimal(str(total_cost)),
                         "latency_ms": getattr(dto, "latency_ms", 100),
                         "status": status_val,
+                        "request_id": getattr(dto, "request_id", None),
                     },
                     actor_id=ctx.get_user_id_str(),
                 )

@@ -80,50 +80,49 @@ class MFARecoveryService:
     async def generate_recovery_codes(
         db: AsyncSession,
         user_id: uuid.UUID,
+        count: int = CODES_PER_SET,
     ) -> List[str]:
         """
         Generate a new set of recovery codes for a user.
-        
-        This revokes any existing unused codes and creates 10 new ones.
-        
+
+        This revokes any existing unused codes and creates a new set.
+
         Args:
             db: Database session
             user_id: User ID
-            
+            count: Number of codes to generate (default 10)
+
         Returns:
-            List of 10 plaintext recovery codes (show to user once)
-            
+            List of plaintext recovery codes (show to user once)
+
         Raises:
-            ValueError: If user not found or MFA not enabled
+            ValueError: If user not found
         """
         from api.models.user import User
         from api.models.security import MFARecoveryCode
-        
-        # Verify user exists and has MFA enabled
+
+        # Verify user exists
         result = await db.execute(
             select(User).where(User.id == user_id)
         )
         user = result.scalar_one_or_none()
-        
+
         if not user:
             raise ValueError(f"User {user_id} not found")
-        
-        if not user.mfa_enabled:
-            raise ValueError("MFA must be enabled before generating recovery codes")
-        
+
         # Delete all existing recovery codes (used and unused)
         await db.execute(
             delete(MFARecoveryCode).where(MFARecoveryCode.user_id == user_id)
         )
-        
+
         # Generate new codes
         plaintext_codes = []
         recovery_code_records = []
-        
-        for _ in range(MFARecoveryService.CODES_PER_SET):
+
+        for _ in range(count):
             code = MFARecoveryService._generate_recovery_code()
             code_hash = MFARecoveryService._hash_recovery_code(code)
-            
+
             plaintext_codes.append(code)
             recovery_code_records.append(
                 MFARecoveryCode(
@@ -132,19 +131,19 @@ class MFARecoveryService:
                     is_used=False,
                 )
             )
-        
+
         # Save to database
         db.add_all(recovery_code_records)
-        
+
         # Update user's generation timestamp
         user.mfa_recovery_codes_generated_at = datetime.now(timezone.utc)
-        
+
         await db.commit()
-        
+
         logger.info(
-            f"Generated {MFARecoveryService.CODES_PER_SET} recovery codes for user {user_id}"
+            f"Generated {count} recovery codes for user {user_id}"
         )
-        
+
         return plaintext_codes
     
     @staticmethod

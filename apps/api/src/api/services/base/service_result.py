@@ -126,3 +126,12 @@ class ServiceResult(Generic[T]):
             error_code=error_code or "INTERNAL_SERVICE_ERROR",
             status_code=status_code,
         )
+
+    def to_exception(self):
+        """Convert a failed ServiceResult to a FastAPI HTTPException."""
+        from fastapi import HTTPException
+        err_msg = self.errors[0] if self.errors else "Service operation failed"
+        return HTTPException(
+            status_code=self.status_code,
+            detail=err_msg,
+        )

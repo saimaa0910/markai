@@ -27,7 +27,7 @@ export const authLifecycleService = {
    * Step 3: Complete password reset with new password
    */
   async completePasswordReset(token: string, newPassword: string): Promise<void> {
-    await apiClient.post('/auth/password-reset/complete', {
+    await apiClient.post('/auth/password-reset/reset', {
       token,
       new_password: newPassword
     });

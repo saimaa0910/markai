@@ -81,6 +81,16 @@ class ModelRouter:
         if not matched_strategy:
             matched_strategy = "balanced"
 
+        # Record routing strategy telemetry metric
+        try:
+            from api.core.metrics_registry import ai_routing_strategy_distribution
+            ai_routing_strategy_distribution.labels(
+                strategy=matched_strategy,
+                organization_id=str(organization_id) if organization_id else "global"
+            ).inc()
+        except Exception:
+            pass
+
         # 4. Filter candidates based on capabilities & context window requirements
         filtered = []
         for m in active_candidates:
@@ -110,14 +120,19 @@ class ModelRouter:
 
         # Fallback if filtering left no candidates
         if not filtered:
-            filtered = active_candidates
+            filtered = list(active_candidates)
+
+        # 4.5. Advanced Rule Modifiers (Time-of-day, User-tier)
+        import datetime
+        current_hour = datetime.datetime.now(datetime.timezone.utc).hour
+        is_off_peak = 0 <= current_hour <= 8
 
         # 5. Sort candidates matching routing strategy
-        if matched_strategy == "cheapest":
+        if matched_strategy == "cheapest" or (matched_strategy == "auto_offpeak" and is_off_peak):
             filtered.sort(key=lambda x: (x.input_token_price + x.output_token_price))
         elif matched_strategy == "fastest":
             filtered.sort(key=lambda x: x.latency)
-        elif matched_strategy == "highest_quality":
+        elif matched_strategy == "highest_quality" or matched_strategy == "enterprise_tier":
             filtered.sort(key=lambda x: x.priority, reverse=True)
         elif matched_strategy == "reasoning":
             filtered.sort(key=lambda x: (0 if "claude" in x.model_name.lower() or "gpt-4" in x.model_name.lower() else 1, -x.priority))

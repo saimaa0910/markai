@@ -1,21 +1,79 @@
 'use client';
 
-import { useState } from 'react';
+import * as React from 'react';
+import { useAuthStore } from '@/store/auth';
 import { accountLifecycleService } from '@/services/account-lifecycle.service';
+import { apiClient } from '@/services/api-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { User, Mail, Shield, Upload, CheckCircle2, AlertTriangle, Trash2, Clock, Building } from 'lucide-react';
+import { Card } from '@eaimos/ui';
 
 export default function AccountSettingsPage() {
   const router = useRouter();
-  const [showDeactivateDialog, setShowDeactivateDialog] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [deactivateReason, setDeactivateReason] = useState('');
-  const [deletionPassword, setDeletionPassword] = useState('');
-  const [deletionConfirmation, setDeletionConfirmation] = useState('');
-  const [processing, setProcessing] = useState(false);
+  const { user: currentUser, activeOrg } = useAuthStore();
+
+  const [showDeactivateDialog, setShowDeactivateDialog] = React.useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = React.useState(false);
+  const [deactivateReason, setDeactivateReason] = React.useState('');
+  const [deletionPassword, setDeletionPassword] = React.useState('');
+  const [deletionConfirmation, setDeletionConfirmation] = React.useState('');
+  const [processing, setProcessing] = React.useState(false);
+
+  // Profile data
+  const { data: userProfile, refetch: refetchProfile } = useQuery({
+    queryKey: ['user-profile'],
+    queryFn: async () => {
+      const res = await apiClient.get('/users/me');
+      return res.data;
+    },
+  });
+
+  const [fullName, setFullName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+
+  React.useEffect(() => {
+    if (userProfile) {
+      setFullName(userProfile.full_name || currentUser?.full_name || '');
+      setEmail(userProfile.email || currentUser?.email || '');
+    } else if (currentUser) {
+      setFullName(currentUser.full_name || '');
+      setEmail(currentUser.email || '');
+    }
+  }, [userProfile, currentUser]);
+
+  const updateProfileMutation = useMutation({
+    mutationFn: async () => {
+      return apiClient.patch('/users/me', { full_name: fullName, email });
+    },
+    onSuccess: () => {
+      refetchProfile();
+      toast.success('Profile Saved', 'Your user profile details have been updated.');
+    },
+    onError: (err: any) => {
+      toast.error('Update Failed', err.response?.data?.detail || err.message);
+    }
+  });
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      await apiClient.post('/users/me/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      refetchProfile();
+      toast.success('Avatar Uploaded', 'Your profile photo has been refreshed.');
+    } catch (err: any) {
+      toast.error('Upload Failed', err.response?.data?.detail || err.message);
+    }
+  };
 
   const handleDeactivate = async () => {
     try {
@@ -23,11 +81,9 @@ export default function AccountSettingsPage() {
       await accountLifecycleService.deactivateAccount({ reason: deactivateReason });
       toast.success('Account deactivated successfully');
       setShowDeactivateDialog(false);
-      // Logout user
       router.push('/auth/login?deactivated=true');
-    } catch (error) {
-      toast.error('Failed to deactivate account');
-      console.error(error);
+    } catch (error: any) {
+      toast.error('Failed to deactivate account', error.message);
     } finally {
       setProcessing(false);
     }
@@ -48,186 +104,246 @@ export default function AccountSettingsPage() {
       toast.success('Account deletion scheduled. You have 7 days to cancel.');
       setShowDeleteDialog(false);
       router.push('/auth/login?deletion_scheduled=true');
-    } catch (error) {
-      toast.error('Failed to schedule account deletion');
-      console.error(error);
+    } catch (error: any) {
+      toast.error('Failed to schedule account deletion', error.message);
     } finally {
       setProcessing(false);
     }
   };
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-8 max-w-4xl pb-12">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Account Settings</h1>
-        <p className="text-muted-foreground mt-2">
-          Manage your account status and preferences
+        <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-2">
+          Account & Profile <User className="w-6 h-6 text-violet-500" />
+        </h1>
+        <p className="text-neutral-400 mt-2">
+          Manage your personal profile, email verification, organization memberships, and account lifecycle.
         </p>
       </div>
 
-      {/* Account Status Section */}
-      <div className="border rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Account Status</h2>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium">Account Active</p>
-              <p className="text-sm text-muted-foreground">
-                Your account is currently active and fully functional
-              </p>
+      {/* User Profile Card */}
+      <Card className="glass p-6 border-white/5 flex flex-col gap-6">
+        <div>
+          <h2 className="font-bold text-lg text-white">Profile Details</h2>
+          <p className="text-xs text-neutral-400 mt-1">Manage public profile identity and verified contact email.</p>
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-8 items-start">
+          <div className="flex flex-col items-center gap-3 shrink-0">
+            <img 
+              src={userProfile?.avatar || (currentUser as any)?.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${fullName || 'User'}`}
+              alt="Avatar" 
+              className="w-20 h-20 rounded-full border border-violet-500/20 bg-neutral-900 object-cover"
+            />
+            <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/20 text-[11px] text-neutral-300 hover:text-white cursor-pointer transition-colors bg-neutral-950/60 font-semibold">
+              <Upload className="w-3.5 h-3.5" /> Upload Photo
+              <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} />
+            </label>
+          </div>
+
+          <div className="flex-1 flex flex-col gap-4 max-w-md">
+            <Input
+              label="Full Name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Your full name"
+            />
+
+            <Input
+              label="Email Address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="user@company.com"
+            />
+
+            <div className="flex items-center gap-4 text-xs text-neutral-400 mt-1">
+              <div className="flex items-center gap-1.5 text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Email Verified</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-violet-400">
+                <Shield className="w-4 h-4" />
+                <span>Role: {currentUser?.role || userProfile?.role || 'Member'}</span>
+              </div>
+              {activeOrg && (
+                <div className="flex items-center gap-1.5 text-neutral-300">
+                  <Building className="w-4 h-4 text-neutral-400" />
+                  <span>Tenant: {activeOrg.name}</span>
+                </div>
+              )}
             </div>
-            <div className="px-3 py-1 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full text-sm font-medium">
-              ✅ Active
-            </div>
+
+            <Button 
+              variant="violet" 
+              onClick={() => updateProfileMutation.mutate()}
+              isLoading={updateProfileMutation.isPending}
+              className="self-start mt-2 px-5 py-2 text-xs"
+            >
+              Save Profile
+            </Button>
           </div>
         </div>
-      </div>
+      </Card>
+
+      {/* Account Status Card */}
+      <Card className="glass p-6 border-white/5">
+        <h2 className="text-lg font-semibold text-white mb-2">Account Status</h2>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-medium text-white text-sm">Account Active</p>
+            <p className="text-xs text-neutral-400">
+              Your account is currently active and authenticated across all platform services.
+            </p>
+          </div>
+          <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-semibold">
+            Active
+          </span>
+        </div>
+      </Card>
 
       {/* Deactivate Account Section */}
-      <div className="border border-yellow-300 dark:border-yellow-800 rounded-lg p-6 bg-yellow-50 dark:bg-yellow-900/20">
-        <h2 className="text-xl font-semibold mb-2">Deactivate Account</h2>
-        <p className="text-sm text-muted-foreground mb-4">
-          Temporarily deactivate your account. You can reactivate it anytime by logging in.
+      <Card className="glass p-6 border-amber-500/20 bg-amber-500/[0.02]">
+        <h2 className="text-lg font-semibold text-amber-300 mb-2 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-amber-400" /> Deactivate Account
+        </h2>
+        <p className="text-xs text-neutral-400 mb-4">
+          Temporarily deactivate your account. You can reactivate anytime by logging back in.
         </p>
-        <ul className="text-sm text-muted-foreground space-y-1 mb-4 ml-4">
-          <li>• Your data will be preserved</li>
-          <li>• You will be logged out of all devices</li>
-          <li>• Your profile will be hidden</li>
-          <li>• You can reactivate anytime</li>
+        <ul className="text-xs text-neutral-400 space-y-1 mb-4 ml-4 list-disc">
+          <li>Your platform data, API keys, and workspace resources will be preserved</li>
+          <li>You will be logged out of active sessions</li>
+          <li>Reactivate instantly by signing in</li>
         </ul>
         <Button
           variant="outline"
           onClick={() => setShowDeactivateDialog(true)}
+          className="border-amber-500/30 text-amber-300 hover:bg-amber-500/10 text-xs"
         >
           Deactivate Account
         </Button>
-      </div>
+      </Card>
 
       {/* Delete Account Section */}
-      <div className="border border-red-300 dark:border-red-800 rounded-lg p-6 bg-red-50 dark:bg-red-900/20">
-        <h2 className="text-xl font-semibold mb-2 text-red-700 dark:text-red-300">Delete Account</h2>
-        <p className="text-sm text-muted-foreground mb-4">
-          Permanently delete your account and all associated data. This action cannot be undone after the 7-day grace period.
+      <Card className="glass p-6 border-rose-500/20 bg-rose-500/[0.02]">
+        <h2 className="text-lg font-semibold text-rose-400 mb-2 flex items-center gap-2">
+          <Trash2 className="w-4 h-4 text-rose-400" /> Delete Account
+        </h2>
+        <p className="text-xs text-neutral-400 mb-4">
+          Permanently delete your user account and all personal records. This action includes a 7-day grace period.
         </p>
-        <ul className="text-sm text-muted-foreground space-y-1 mb-4 ml-4">
-          <li>• 7-day grace period to cancel</li>
-          <li>• All data will be permanently deleted</li>
-          <li>• Cannot be recovered after grace period</li>
-          <li>• You will receive email confirmation</li>
+        <ul className="text-xs text-neutral-400 space-y-1 mb-4 ml-4 list-disc">
+          <li>7-day grace period to cancel deletion if initiated in error</li>
+          <li>All personal documents, conversations, and custom settings will be removed</li>
+          <li>Confirmation notification will be sent to your verified email</li>
         </ul>
         <Button
           variant="destructive"
           onClick={() => setShowDeleteDialog(true)}
+          className="bg-rose-600 hover:bg-rose-700 text-white text-xs"
         >
           Delete Account
         </Button>
-      </div>
+      </Card>
 
       {/* Deactivate Dialog */}
-      {showDeactivateDialog && (
-        <Dialog
-          open={showDeactivateDialog}
-          onClose={() => setShowDeactivateDialog(false)}
-          title="Deactivate Your Account?"
-          description="Your account will be temporarily deactivated. You can reactivate it by logging in."
-        >
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Reason for deactivation (optional)
-              </label>
-              <textarea
-                className="w-full border rounded-lg p-3 text-sm"
-                rows={3}
-                value={deactivateReason}
-                onChange={(e) => setDeactivateReason(e.target.value)}
-                placeholder="Help us improve by telling us why..."
-              />
-            </div>
-            <div className="flex gap-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => setShowDeactivateDialog(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleDeactivate}
-                disabled={processing}
-                className="flex-1"
-              >
-                {processing ? 'Deactivating...' : 'Deactivate Account'}
-              </Button>
-            </div>
+      <Dialog
+        isOpen={showDeactivateDialog}
+        onClose={() => setShowDeactivateDialog(false)}
+        title="Deactivate Your Account?"
+        description="Your account will be temporarily deactivated. You can reactivate anytime by logging in."
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-neutral-300 mb-2">
+              Reason for deactivation (optional)
+            </label>
+            <textarea
+              className="w-full bg-neutral-900 border border-white/10 rounded-lg p-3 text-xs text-white placeholder:text-neutral-600 focus:outline-none focus:border-violet-500"
+              rows={3}
+              value={deactivateReason}
+              onChange={(e) => setDeactivateReason(e.target.value)}
+              placeholder="Help us improve..."
+            />
           </div>
-        </Dialog>
-      )}
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowDeactivateDialog(false)}
+              className="flex-1 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeactivate}
+              disabled={processing}
+              className="flex-1 text-xs"
+            >
+              {processing ? 'Deactivating...' : 'Deactivate Account'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* Delete Dialog */}
-      {showDeleteDialog && (
-        <Dialog
-          open={showDeleteDialog}
-          onClose={() => setShowDeleteDialog(false)}
-          title="⚠️ Delete Your Account?"
-          description="This action will schedule your account for permanent deletion after 7 days."
-          size="lg"
-        >
-          <div className="space-y-4">
-            <div className="p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
-              <h4 className="font-semibold text-red-700 dark:text-red-300 mb-2">Warning: This is permanent!</h4>
-              <ul className="text-sm text-red-600 dark:text-red-400 space-y-1 ml-4">
-                <li>• Your account will be deleted after 7 days</li>
-                <li>• All your data will be permanently lost</li>
-                <li>• This cannot be undone after the grace period</li>
-                <li>• You can cancel within 7 days</li>
-              </ul>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Confirm your password
-              </label>
-              <Input
-                type="password"
-                value={deletionPassword}
-                onChange={(e) => setDeletionPassword(e.target.value)}
-                placeholder="Enter your password"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Type <code className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">DELETE MY ACCOUNT</code> to confirm
-              </label>
-              <Input
-                value={deletionConfirmation}
-                onChange={(e) => setDeletionConfirmation(e.target.value)}
-                placeholder="DELETE MY ACCOUNT"
-              />
-            </div>
-
-            <div className="flex gap-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => setShowDeleteDialog(false)}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleRequestDeletion}
-                disabled={processing || deletionConfirmation !== 'DELETE MY ACCOUNT' || !deletionPassword}
-                className="flex-1"
-              >
-                {processing ? 'Processing...' : 'Schedule Deletion'}
-              </Button>
-            </div>
+      <Dialog
+        isOpen={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        title="⚠️ Delete Your Account?"
+        description="This action will schedule your account for permanent deletion after 7 days."
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg">
+            <h4 className="font-semibold text-rose-400 text-xs mb-1">Warning: 7-Day Grace Period</h4>
+            <ul className="text-[11px] text-rose-300 space-y-0.5 ml-3 list-disc">
+              <li>Your account will be deleted permanently after 7 days</li>
+              <li>You can cancel anytime during this window</li>
+            </ul>
           </div>
-        </Dialog>
-      )}
+
+          <div>
+            <label className="block text-xs font-medium text-neutral-300 mb-1">
+              Confirm your password
+            </label>
+            <Input
+              type="password"
+              value={deletionPassword}
+              onChange={(e) => setDeletionPassword(e.target.value)}
+              placeholder="Enter your password"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-neutral-300 mb-1">
+              Type <code className="bg-neutral-800 text-rose-400 px-1.5 py-0.5 rounded font-mono">DELETE MY ACCOUNT</code> to confirm
+            </label>
+            <Input
+              value={deletionConfirmation}
+              onChange={(e) => setDeletionConfirmation(e.target.value)}
+              placeholder="DELETE MY ACCOUNT"
+            />
+          </div>
+
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowDeleteDialog(false)}
+              className="flex-1 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleRequestDeletion}
+              disabled={processing || deletionConfirmation !== 'DELETE MY ACCOUNT' || !deletionPassword}
+              className="flex-1 text-xs"
+            >
+              {processing ? 'Processing...' : 'Schedule Deletion'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

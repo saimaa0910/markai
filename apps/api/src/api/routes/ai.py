@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_, func
 from sqlalchemy.orm import Session
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.database.session import get_db
 from api.core.deps import RoleChecker, get_current_user
@@ -68,27 +69,9 @@ analytics_router = APIRouter(prefix="/ai/analytics", tags=["ai-analytics"])
 active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.GUEST])
 
 
-@providers_router.get("/{provider_name}/models")
-def list_provider_models(
-    provider_name: str,
-    membership: UserOrganization = Depends(active_member)
-):
-    models = [
-        {"model_name": "llama3-70b-8192", "provider": "groq", "supports_streaming": True},
-        {"model_name": "llama3-8b-8192", "provider": "groq", "supports_streaming": True},
-        {"model_name": "mixtral-8x7b-32768", "provider": "groq", "supports_streaming": True},
-        {"model_name": "gemini-1.5-flash", "provider": "google", "supports_streaming": True},
-        {"model_name": "gemini-1.5-pro", "provider": "google", "supports_streaming": True},
-        {"model_name": "gpt-4o", "provider": "openai", "supports_streaming": True},
-    ]
-    filtered = [m for m in models if m["provider"].lower() == provider_name.lower()]
-    return filtered or models
-
-
 # ==========================================
 # PROMPT LIBRARY ENDPOINTS (BACKWARD COMPATIBILITY)
 # ==========================================
-
 
 @prompts_router.post(
     "/", response_model=PromptResponse, status_code=status.HTTP_201_CREATED
@@ -1151,9 +1134,6 @@ def list_usage(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    # Seed mock usage data for better analytics display if empty
-    seed_dummy_usages(db, membership.organization_id, membership.user_id)
-    
     usages = db.scalars(
         select(AITokenUsage)
         .where(AITokenUsage.organization_id == membership.organization_id)
@@ -1207,28 +1187,55 @@ def sync_providers_and_models(db: Session) -> None:
             pass
 
     try:
+        db.execute(text("ALTER TABLE ai_token_usage ADD COLUMN IF NOT EXISTS request_id VARCHAR(64)"))
+        db.commit()
+        db.execute(text("CREATE INDEX IF NOT EXISTS ix_ai_token_usage_request_id ON ai_token_usage (request_id, status)"))
+        db.commit()
+    except Exception:
+        try:
+            db.execute(text("CREATE INDEX IF NOT EXISTS ix_ai_token_usage_request_id ON ai_token_usage (request_id, status)"))
+            db.commit()
+        except Exception:
+            pass
+
+    # P2-2: pgvector HNSW index for fast approximate vector search
+    try:
+        db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        db.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_doc_chunk_embeddings_hnsw "
+            "ON document_chunk_embeddings USING hnsw (embedding vector_cosine_ops)"
+        ))
+        db.commit()
+    except Exception:
+        pass
+
+    try:
         db.execute(text("ALTER TABLE ai_models ADD COLUMN IF NOT EXISTS supports_images BOOLEAN DEFAULT FALSE"))
         db.commit()
     except Exception:
+        db.rollback()
         try:
             db.execute(text("ALTER TABLE ai_models ADD COLUMN supports_images BOOLEAN"))
             db.commit()
         except Exception:
-            pass
+            db.rollback()
 
     try:
         db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0"))
         db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS capability VARCHAR(50) DEFAULT 'text'"))
         db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS agent VARCHAR(100)"))
+        db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS request_id VARCHAR(100)"))
         db.commit()
     except Exception:
+        db.rollback()
         try:
             db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN retry_count INTEGER"))
             db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN capability VARCHAR(50)"))
             db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN agent VARCHAR(100)"))
+            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN request_id VARCHAR(100)"))
             db.commit()
         except Exception:
-            pass
+            db.rollback()
 
     provider_names = ["groq", "openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "ollama", "cloudflare", "pollinations", "replicate", "together", "fal", "stability", "ideogram", "blackforestlabs"]
     providers = {}
@@ -1273,26 +1280,53 @@ def sync_providers_and_models(db: Session) -> None:
     ModelRegistryManager.seed_default_models(db)
 
     registry_models = {model.model_name: model for model in db.query(AIModelRegistry).all()}
-    
-    # Register Groq models if not present
-    for model_name in groq_models:
-        if model_name in registry_models:
+
+    # Live model discovery (P2-1): fetch real catalogs from provider APIs where a key is configured.
+    def _discover_openai_compatible(base_url: str, env_key: str) -> List[str]:
+        """Fetch /models from any OpenAI-compatible endpoint."""
+        key = os.getenv(env_key)
+        if not key:
+            return []
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(
+                    f"{base_url}/models",
+                    headers={"Authorization": f"Bearer {key}"},
+                )
+                if res.status_code == 200:
+                    return [m.get("id") for m in res.json().get("data", []) if m.get("id")]
+        except Exception:
+            pass
+        return []
+
+    discovered = {
+        "openai": _discover_openai_compatible("https://api.openai.com/v1", "OPENAI_API_KEY"),
+        "openrouter": _discover_openai_compatible("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+        "deepseek": _discover_openai_compatible("https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"),
+        "mistral": _discover_openai_compatible("https://api.mistral.ai/v1", "MISTRAL_API_KEY"),
+        "groq": groq_models,
+    }
+    for prov, models in discovered.items():
+        if not models:
             continue
-        reg = AIModelRegistry(
-            provider="groq",
-            model_name=model_name,
-            context_window=131072 if "70b" in model_name or model_name == "openai/gpt-oss-120b" else 8192,
-            supports_streaming=True,
-            supports_json=True,
-            supports_images=False,
-            input_token_price=Decimal("0.0000"),
-            output_token_price=Decimal("0.0000"),
-            latency=Decimal("0.20"),
-            priority=8,
-            is_healthy=True,
-        )
-        db.add(reg)
-        registry_models[model_name] = reg
+        for model_name in models:
+            if model_name in registry_models:
+                continue
+            reg = AIModelRegistry(
+                provider=prov,
+                model_name=model_name,
+                context_window=131072 if "70b" in model_name or model_name.startswith("gpt-oss") else 8192,
+                supports_streaming=True,
+                supports_json=True,
+                supports_images=False,
+                input_token_price=Decimal("0.0000"),
+                output_token_price=Decimal("0.0000"),
+                latency=Decimal("0.20"),
+                priority=8,
+                is_healthy=True,
+            )
+            db.add(reg)
+            registry_models[model_name] = reg
 
     # Seed additional models in AIModelRegistry
     new_provider_models = [
@@ -1397,7 +1431,24 @@ def resolve_provider_capabilities(provider_name: str, models: list) -> list:
     if any(m.supports_embeddings for m in prov_models):
         if "Embeddings" not in caps: caps.append("Embeddings")
         
-    return list(set(caps))
+PROVIDER_DISPLAY_META = {
+    "groq": {"label": "Groq API", "logo": "⚡", "desc": "Ultra-low latency LPU engine powering Llama, Mixtral, and Gemma."},
+    "openai": {"label": "OpenAI", "logo": "🤖", "desc": "Advanced cognitive models like GPT-4o, GPT-4o-mini, and Embeddings."},
+    "anthropic": {"label": "Anthropic Claude", "logo": "🧬", "desc": "Highly precise context understanding and Claude 3.5 models."},
+    "google": {"label": "Google Gemini", "logo": "♊", "desc": "Industry-leading multimodal capabilities and massive context windows."},
+    "openrouter": {"label": "OpenRouter", "logo": "🌐", "desc": "Unified gateway providing access to hundreds of open weights LLMs."},
+    "deepseek": {"label": "DeepSeek", "logo": "🌊", "desc": "Cost-optimized deep reasoning models like DeepSeek-R1."},
+    "mistral": {"label": "Mistral AI", "logo": "🗼", "desc": "State of the art open-source LLMs from France."},
+    "ollama": {"label": "Local Ollama", "logo": "🦙", "desc": "Secure local model execution inside your network boundary."},
+    "cloudflare": {"label": "Cloudflare Workers AI", "logo": "☁️", "desc": "Distributed serverless AI models running on Cloudflare Edge."},
+    "pollinations": {"label": "Pollinations AI", "logo": "🎨", "desc": "Free default text and image model server without API credential keys."},
+    "replicate": {"label": "Replicate", "logo": "📦", "desc": "Cloud repository hosting open-source diffusion and video generators."},
+    "together": {"label": "Together AI", "logo": "🤝", "desc": "High-performance API endpoints for custom fine-tuned weights."},
+    "fal": {"label": "Fal AI", "logo": "🦅", "desc": "Real-time media generation for ultra-fast Flux and diffusion pipelines."},
+    "stability": {"label": "Stability AI", "logo": "🎯", "desc": "Creators of Stable Diffusion, Stable Video, and image models."},
+    "ideogram": {"label": "Ideogram", "logo": "🅰️", "desc": "Leading typography and design generation models."},
+    "blackforestlabs": {"label": "Black Forest Labs", "logo": "🌲", "desc": "Creators of the state-of-the-art Flux image models family."},
+}
 
 
 @providers_router.get("/")
@@ -1503,12 +1554,19 @@ def get_providers(
             for k, v in prov.config.items():
                 if k in ("api_key", "secret_key") and v:
                     masked_config[k] = "sk-••••" + v[-4:] if len(v) > 4 else "sk-••••"
-                else:
-                    masked_config[k] = v
+        # Dynamic metadata
+        meta = PROVIDER_DISPLAY_META.get(prov_name, {
+            "label": f"{prov.name.title()} AI",
+            "logo": "⚡",
+            "desc": f"Dynamic provider integration supporting {len(prov_models)} models."
+        })
 
         out.append({
             "id": str(prov.id),
             "name": prov.name,
+            "label": meta.get("label", prov.name.title()),
+            "logo": meta.get("logo", "⚡"),
+            "description": meta.get("desc", ""),
             "is_active": prov.is_active,
             "priority": prov.priority,
             "config": masked_config,
@@ -1518,8 +1576,10 @@ def get_providers(
             "failure_rate": failure_rate,
             "last_error": last_error,
             "last_checked": last_checked,
+            "models_count": len(prov_models),
             "supported_models": prov_models,
             "supported_capabilities": caps,
+            "capabilities": caps,
             "estimated_cost": 0.04,
             "is_default": is_default,
             "default_for": default_for,
@@ -1578,15 +1638,17 @@ def update_provider(
         new_config = update_data["config"]
         
         # If API key is provided and is not masked, encrypt it!
-        if "api_key" in new_config and new_config["api_key"] and not new_config["api_key"].startswith("sk-") and "********" not in new_config["api_key"]:
+        is_masked_api = "••••" in new_config.get("api_key", "") or "********" in new_config.get("api_key", "")
+        if "api_key" in new_config and new_config["api_key"] and not is_masked_api:
             new_config["api_key"] = encrypt_key(new_config["api_key"])
-        elif "api_key" in new_config and (not new_config["api_key"] or new_config["api_key"].startswith("sk-") or "********" in new_config["api_key"]):
+        elif "api_key" in new_config and (not new_config["api_key"] or is_masked_api):
             if "api_key" in config:
                 new_config["api_key"] = config["api_key"]
                 
-        if "secret_key" in new_config and new_config["secret_key"] and not new_config["secret_key"].startswith("sk-") and "********" not in new_config["secret_key"]:
+        is_masked_secret = "••••" in new_config.get("secret_key", "") or "********" in new_config.get("secret_key", "")
+        if "secret_key" in new_config and new_config["secret_key"] and not is_masked_secret:
             new_config["secret_key"] = encrypt_key(new_config["secret_key"])
-        elif "secret_key" in new_config and (not new_config["secret_key"] or new_config["secret_key"].startswith("sk-") or "********" in new_config["secret_key"]):
+        elif "secret_key" in new_config and (not new_config["secret_key"] or is_masked_secret):
             if "secret_key" in config:
                 new_config["secret_key"] = config["secret_key"]
                 
@@ -1632,13 +1694,17 @@ def trigger_provider_health_check(
                     if encrypted_key:
                         api_key = decrypt_key(encrypted_key)
                 provider_instance.api_key = api_key or os.getenv(f"{prov.name.upper()}_API_KEY")
-                is_healthy = provider_instance.health()
+                conn = provider_instance.check_connectivity()
+                is_healthy = conn["reachable"]
+                error_message = conn["error"]
         else:
             from api.ai.gateway.coordinator import AIGateway
             gateway = AIGateway()
             adapter = gateway._get_provider_adapter(db, prov.name, membership.organization_id)
             if adapter:
-                is_healthy = adapter.health()
+                conn = adapter.check_connectivity()
+                is_healthy = conn["reachable"]
+                error_message = conn["error"]
     except Exception as e:
         error_message = str(e)
         
@@ -1748,7 +1814,9 @@ def check_provider_health(
     err_msg = None
     if adapter:
         try:
-            is_healthy = adapter.health()
+            conn = adapter.check_connectivity()
+            is_healthy = conn["reachable"]
+            err_msg = conn["error"]
         except Exception as e:
             err_msg = str(e)
     latency = int((time.perf_counter() - start_time) * 1000)
@@ -1784,19 +1852,23 @@ class ProviderKeyResponse(BaseModel):
     masked_key: str
     created_at: datetime.datetime
     user_id: Optional[uuid.UUID] = None
-    level: Optional[str] = None # "user" or "organization"
+    level: Optional[str] = None  # "user" or "organization"
 
     class Config:
         from_attributes = True
+
 
 class ProviderKeyCreate(BaseModel):
     provider_id: uuid.UUID
     api_key: str
     is_active: Optional[bool] = True
-    level: Optional[str] = "organization" # "user" or "organization"
+    level: Optional[str] = "organization"  # "user" or "organization"
+    user_id: Optional[uuid.UUID] = None
+
 
 class ProviderKeyRotate(BaseModel):
     api_key: str
+
 
 class ProviderHealthLogResponse(BaseModel):
     id: uuid.UUID
@@ -1809,6 +1881,7 @@ class ProviderHealthLogResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class OrgCapLimitResponse(BaseModel):
     organization_id: uuid.UUID
     credit_limit: float
@@ -1819,8 +1892,10 @@ class OrgCapLimitResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class AddCreditsRequest(BaseModel):
     amount: float
+
 
 class UpdateLimitsRequest(BaseModel):
     rpm_limit: int
@@ -1862,30 +1937,56 @@ def get_provider_keys(
         })
     return result
 
+
 @providers_router.post("/keys/", response_model=ProviderKeyResponse)
 def create_or_update_provider_key(
     key_in: ProviderKeyCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
+    current_user: User = Depends(get_current_user),
 ) -> Any:
     prov = db.query(AIProvider).filter(AIProvider.id == key_in.provider_id).first()
     if not prov:
         raise HTTPException(status_code=404, detail="Provider not found.")
-        
-    if key_in.level == "user":
-        existing = db.query(AIProviderKey).filter(
-            AIProviderKey.provider_id == key_in.provider_id,
-            AIProviderKey.organization_id == membership.organization_id,
-            AIProviderKey.user_id == membership.user_id
-        ).first()
-    else:
-        existing = db.query(AIProviderKey).filter(
-            AIProviderKey.provider_id == key_in.provider_id,
-            AIProviderKey.organization_id == membership.organization_id,
-            AIProviderKey.user_id == None
-        ).first()
+    
+    if key_in.level == "organization" and not current_user.is_superuser:
+        if membership.role.value not in ("OWNER", "ADMIN"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Organization provider keys require admin or owner access",
+            )
+    
+    if key_in.level == "user" and not current_user.is_superuser:
+        if key_in.user_id and membership.user_id != key_in.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User provider keys may only be set for the owning user",
+            )
     
     encrypted = encrypt_key(key_in.api_key)
+
+    from api.repositories.ai_gateway_repository import AIProviderKeyRepository
+    from api.repositories.filters import FilterParam, FilterOperator
+    key_repo = AIProviderKeyRepository()
+    
+    if key_in.level == "user":
+        existing = key_repo.find_one_sync(
+            db,
+            [
+                FilterParam(field="provider_id", operator=FilterOperator.EQ, value=key_in.provider_id),
+                FilterParam(field="organization_id", operator=FilterOperator.EQ, value=membership.organization_id),
+                FilterParam(field="user_id", operator=FilterOperator.EQ, value=membership.user_id),
+            ],
+        )
+    else:
+        existing = key_repo.find_one_sync(
+            db,
+            [
+                FilterParam(field="provider_id", operator=FilterOperator.EQ, value=key_in.provider_id),
+                FilterParam(field="organization_id", operator=FilterOperator.EQ, value=membership.organization_id),
+                FilterParam(field="user_id", operator=FilterOperator.IS_NULL),
+            ],
+        )
     
     if existing:
         existing.api_key = encrypted
@@ -1905,8 +2006,14 @@ def create_or_update_provider_key(
         db.commit()
         db.refresh(new_key)
         target = new_key
-        
-    plain_key = key_in.api_key
+    
+    from api.core.encryption import decrypt_key
+    try:
+        plain = decrypt_key(target.api_key) if target.api_key else None
+    except Exception:
+        plain = None
+    
+    plain_key = plain or key_in.api_key or ""
     masked = f"{plain_key[:7]}*****{plain_key[-4:]}" if len(plain_key) > 10 else "sk-*****"
     
     return {
@@ -1920,6 +2027,7 @@ def create_or_update_provider_key(
         "level": "user" if target.user_id else "organization",
     }
 
+
 @providers_router.post("/keys/{key_id}/rotate", response_model=ProviderKeyResponse)
 def rotate_provider_key(
     key_id: uuid.UUID,
@@ -1927,11 +2035,18 @@ def rotate_provider_key(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    key_rec = db.query(AIProviderKey).filter(
-        AIProviderKey.id == key_id,
-        AIProviderKey.organization_id == membership.organization_id,
-        ((AIProviderKey.user_id == None) | (AIProviderKey.user_id == membership.user_id))
-    ).first()
+    from api.repositories.ai_gateway_repository import AIProviderKeyRepository
+    from api.repositories.filters import FilterParam, FilterOperator
+    key_repo = AIProviderKeyRepository()
+    key_rec = key_repo.find_one_sync(
+        db,
+        [
+            FilterParam(field="id", operator=FilterOperator.EQ, value=key_id),
+            FilterParam(field="organization_id", operator=FilterOperator.EQ, value=membership.organization_id),
+        ],
+    )
+    if key_rec and key_rec.user_id is not None and key_rec.user_id != membership.user_id:
+        key_rec = None
     if not key_rec:
         raise HTTPException(status_code=404, detail="Provider key record not found.")
         
@@ -1954,19 +2069,25 @@ def rotate_provider_key(
         "level": "user" if key_rec.user_id else "organization",
     }
 
+
 @providers_router.get("/health-logs", response_model=List[ProviderHealthLogResponse])
 def get_provider_health_logs(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
+    current_user: User = Depends(get_current_user),
 ) -> Any:
+    from api.models.ai_platform import AIProviderHealth
     logs = db.query(AIProviderHealth).order_by(AIProviderHealth.last_checked.desc()).limit(100).all()
     return logs
+
 
 @providers_router.get("/health/incidents")
 def get_provider_incidents(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
+    current_user: User = Depends(get_current_user),
 ) -> Any:
+    from api.models.ai_platform import AIProviderHealth
     failures = db.query(AIProviderHealth).filter(
         AIProviderHealth.is_healthy == False
     ).order_by(AIProviderHealth.last_checked.desc()).limit(30).all()
@@ -1975,20 +2096,23 @@ def get_provider_incidents(
     for f in failures:
         newer_check = db.query(AIProviderHealth).filter(
             AIProviderHealth.provider_id == f.provider_id,
-            AIProviderHealth.last_checked > f.last_checked
+            AIProviderHealth.last_checked > f.last_checked,
         ).order_by(AIProviderHealth.last_checked.asc()).first()
-        
         resolved = newer_check.is_healthy if newer_check else False
-        
         incidents.append({
             "id": str(f.id),
+            "provider_id": str(f.provider_id),
             "provider": f.provider_rel.name if f.provider_rel else "unknown",
-            "timestamp": f.last_checked.isoformat(),
-            "type": "Outage" if "timeout" in (f.error_message or "").lower() else "API Error",
-            "message": f.error_message or "Connectivity failure.",
+            "provider_name": f.provider_rel.name if f.provider_rel else "unknown",
+            "is_healthy": resolved,
             "resolved": resolved,
+            "message": f.error_message or "",
+            "error_message": f.error_message,
+            "last_checked": f.last_checked,
         })
+    
     return incidents
+
 
 @providers_router.post("/health/incidents/{id}/resolve")
 def resolve_health_incident(
@@ -1996,6 +2120,7 @@ def resolve_health_incident(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
+    from api.models.ai_platform import AIProviderHealth
     log_rec = db.query(AIProviderHealth).filter(AIProviderHealth.id == id).first()
     if not log_rec:
         raise HTTPException(status_code=404, detail="Incident record not found.")
@@ -2003,6 +2128,7 @@ def resolve_health_incident(
     log_rec.is_healthy = True
     db.commit()
     return {"success": True}
+
 
 @providers_router.get("/limits/orgs", response_model=List[OrgCapLimitResponse])
 def list_orgs_limits(
@@ -2012,17 +2138,23 @@ def list_orgs_limits(
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
-    limits = db.query(AIOrgLimit).all()
+    from api.repositories.ai_gateway_repository import AIOrgLimitRepository
+    limits = AIOrgLimitRepository().find_many_sync(db)
     return limits
+
 
 @providers_router.get("/limits/current", response_model=OrgCapLimitResponse)
 def get_current_org_limit(
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
-    limit = db.query(AIOrgLimit).filter(
-        AIOrgLimit.organization_id == membership.organization_id
-    ).first()
+    from api.repositories.ai_gateway_repository import AIOrgLimitRepository
+    from api.repositories.filters import FilterParam, FilterOperator
+    limit_repo = AIOrgLimitRepository()
+    limit = limit_repo.find_one_sync(
+        db,
+        [FilterParam(field="organization_id", operator=FilterOperator.EQ, value=membership.organization_id)],
+    )
     
     if not limit:
         limit = AIOrgLimit(
@@ -2048,7 +2180,13 @@ def add_credits_to_org(
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
-    limit = db.query(AIOrgLimit).filter(AIOrgLimit.organization_id == org_id).first()
+    from api.repositories.ai_gateway_repository import AIOrgLimitRepository
+    from api.repositories.filters import FilterParam, FilterOperator
+    limit_repo = AIOrgLimitRepository()
+    limit = limit_repo.find_one_sync(
+        db,
+        [FilterParam(field="organization_id", operator=FilterOperator.EQ, value=org_id)],
+    )
     if not limit:
         limit = AIOrgLimit(
             organization_id=org_id,
@@ -2075,7 +2213,13 @@ def update_org_limits(
     if membership.role not in [UserRole.OWNER, UserRole.ADMIN]:
         raise HTTPException(status_code=403, detail="Insufficient privileges.")
         
-    limit = db.query(AIOrgLimit).filter(AIOrgLimit.organization_id == org_id).first()
+    from api.repositories.ai_gateway_repository import AIOrgLimitRepository
+    from api.repositories.filters import FilterParam, FilterOperator
+    limit_repo = AIOrgLimitRepository()
+    limit = limit_repo.find_one_sync(
+        db,
+        [FilterParam(field="organization_id", operator=FilterOperator.EQ, value=org_id)],
+    )
     if not limit:
         limit = AIOrgLimit(
             organization_id=org_id,
@@ -2509,7 +2653,6 @@ def compare_models(
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
                 
                 from api.ai.agents.image.asset_manager import AssetManager
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
                 import uuid
                 file_asset = AssetManager.save_image_asset(
                     db=db,
@@ -2518,6 +2661,9 @@ from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 
                     organization_id=membership.organization_id
                 )
                 
+                reg_model = db.query(AIModelRegistry).filter(AIModelRegistry.model_name == resolved_model).first()
+                calculated_cost = float(reg_model.input_token_price) if (reg_model and reg_model.input_token_price is not None) else 0.02
+
                 usage_record = AITokenUsage(
                     organization_id=membership.organization_id,
                     user_id=membership.user_id,
@@ -2526,7 +2672,7 @@ from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 
                     prompt_tokens=0,
                     completion_tokens=0,
                     total_tokens=0,
-                    cost_usd=0.04,
+                    cost_usd=calculated_cost,
                     latency_ms=latency_ms,
                     status="success",
                     capability="image",
@@ -2542,7 +2688,7 @@ from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 
                     "latency_ms": latency_ms,
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
-                    "cost_usd": 0.04,
+                    "cost_usd": calculated_cost,
                     "status": "success"
                 })
             else:

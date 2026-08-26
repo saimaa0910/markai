@@ -9,7 +9,6 @@ import uuid
 from typing import Any, Dict, List, Optional, Union
 from api.services.base import ServiceContext, ServiceResult
 from api.services.ai.cache_keys import (
-    MEMORY_BUFFER_CACHE_TTL,
     conversation_memory_cache_key,
 )
 from api.services.ai.dtos import ConversationMemoryDTO, StoreMessageDTO
@@ -17,6 +16,53 @@ from api.services.ai.events import ConversationMemoryUpdated, MemorySummarized
 from api.services.ai.policies import MemoryPolicy
 
 logger = logging.getLogger("eaimos.ai.memory")
+
+# P2-5: Memory retention/max-size policy constants.
+MEMORY_MAX_MESSAGES = 60          # hard cap on buffered messages per conversation
+MEMORY_MAX_TOKENS = 8000          # approximate token budget before oldest messages are evicted
+MEMORY_EVICT_TOKENS = 4000        # target token level after eviction
+MEMORY_BUFFER_TTL_SECONDS = 86400  # 24h retention for the in-memory buffer
+
+# Simple PII redaction patterns applied on write (P2-5).
+_PII_PATTERNS = [
+    (r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[EMAIL]"),
+    (r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b", "[PHONE]"),
+    (r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b", "[CARD]"),
+]
+
+
+def _redact_pii(text: str) -> str:
+    """Mask common PII patterns before persisting to memory (P2-5)."""
+    import re
+    for pattern, replacement in _PII_PATTERNS:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def _apply_memory_policy(cached_memory: Dict[str, Any]) -> None:
+    """Enforce max-size and retention policy on a memory buffer (P2-5)."""
+    messages = cached_memory.get("messages", [])
+    total_tokens = int(cached_memory.get("total_tokens", 0))
+
+    # Evict oldest messages to stay within the token budget.
+    evicted = 0
+    while (total_tokens > MEMORY_MAX_TOKENS and len(messages) > 1) or len(messages) > MEMORY_MAX_MESSAGES:
+        oldest = messages.pop(0)
+        total_tokens -= max(1, len(oldest.get("content", "")) // 4)
+        evicted += 1
+        if len(messages) <= 1:
+            break
+    # If still over budget after exhausting (rare, huge single message), trim tail.
+    if total_tokens > MEMORY_MAX_TOKENS and len(messages) > 1:
+        while total_tokens > MEMORY_EVICT_TOKENS and len(messages) > 1:
+            oldest = messages.pop(0)
+            total_tokens -= max(1, len(oldest.get("content", "")) // 4)
+            evicted += 1
+
+    cached_memory["messages"] = messages
+    cached_memory["total_tokens"] = total_tokens
+    if evicted:
+        cached_memory["evicted_count"] = cached_memory.get("evicted_count", 0) + evicted
 
 
 class MemoryService:
@@ -46,16 +92,22 @@ class MemoryService:
             cache_key = conversation_memory_cache_key(dto.conversation_id)
             cached_memory = await self.cache.get(cache_key) or {"messages": [], "summary": None, "total_tokens": 0}
 
+            # Redact PII before persisting to memory (P2-5).
+            safe_content = _redact_pii(dto.content)
+
             msg_dict = {
                 "id": str(uuid.uuid4()),
                 "role": dto.role,
-                "content": dto.content,
+                "content": safe_content,
                 "name": dto.name,
                 "metadata": dto.metadata_json or {},
             }
 
             cached_memory["messages"].append(msg_dict)
-            cached_memory["total_tokens"] += max(1, len(dto.content) // 4)
+            cached_memory["total_tokens"] += max(1, len(safe_content) // 4)
+
+            # Enforce max-size / retention policy on the buffer (P2-5).
+            _apply_memory_policy(cached_memory)
 
             session_uuid = None
             try:
@@ -82,7 +134,7 @@ class MemoryService:
                                 "organization_id": db_session.organization_id,
                                 "memory_type": MemoryType.EPISODIC,
                                 "memory_key": f"msg_{msg_dict['id']}",
-                                "memory_value": f"{dto.role}: {dto.content}",
+                                "memory_value": f"{dto.role}: {safe_content}",
                                 "importance": 0.5,
                                 "access_count": 1,
                             },
@@ -140,7 +192,7 @@ class MemoryService:
                                     )
                                 )
 
-            await self.cache.set(cache_key, cached_memory, ttl=MEMORY_BUFFER_CACHE_TTL)
+            await self.cache.set(cache_key, cached_memory, ttl=MEMORY_BUFFER_TTL_SECONDS)
 
             if self.dispatcher:
                 await self.dispatcher.publish(

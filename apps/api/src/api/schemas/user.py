@@ -9,14 +9,10 @@ class UserBase(BaseModel):
     is_active: Optional[bool] = True
 
 
-from api.models.membership import UserRole
-
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
     org_name: Optional[str] = None  # Auto-created organization name
     invitation_token: Optional[str] = None
-    organization_id: Optional[uuid.UUID] = None
-    role: Optional[UserRole] = UserRole.MEMBER
 
 
 class UserUpdate(BaseModel):

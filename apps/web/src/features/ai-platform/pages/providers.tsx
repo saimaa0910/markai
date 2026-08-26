@@ -328,7 +328,11 @@ export function ProvidersPage() {
           ) : filteredProviders.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredProviders.map((p: any) => {
-                const meta = PROVIDER_METADATA[p.name.toLowerCase()] || { label: p.name, logo: '🔗', desc: '' };
+                const meta = {
+                  label: p.label || PROVIDER_METADATA[p.name.toLowerCase()]?.label || p.name,
+                  logo: p.logo || PROVIDER_METADATA[p.name.toLowerCase()]?.logo || '🔗',
+                  desc: p.description || PROVIDER_METADATA[p.name.toLowerCase()]?.desc || 'Enterprise AI Provider Integration',
+                };
                 return (
                   <div 
                     key={p.id}

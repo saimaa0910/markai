@@ -24,6 +24,7 @@ from sqlalchemy import (
     ForeignKey, Index, Integer, String, Text, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapped, mapped_column
 from api.database.base import Base
 
@@ -215,3 +216,21 @@ class AuditLog(Base):
         String(20), nullable=False, default="low", server_default="low",
         comment="low | medium | high | critical",
     )
+
+    @hybrid_property
+    def event_type(self) -> Optional[str]:
+        """Alias for `action` (Sprint 8.3.1 contract)."""
+        return self.action
+
+    @event_type.setter
+    def event_type(self, value: Optional[str]) -> None:
+        self.action = value
+
+    @hybrid_property
+    def user_id(self) -> Optional[uuid.UUID]:
+        """Alias for `actor_id` (Sprint 8.3.1 contract)."""
+        return self.actor_id
+
+    @user_id.setter
+    def user_id(self, value: Optional[uuid.UUID]) -> None:
+        self.actor_id = value

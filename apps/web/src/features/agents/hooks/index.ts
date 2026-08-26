@@ -10,6 +10,9 @@ import {
   AgentLog 
 } from '../types';
 
+const EMPTY_ITEMS: any[] = [];
+const EMPTY_LOGS: AgentLog[] = [];
+
 // Helper: Custom paginated response container
 interface PaginatedData<T> {
   items: T[];
@@ -70,7 +73,7 @@ export function useAgents(page = 1, pageSize = 20) {
   });
 
   return {
-    agents: query.data?.items || [],
+    agents: query.data?.items ?? EMPTY_ITEMS,
     total: query.data?.total || 0,
     isLoading: query.isLoading,
     isError: query.isError,
@@ -151,7 +154,7 @@ export function useAgentSessions(page = 1, pageSize = 20) {
   });
 
   return {
-    sessions: query.data?.items || [],
+    sessions: query.data?.items ?? EMPTY_ITEMS,
     total: query.data?.total || 0,
     isLoading: query.isLoading,
     isError: query.isError,
@@ -178,7 +181,7 @@ export function useAgentRuns(sessionId: string | undefined, page = 1, pageSize =
   });
 
   return {
-    runs: query.data?.items || [],
+    runs: query.data?.items ?? EMPTY_ITEMS,
     total: query.data?.total || 0,
     isLoading: query.isLoading,
     isError: query.isError,
@@ -194,13 +197,13 @@ export function useRunLogs(runId: string | undefined) {
     queryKey: ['run-logs', runId],
     queryFn: async () => {
       const res = await apiClient.get(`/agents/runs/${runId}/logs`);
-      return res.data || [];
+      return res.data || EMPTY_LOGS;
     },
     enabled: !!runId,
   });
 
   return {
-    logs: query.data || [],
+    logs: query.data ?? EMPTY_LOGS,
     isLoading: query.isLoading,
     isError: query.isError,
     refetch: query.refetch,

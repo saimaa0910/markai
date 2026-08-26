@@ -17,12 +17,10 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
 
 
 @router.post("/", response_model=FileAssetResponse, status_code=status.HTTP_201_CREATED)
-async def upload_file(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+async def upload_file(  # Sprint 8.3.1
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     file_id = uuid.uuid4()
     original_filename = file.filename or "file"
     extension = original_filename.split(".")[-1] if "." in original_filename else ""
@@ -59,11 +57,9 @@ async def upload_file(
 
 
 @router.get("/", response_model=List[FileAssetResponse])
-def list_files(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_files(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return (
         db.query(FileAsset)
         .filter(FileAsset.organization_id == membership.organization_id)
@@ -72,12 +68,10 @@ def list_files(
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_file(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_file(  # Sprint 8.3.1
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     file_asset = (
         db.query(FileAsset)
         .filter(
@@ -103,12 +97,10 @@ def delete_file(
 
 
 @router.get("/{file_id}/download")
-def download_file(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def download_file(  # Sprint 8.3.1
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),):
     file_asset = (
         db.query(FileAsset)
         .filter(

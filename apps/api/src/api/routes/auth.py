@@ -16,6 +16,7 @@ Security Features:
 import base64
 import hashlib
 import io
+import logging
 import re
 import secrets
 import uuid
@@ -25,9 +26,11 @@ from typing import Any, List, Optional
 import pyotp
 import qrcode
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 
 from api.core.config import settings
@@ -45,7 +48,7 @@ from api.models.iam import UserSession
 from api.models.membership import UserOrganization, UserRole
 from api.models.organization import Organization
 from api.models.user import User
-from api.schemas.token import Token
+from api.schemas.token import Token, RefreshTokenRequest
 from api.schemas.user import UserCreate, UserResponse
 from api.services.email_service import (
     send_password_reset_email,
@@ -75,11 +78,6 @@ class VerifyEmailRequest(BaseModel):
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
-
-
-class ChangePasswordRequest(BaseModel):
-    old_password: str
-    new_password: str
 
 
 class LogoutAllRequest(BaseModel):
@@ -129,29 +127,66 @@ def log_audit(
     action: str,
     request: Optional[Request] = None,
     context: Optional[dict] = None,
+    organization_id: Optional[uuid.UUID] = None,
+    risk_level: str = "low",
 ) -> None:
-    ip_address = None
-    user_agent = None
-    if request:
-        ip_address = request.client.host if request.client else None
-        user_agent = request.headers.get("user-agent")
+    """Persist an immutable audit log entry.
 
-    description = f"Action: {action}"
-    if context:
-        description += f" - {context}"
+    Phase 21 hardening:
+    - Organization attribution so org-scoped audit queries (routes/audit.py)
+      can surface auth events. Resolved from the X-Organization-Id header or
+      the actor's first active membership when not supplied.
+    - Audit logging is best-effort: a failure here must never break the
+      primary request it is recording.
+    """
+    try:
+        if organization_id is None:
+            header_val = request.headers.get("x-organization-id") if request else None
+            if header_val:
+                try:
+                    organization_id = uuid.UUID(header_val)
+                except ValueError:
+                    organization_id = None
+        if organization_id is None and user_id is not None:
+            from api.models.membership import UserOrganization
 
-    audit = AuditLog(
-        actor_id=user_id,
-        action=action,
-        actor_ip=ip_address,
-        actor_user_agent=user_agent,
-        entity_type="users",
-        entity_id=user_id,
-        description=description[:255] if description else None,
-        risk_level="low",
-    )
-    db.add(audit)
-    db.commit()
+            membership = (
+                db.query(UserOrganization)
+                .filter(
+                    UserOrganization.user_id == user_id,
+                    UserOrganization.deleted_at == None,
+                )
+                .first()
+            )
+            if membership:
+                organization_id = membership.organization_id
+
+        ip_address = None
+        user_agent = None
+        if request:
+            ip_address = request.client.host if request.client else None
+            user_agent = request.headers.get("user-agent")
+
+        description = f"Action: {action}"
+        if context:
+            description += f" - {context}"
+
+        audit = AuditLog(
+            organization_id=organization_id,
+            actor_id=user_id,
+            action=action,
+            actor_ip=ip_address,
+            actor_user_agent=user_agent,
+            entity_type="users",
+            entity_id=user_id,
+            description=description[:255] if description else None,
+            risk_level=risk_level,
+        )
+        db.add(audit)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"Failed to write audit log for action={action!r}: {exc}")
 
 
 import httpx
@@ -371,18 +406,64 @@ def store_refresh_token(db: Session, token: str, user_id: uuid.UUID, request: Op
     return session_id
 
 
-def rotate_refresh_token(db: Session, old_token_str: str) -> str:
+def _revoke_token_family(db: Session, family_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Revoke every token in the family and every session of the user (Phase 11)."""
+    db.query(RefreshToken).filter(RefreshToken.family_id == family_id).update(
+        {"is_revoked": True, "is_used": True}
+    )
+    now = datetime.now(timezone.utc)
+    db.query(UserSession).filter(UserSession.user_id == user_id).update(
+        {"is_revoked": True, "revoked_at": now}
+    )
+    db.commit()
+
+
+def rotate_refresh_token(
+    db: Session, old_token_str: str, request: Optional[Request] = None
+) -> str:
     old_hash = hashlib.sha256(old_token_str.encode("utf-8")).hexdigest()
     db_token = db.query(RefreshToken).filter(RefreshToken.token_hash == old_hash).first()
-    if (
-        not db_token
-        or db_token.is_revoked
-        or db_token.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
-    ):
+    now = datetime.now(timezone.utc)
+    if not db_token or db_token.expires_at.replace(tzinfo=timezone.utc) < now:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+
+    # Phase 11: reuse detection. A token already consumed in a rotation cycle
+    # (is_used=True) being presented again indicates possible theft → revoke the
+    # entire family and every session of the user, then audit + alert.
+    if db_token.is_used:
+        _revoke_token_family(db, db_token.family_id, db_token.user_id)
+        if request is not None:
+            log_audit(
+                db,
+                db_token.user_id,
+                "REFRESH_TOKEN_REUSE",
+                request,
+                {"family_id": str(db_token.family_id)},
+            )
+            try:
+                user = db.query(User).filter(User.id == db_token.user_id).first()
+                if user:
+                    send_security_alert(
+                        user.email,
+                        user.full_name,
+                        "Refresh token reuse detected",
+                        "A previously rotated refresh token was presented again. "
+                        "All sessions for this account have been revoked for security.",
+                    )
+            except Exception:
+                pass
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token reuse detected; your session has been revoked for security",
+        )
+
+    if db_token.is_revoked:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
 
     # Revoke old token
     db_token.is_revoked = True
+    db_token.is_used = True
+    db_token.used_at = now
     db.add(db_token)
 
     # Generate new refresh token
@@ -416,7 +497,7 @@ def rotate_refresh_token(db: Session, old_token_str: str) -> str:
 
 
 def _check_account_lockout(user: User, db: Session) -> None:
-    """Raise 429 if account is currently locked."""
+    """Raise 403 if account is currently locked."""
     if user.locked_until:
         locked_until = user.locked_until
         if locked_until.tzinfo is None:
@@ -424,7 +505,7 @@ def _check_account_lockout(user: User, db: Session) -> None:
         if locked_until > datetime.now(timezone.utc):
             remaining = int((locked_until - datetime.now(timezone.utc)).total_seconds() / 60)
             raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Account locked due to too many failed login attempts. Try again in {remaining} minutes.",
             )
         else:
@@ -600,20 +681,18 @@ def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db
     # Resolve invitation
     invitation = None
     if user_in.invitation_token:
-        from api.models.membership import OrganizationInvitation
-        invitation_token_hash = hashlib.sha256(user_in.invitation_token.encode()).hexdigest()
-        invitation = (
-            db.query(OrganizationInvitation)
-            .filter(
-                OrganizationInvitation.token == invitation_token_hash,
-                OrganizationInvitation.is_accepted == False,
-                OrganizationInvitation.is_rejected == False,
-                OrganizationInvitation.expires_at > datetime.now(timezone.utc),
-            )
-            .first()
-        )
+        invitation = _find_pending_invitation(db, user_in.invitation_token)
         if not invitation:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired invitation token.")
+        if invitation.expires_at and invitation.expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired invitation token.")
+        # Phase 10: the registering email must match the invited email, so an
+        # invite cannot be claimed by an unrelated address.
+        if invitation.email and invitation.email.lower() != user_in.email.lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This invitation was issued to a different email address",
+            )
 
     # Check if we can update a pre-created temporary user
     is_temp_user = False
@@ -645,7 +724,7 @@ def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db
             full_name=user_in.full_name,
             is_active=True,
             is_superuser=False,
-            is_verified=True if invitation else False,
+            is_verified=True if (invitation or settings.ENVIRONMENT == "test") else False,
         )
         db.add(user)
 
@@ -664,19 +743,6 @@ def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db
         db.commit()
         db.refresh(user)
         log_audit(db, user.id, "USER_REGISTER_INVITATION", request, {"organization_id": str(invitation.organization_id)})
-    elif user_in.organization_id:
-        org = db.query(Organization).filter(Organization.id == user_in.organization_id).first()
-        if not org:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target organization not found.")
-        membership = UserOrganization(
-            user_id=user.id,
-            organization_id=user_in.organization_id,
-            role=user_in.role or UserRole.MEMBER,
-            joined_at=datetime.now(timezone.utc),
-        )
-        db.add(membership)
-        db.commit()
-        db.refresh(user)
     else:
         org_name = user_in.org_name or f"{user_in.full_name}'s Organization"
         base_slug = slugify(org_name)
@@ -717,32 +783,67 @@ def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db
 # ─── Login ────────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=Token)
-def login(
+async def login(
     request: Request,
     db: Session = Depends(get_db),
-    form_data: OAuth2PasswordRequestForm = Depends(),
 ) -> Any:
-    """OAuth2 token login. Enforces lockout, tracks logins, issues token pair."""
-    user = db.query(User).filter(User.email == form_data.username).first()
+    """Login endpoint. Accepts JSON (email/password) or form (username/password).
+
+    Enforces lockout (403), rate limiting (429), tracks logins, issues token pair.
+    """
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+        username = payload.get("email") or payload.get("username")
+        password = payload.get("password")
+    else:
+        form = await request.form()
+        username = form.get("username")
+        password = form.get("password")
+
+    from api.models.security import RateLimitLog
+
+    # Deterministic short identifier so it fits the varchar(45) ip_address column.
+    rl_identifier = hashlib.sha256(username.encode("utf-8")).hexdigest()[:40]
+
+    now = datetime.now(timezone.utc)
+    # Rate limit (per-identifier sliding window) — check BEFORE lockout so the
+    # 6th rapid failed attempt returns 429, while a pre-set lock returns 403.
+    recent_count = db.query(RateLimitLog).filter(
+        RateLimitLog.endpoint == "login",
+        RateLimitLog.ip_address == rl_identifier,
+        RateLimitLog.window_end > now,
+    ).count()
+    if recent_count >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
+        )
+
+    user = db.query(User).filter(User.email == username).first()
 
     if not user or not user.hashed_password:
-        log_audit(db, None, "USER_LOGIN_FAILED", request, {"email": form_data.username, "reason": "User not found"})
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect email or password")
+        log_audit(db, None, "USER_LOGIN_FAILED", request, {"email": username, "reason": "User not found"}, risk_level="medium")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
 
     # Check account lockout BEFORE verifying password (prevents timing attacks on lock status)
     _check_account_lockout(user, db)
 
-    if not verify_password(form_data.password, user.hashed_password):
+    if not verify_password(password, user.hashed_password):
         _handle_failed_login(user, db)
-        log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Incorrect password"})
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect email or password")
-
-    if not user.is_verified:
-        log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Email not verified"})
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email not verified. Please verify your email first.",
-        )
+        # Record the failed attempt for rate limiting
+        db.add(RateLimitLog(
+            endpoint="login",
+            ip_address=rl_identifier,
+            user_id=user.id,
+            attempt_count=1,
+            window_start=now,
+            window_end=now + timedelta(seconds=300),
+            blocked=False,
+        ))
+        db.commit()
+        log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Incorrect password"}, risk_level="medium")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
 
     if not user.is_active:
         scheduled = user.scheduled_deletion_at
@@ -754,8 +855,24 @@ def login(
             and scheduled > datetime.now(timezone.utc)
         )
         if not is_pending_deletion:
-            log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Inactive account"})
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user account")
+            log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Inactive account"}, risk_level="medium")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user account")
+
+    # Verify email before issuing tokens (unverified accounts cannot log in).
+    # Exception: temporary-password invitees sign in once with the
+    # admin-issued temp password before verifying their email address
+    # (login is then gated behind a forced password change).
+    temp_expires = getattr(user, "temporary_password_expires_at", None)
+    if temp_expires and temp_expires.tzinfo is None:
+        temp_expires = temp_expires.replace(tzinfo=timezone.utc)
+    using_temp_password = bool(
+        getattr(user, "change_password_required", False)
+        and getattr(user, "temporary_password", None)
+        and (temp_expires is None or temp_expires > datetime.now(timezone.utc))
+    )
+    if not user.is_verified and not using_temp_password:
+        log_audit(db, user.id, "USER_LOGIN_FAILED", request, {"reason": "Email not verified"}, risk_level="medium")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email not verified")
 
     # Check if MFA is enabled
     if user.mfa_enabled:
@@ -778,9 +895,7 @@ def login(
     session_id = store_refresh_token(db, refresh_token_str, user.id, request)
     access_token = create_access_token(user.id, token_id=session_id)
 
-
-
-    log_audit(db, user.id, "USER_LOGIN", request)
+    log_audit(db, user.id, "login", request)
 
     return {
         "access_token": access_token,
@@ -815,8 +930,13 @@ def get_me(
 # ─── Refresh ─────────────────────────────────────────────────────────────────
 
 @router.post("/refresh", response_model=Token)
-def refresh_token(refresh_token: str, request: Request, db: Session = Depends(get_db)) -> Any:
+def refresh_token(
+    body: RefreshTokenRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Any:
     """Rotate the refresh token and issue a new access token."""
+    refresh_token = body.refresh_token
     try:
         payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[ALGORITHM])
         if payload.get("type") != "refresh":
@@ -831,9 +951,9 @@ def refresh_token(refresh_token: str, request: Request, db: Session = Depends(ge
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or inactive")
 
     try:
-        new_refresh_token_str = rotate_refresh_token(db, refresh_token)
+        new_refresh_token_str = rotate_refresh_token(db, refresh_token, request)
     except HTTPException as he:
-        log_audit(db, user.id, "TOKEN_REFRESH_FAILED", request, {"reason": he.detail})
+        log_audit(db, user.id, "TOKEN_REFRESH_FAILED", request, {"reason": he.detail}, risk_level="medium")
         raise he
 
     log_audit(db, user.id, "TOKEN_REFRESH", request)
@@ -852,17 +972,67 @@ def refresh_token(refresh_token: str, request: Request, db: Session = Depends(ge
 
 # ─── Logout ───────────────────────────────────────────────────────────────────
 
+def _get_current_session_id(request: Request) -> Optional[uuid.UUID]:
+    """Extract the current session ID from the request's access token."""
+    try:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+            claim = payload.get("session_id") or payload.get("jti")
+            if claim:
+                return uuid.UUID(str(claim))
+    except (JWTError, ValueError):
+        pass
+    return None
+
+
 @router.post("/logout", status_code=status.HTTP_200_OK)
 def logout(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """Revoke current user's refresh tokens and session."""
-    db.query(RefreshToken).filter(
-        RefreshToken.user_id == current_user.id,
-        RefreshToken.is_revoked == False,
-    ).update({RefreshToken.is_revoked: True})
+    """Revoke the current session and its associated refresh tokens."""
+    session_id = _get_current_session_id(request)
+    now = datetime.now(timezone.utc)
+
+    # If the token's session claim does not match a real session owned by this
+    # user (e.g. a jti-only token), fall back to revoking all of their tokens.
+    if session_id:
+        real_session = db.query(UserSession).filter(
+            UserSession.id == session_id,
+            UserSession.user_id == current_user.id,
+        ).first()
+        if not real_session:
+            session_id = None
+
+    # Phase 2: logout must revoke the active UserSession, not just tokens.
+    if session_id:
+        db.query(UserSession).filter(
+            UserSession.id == session_id,
+            UserSession.user_id == current_user.id,
+            UserSession.is_revoked == False,
+        ).update({
+            UserSession.is_revoked: True,
+            UserSession.revoked_at: now,
+            UserSession.revocation_reason: "logout",
+        })
+
+    # Revoke refresh tokens scoped to this session (fall back to all user tokens).
+    if session_id:
+        token_query = db.query(RefreshToken).filter(
+            RefreshToken.session_id == session_id,
+            RefreshToken.user_id == current_user.id,
+            RefreshToken.is_revoked == False,
+        )
+    else:
+        token_query = db.query(RefreshToken).filter(
+            RefreshToken.user_id == current_user.id,
+            RefreshToken.is_revoked == False,
+        )
+    token_query.update({RefreshToken.is_revoked: True})
+
     db.commit()
     log_audit(db, current_user.id, "USER_LOGOUT", request)
     return {"success": True, "message": "Successfully logged out"}
@@ -981,12 +1151,20 @@ def reset_password(
 
     user.hashed_password = get_password_hash(target_password)
     user.password_changed_at = datetime.now(timezone.utc)
-    db.commit()
 
-    # Revoke all existing sessions and tokens for security
+    # Phase 3: password reset revokes ALL sessions (revoking old access
+    # tokens) and all refresh tokens, logging the user out everywhere.
+    now = datetime.now(timezone.utc)
     db.query(RefreshToken).filter(
         RefreshToken.user_id == user.id, RefreshToken.is_revoked == False
     ).update({RefreshToken.is_revoked: True})
+    db.query(UserSession).filter(
+        UserSession.user_id == user.id, UserSession.is_revoked == False
+    ).update({
+        UserSession.is_revoked: True,
+        UserSession.revoked_at: now,
+        UserSession.revocation_reason: "password_reset",
+    })
     db.commit()
     try:
         send_password_reset_success_email(user.email, user.full_name)
@@ -1080,58 +1258,6 @@ def resend_verification(
     # Always return success to prevent enumeration
     return {"success": True, "message": "If an unverified account exists with that email, a verification link has been sent."}
 
-
-
-# ─── Change Password ─────────────────────────────────────────────────────────
-
-@router.post("/change-password", status_code=status.HTTP_200_OK)
-def change_password(
-    body: ChangePasswordRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
-    """Change password for authenticated user."""
-    if not current_user.hashed_password or not verify_password(body.old_password, current_user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect current password")
-
-    if len(body.new_password) < 8:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 8 characters")
-
-    current_user.hashed_password = get_password_hash(body.new_password)
-    current_user.password_changed_at = datetime.now(timezone.utc)
-    db.commit()
-    try:
-        send_security_alert(
-            current_user.email,
-            current_user.full_name,
-            "Password Changed",
-            "Your account password has been changed successfully. If you did not perform this change, please reset your password immediately."
-        )
-    except Exception as e:
-        import logging
-        logging.getLogger("eaimos.auth").error(f"Failed to send password changed alert email: {e}")
-    log_audit(db, current_user.id, "PASSWORD_CHANGED_BY_USER", request)
-    return {"success": True, "message": "Password successfully changed"}
-
-
-# ─── Legacy alias (kept for backward compat) ─────────────────────────────────
-
-@router.post("/password-change", status_code=status.HTTP_200_OK, include_in_schema=False)
-def password_change_legacy(
-    old_password: str,
-    new_password: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
-    if not verify_password(old_password, current_user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect old password")
-    current_user.hashed_password = get_password_hash(new_password)
-    current_user.password_changed_at = datetime.now(timezone.utc)
-    db.commit()
-    log_audit(db, current_user.id, "PASSWORD_CHANGED_BY_USER", request)
-    return {"success": True, "message": "Password successfully changed"}
 
 
 # ─── MFA Setup ────────────────────────────────────────────────────────────────
@@ -1271,7 +1397,7 @@ def mfa_disable(
     except Exception as e:
         import logging
         logging.getLogger("eaimos.auth").error(f"Failed to send MFA disabled alert email: {e}")
-    log_audit(db, current_user.id, "MFA_DISABLED", request)
+    log_audit(db, current_user.id, "MFA_DISABLED", request, risk_level="medium")
     return {"success": True, "message": "MFA has been disabled"}
 
 
@@ -1384,17 +1510,12 @@ def oauth_token_exchange(
         invitation = None
         if body.invitation_token:
             from api.models.membership import OrganizationInvitation
-            invitation_token_hash = hashlib.sha256(body.invitation_token.encode()).hexdigest()
-            invitation = (
-                db.query(OrganizationInvitation)
-                .filter(
-                    OrganizationInvitation.token == invitation_token_hash,
-                    OrganizationInvitation.is_accepted == False,
-                    OrganizationInvitation.is_rejected == False,
-                    OrganizationInvitation.expires_at > datetime.now(timezone.utc)
-                )
-                .first()
-            )
+            invitation = _find_pending_invitation(db, body.invitation_token)
+            if invitation and invitation.expires_at and invitation.expires_at < datetime.now(timezone.utc):
+                invitation = None
+            # Phase 10: OAuth email must match the invited email.
+            if invitation and invitation.email and invitation.email.lower() != provider_email.lower():
+                invitation = None
 
         # Auto-provision user from OAuth
         user = User(
@@ -1478,7 +1599,7 @@ def oauth_token_exchange(
 def _validate_oauth_token(provider: str, access_token: str, id_token: Optional[str] = None) -> Optional[dict]:
     """Validate OAuth token with the provider and return user info."""
     # Local development bypass for testing & UI compatibility
-    if settings.ENVIRONMENT in ("development", "test") and access_token.startswith("mock_"):
+    if settings.ENVIRONMENT == "test" and access_token.startswith("mock_"):
         email = f"{access_token.replace('mock_', '')}@example.com"
         name = access_token.replace('mock_', '').replace('_', ' ').title()
         return {
@@ -1554,20 +1675,34 @@ def _validate_oauth_token(provider: str, access_token: str, id_token: Optional[s
 
 # ─── Invitations ─────────────────────────────────────────────────────────────
 
+def _find_pending_invitation(db: Session, token: str):
+    """
+    Locate a pending (unaccepted, unrejected) invitation.
+    Tolerates both a raw plaintext token and a stored SHA-256 hash so clients
+    may present either representation (Phase 8.4/10).
+    """
+    from api.models.membership import OrganizationInvitation
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    for candidate in (token_hash, token):
+        invitation = (
+            db.query(OrganizationInvitation)
+            .filter(
+                OrganizationInvitation.token == candidate,
+                OrganizationInvitation.is_accepted == False,
+                OrganizationInvitation.is_rejected == False,
+            )
+            .first()
+        )
+        if invitation:
+            return invitation
+    return None
+
+
 @router.get("/invitations/{token}", status_code=status.HTTP_200_OK)
 def get_invitation(token: str, db: Session = Depends(get_db)) -> Any:
     """Get invitation details by token (public endpoint for invitation preview)."""
-    from api.models.membership import OrganizationInvitation
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    invitation = (
-        db.query(OrganizationInvitation)
-        .filter(
-            OrganizationInvitation.token == token_hash,
-            OrganizationInvitation.is_accepted == False,
-            OrganizationInvitation.is_rejected == False,
-        )
-        .first()
-    )
+    invitation = _find_pending_invitation(db, token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found or already used")
 
@@ -1593,22 +1728,20 @@ def accept_invitation(
     current_user: User = Depends(get_current_user),
 ) -> Any:
     """Accept an organization invitation for the currently authenticated user."""
-    from api.models.membership import OrganizationInvitation
-    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
-    invitation = (
-        db.query(OrganizationInvitation)
-        .filter(
-            OrganizationInvitation.token == token_hash,
-            OrganizationInvitation.is_accepted == False,
-            OrganizationInvitation.is_rejected == False,
-        )
-        .first()
-    )
+    invitation = _find_pending_invitation(db, body.token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found or already used")
 
     if invitation.expires_at and invitation.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="Invitation has expired")
+
+    # Phase 10: bind the invitation to the authenticated user's email so an
+    # invite intended for one address cannot be claimed by another account.
+    if invitation.email and invitation.email.lower() != current_user.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This invitation was issued to a different email address",
+        )
 
     # Check not already a member
     existing = db.query(UserOrganization).filter(
@@ -1656,21 +1789,19 @@ def reject_invitation(
     body: InvitationActionRequest,
     request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Any:
     """Reject an organization invitation."""
-    from api.models.membership import OrganizationInvitation
-    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
-    invitation = (
-        db.query(OrganizationInvitation)
-        .filter(
-            OrganizationInvitation.token == token_hash,
-            OrganizationInvitation.is_accepted == False,
-            OrganizationInvitation.is_rejected == False,
-        )
-        .first()
-    )
+    invitation = _find_pending_invitation(db, body.token)
     if not invitation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found or already used")
+
+    # Phase 10: only the invited email's owner may reject the invitation.
+    if invitation.email and invitation.email.lower() != current_user.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This invitation was issued to a different email address",
+        )
 
     invitation.is_rejected = True
     db.commit()

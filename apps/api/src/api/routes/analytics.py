@@ -14,11 +14,9 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
 
 
 @router.get("/executive")
-def get_executive_report(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_executive_report(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Returns an aggregated corporate dashboard report including AI cost audit,
     campaign performance metrics, and CRM pipeline values.
@@ -29,12 +27,10 @@ def get_executive_report(
 
 
 @router.get("/token-usage")
-def get_token_usage_report(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_token_usage_report(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    days: int = Query(7, ge=1, le=90),
-) -> Any:
+    days: int = Query(7, ge=1, le=90),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Returns day-by-day aggregate trends of AI Token execution cost
     and count metrics for visual chart rendering.

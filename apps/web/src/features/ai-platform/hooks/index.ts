@@ -73,6 +73,7 @@ export function useProviders() {
       const res = await apiClient.get('/ai/providers/');
       return res.data || [];
     },
+    staleTime: 5 * 60 * 1000, // 5 minute dynamic cache
   });
 
   return {

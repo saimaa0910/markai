@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 import { useModels } from '../hooks';
 import { ModelCard } from '../components/model-card';
 import { FilterPanel } from '../components/filter-panel';
@@ -7,10 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DataTable, DataTableColumn } from '@/components/ui/data-table';
 import { useAIPlatformStore } from '../store/ai-platform';
-import { Database, Columns, Check, Star, RefreshCw, X, Zap, Cpu } from 'lucide-react';
+import { Database, Columns, Check, Star, RefreshCw, X, Zap, Cpu, ArrowRight, Play } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 
 export function ModelsPage() {
+  const router = useRouter();
   const { models, isLoading, refetch, toggleHealth } = useModels();
   const { 
     searchQuery, selectedProvider, selectedModel,
@@ -28,10 +30,10 @@ export function ModelsPage() {
       if (showOnlyFavorites && !favorites.includes(m.id)) return false;
       
       if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        return m.name.toLowerCase().includes(q) || 
-               m.model_name.toLowerCase().includes(q) ||
-               m.provider.toLowerCase().includes(q);
+        const q = (searchQuery || '').toLowerCase();
+        return (m?.name || '').toLowerCase().includes(q) || 
+               (m?.model_name || '').toLowerCase().includes(q) ||
+               (m?.provider || '').toLowerCase().includes(q);
       }
       return true;
     });
@@ -41,6 +43,12 @@ export function ModelsPage() {
   const selectedComparisonModels = React.useMemo(() => {
     return models.filter((m) => comparisonModels.includes(m.id));
   }, [models, comparisonModels]);
+
+  const handleOpenCompareLab = () => {
+    if (selectedComparisonModels.length === 0) return;
+    const modelNames = selectedComparisonModels.map((m) => m.model_name).join(',');
+    router.push(`/dashboard/ai/compare?models=${encodeURIComponent(modelNames)}`);
+  };
 
   const columns: DataTableColumn<any>[] = [
     {
@@ -159,11 +167,23 @@ export function ModelsPage() {
             <X className="w-4 h-4" />
           </button>
           
-          <div>
-            <h3 className="font-bold text-white text-sm flex items-center gap-2">
-              Model Comparison Matrix <Columns className="w-4 h-4 text-violet-400" />
-            </h3>
-            <p className="text-[11px] text-neutral-500 mt-0.5">Comparing up to 3 selected models side-by-side.</p>
+          <div className="flex items-center justify-between pr-8">
+            <div>
+              <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                Model Comparison Matrix <Columns className="w-4 h-4 text-violet-400" />
+              </h3>
+              <p className="text-[11px] text-neutral-500 mt-0.5">Comparing up to 3 selected models side-by-side.</p>
+            </div>
+            <Button
+              variant="violet"
+              size="sm"
+              onClick={handleOpenCompareLab}
+              className="h-8 text-xs px-3 shadow-sm flex items-center gap-1.5"
+            >
+              <Play className="w-3.5 h-3.5" />
+              Open in Compare Lab
+              <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border border-white/5 bg-neutral-950/20 p-4 rounded-xl">

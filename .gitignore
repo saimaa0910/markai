@@ -27,13 +27,9 @@ pip-delete-this-directory.txt
 .coverage
 htmlcov/
 
-# Environment variables (secrets)
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-*.env
+# Environment variables (secrets) — never commit any .env* file except the example
+.env*
+!.env.example
 
 # IDEs and editors
 .vscode/

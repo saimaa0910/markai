@@ -26,6 +26,92 @@ router = APIRouter(prefix="/image", tags=["image-agent"])
 active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
 
 
+def _get_available_image_providers(db: Session) -> List[dict]:
+    """Return provider metadata from DB when available, otherwise use a safe built-in fallback."""
+    import os
+    from api.models.ai_platform import AIProvider
+    from api.models.ai_registry import AIModelRegistry
+
+    db_provs = db.query(AIProvider).all()
+    models = db.query(AIModelRegistry).all()
+
+    from api.routes.ai import resolve_provider_capabilities
+
+    out = []
+    fallback_names = ["google", "pollinations", "huggingface", "cloudflare", "fal", "replicate", "stability", "openai", "groq", "ideogram", "together"]
+
+    for prov in db_provs:
+        prov_name = prov.name.lower()
+        caps = resolve_provider_capabilities(prov_name, models)
+        if "Image Generation" in caps or prov_name in ("pollinations", "cloudflare", "replicate", "stability", "ideogram", "blackforestlabs", "fal"):
+            has_key = False
+            if prov_name == "pollinations":
+                has_key = True
+            elif prov.config and prov.config.get("api_key"):
+                has_key = True
+            else:
+                env_var = f"{prov.name.upper()}_API_KEY"
+                has_key = bool(os.getenv(env_var))
+
+            out.append({
+                "name": prov_name,
+                "label": prov.name.capitalize(),
+                "priority": prov.priority,
+                "configured": prov.is_active and has_key,
+            })
+
+    for name in fallback_names:
+        if not any(item["name"] == name for item in out):
+            out.append({
+                "name": name,
+                "label": name.capitalize(),
+                "priority": 100,
+                "configured": name in {"google", "pollinations"},
+            })
+
+    return sorted(out, key=lambda item: (0 if item["name"] == "google" else 1 if item["name"] == "pollinations" else 2, item["name"]))
+
+
+def _get_available_image_models(db: Session) -> List[dict]:
+    """Return model metadata from DB when available, otherwise use a stable built-in fallback."""
+    from api.models.ai_registry import AIModelRegistry
+
+    models_in_db = db.query(AIModelRegistry).filter(AIModelRegistry.supports_images == True).all()
+    if models_in_db:
+        ratios = list(ASPECT_RATIOS.keys())
+        return [
+            {
+                "name": m.model_name,
+                "label": m.model_name.upper().replace("-", " ").replace("@CF/", "").replace("STABILITY-AI/", ""),
+                "provider": m.provider,
+                "supported_ratios": ratios,
+            }
+            for m in models_in_db
+        ]
+
+    ratios = list(ASPECT_RATIOS.keys())
+    return [
+        {
+            "name": "imagen-3.0-generate-002",
+            "label": "Imagen 3.0",
+            "provider": "google",
+            "supported_ratios": ratios,
+        },
+        {
+            "name": "flux-schnell",
+            "label": "Flux Schnell",
+            "provider": "pollinations",
+            "supported_ratios": ratios,
+        },
+        {
+            "name": "sdxl",
+            "label": "SDXL",
+            "provider": "stability",
+            "supported_ratios": ratios,
+        },
+    ]
+
+
 def _resolve_image_session(db: Session, org_id: uuid.UUID, user_id: uuid.UUID) -> AgentSession:
     """Finds or creates the persistent session dedicated to the Image Studio agent."""
     agent = db.scalars(
@@ -609,39 +695,16 @@ def get_providers(
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
     """Lists configuration and health state of image providers dynamically from registry."""
-    import os
-    from api.models.ai_platform import AIProvider
-    from api.models.ai_registry import AIModelRegistry
-    
-    db_provs = db.query(AIProvider).all()
-    models = db.query(AIModelRegistry).all()
-    
-    from api.routes.ai import resolve_provider_capabilities
-    
-    out = []
-    for prov in db_provs:
-        prov_name = prov.name.lower()
-        caps = resolve_provider_capabilities(prov_name, models)
-        
-        if "Image Generation" in caps or prov_name in ("pollinations", "cloudflare", "replicate", "stability", "ideogram", "blackforestlabs", "fal"):
-            has_key = False
-            if prov_name == "pollinations":
-                has_key = True
-            elif prov.config and prov.config.get("api_key"):
-                has_key = True
-            else:
-                env_var = f"{prov.name.upper()}_API_KEY"
-                has_key = bool(os.getenv(env_var))
-                
-            out.append(
-                ImageProviderResponse(
-                    name=prov_name,
-                    label=prov.name.capitalize(),
-                    priority=prov.priority,
-                    configured=prov.is_active and has_key
-                )
-            )
-    return out
+    providers = _get_available_image_providers(db)
+    return [
+        ImageProviderResponse(
+            name=item["name"],
+            label=item["label"],
+            priority=item["priority"],
+            configured=item["configured"]
+        )
+        for item in providers
+    ]
 
 
 @router.get("/models", response_model=List[ImageModelResponse])
@@ -650,18 +713,13 @@ def get_models(
     membership: UserOrganization = Depends(active_member),
 ) -> Any:
     """Lists supported layout generation models from the database registry."""
-    from api.models.ai_registry import AIModelRegistry
-    models_in_db = db.query(AIModelRegistry).filter(AIModelRegistry.supports_images == True).all()
-    
-    ratios = list(ASPECT_RATIOS.keys())
-    out = []
-    for m in models_in_db:
-        out.append(
-            ImageModelResponse(
-                name=m.model_name,
-                label=m.model_name.upper().replace("-", " ").replace("@CF/", "").replace("STABILITY-AI/", ""),
-                provider=m.provider,
-                supported_ratios=ratios
-            )
+    models = _get_available_image_models(db)
+    return [
+        ImageModelResponse(
+            name=item["name"],
+            label=item["label"],
+            provider=item["provider"],
+            supported_ratios=item["supported_ratios"],
         )
-    return out
+        for item in models
+    ]

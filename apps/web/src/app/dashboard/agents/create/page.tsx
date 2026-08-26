@@ -22,7 +22,7 @@ const STEPS = [
   { id: 6, label: 'Review', desc: 'Deploy definition' },
 ];
 
-export default function CreateAgentWizardPage() {
+function CreateAgentWizardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -353,5 +353,13 @@ export default function CreateAgentWizardPage() {
 
       </div>
     </div>
+  );
+}
+
+export default function CreateAgentWizardPage() {
+  return (
+    <React.Suspense fallback={<div className="text-neutral-500 text-xs py-8 text-center animate-pulse">Loading agent wizard...</div>}>
+      <CreateAgentWizardContent />
+    </React.Suspense>
   );
 }

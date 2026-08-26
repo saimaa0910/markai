@@ -1,7 +1,10 @@
 import json
 import logging
+import random
+import time
 import zlib
 from typing import Any, Dict, Optional
+from contextlib import contextmanager
 from api.core.redis_manager import RedisConnectionManager
 
 logger = logging.getLogger("api.services.cache_service")
@@ -20,6 +23,7 @@ class CacheService:
             return
         
         self.redis_manager = RedisConnectionManager()
+        self._memory_cache: Dict[str, Dict[str, Any]] = {}
         
         # In-memory metrics counter
         self.hits_count = 0
@@ -35,12 +39,17 @@ class CacheService:
 
     def get(self, namespace: str, key: str, org_id: Optional[str] = None) -> Optional[Any]:
         """Fetch item from cache. Automates json parsing and decompression."""
-        client = self.redis_manager.get_client()
         cache_key = self._get_key(namespace, org_id, key)
         
         try:
+            client = self.redis_manager.get_client()
             val = client.get(cache_key)
             if val is None:
+                # Check memory fallback
+                mem_item = self._memory_cache.get(cache_key)
+                if mem_item and mem_item.get("expires_at", float("inf")) > time.time():
+                    self.hits_count += 1
+                    return mem_item.get("value")
                 self.misses_count += 1
                 return None
             
@@ -56,7 +65,12 @@ class CacheService:
             
             return json.loads(val)
         except Exception as e:
-            logger.warning(f"Failed to get cache key {cache_key}: {e}")
+            # Memory fallback on Redis error
+            mem_item = self._memory_cache.get(cache_key)
+            if mem_item and mem_item.get("expires_at", float("inf")) > time.time():
+                self.hits_count += 1
+                return mem_item.get("value")
+            logger.debug(f"Cache get error for {cache_key}: {e}")
             return None
 
     def set(
@@ -67,11 +81,17 @@ class CacheService:
         org_id: Optional[str] = None,
         ttl: Optional[int] = 3600,
         compress: bool = False,
+        jitter: bool = True,
     ) -> bool:
-        """Save item to cache with optional TTL and compression."""
-        client = self.redis_manager.get_client()
+        """Save item to cache with jittered TTL to prevent cache stampedes."""
         cache_key = self._get_key(namespace, org_id, key)
         
+        # Apply jitter (random offset +- 10%) to prevent synchronized expiry stampedes
+        effective_ttl = ttl
+        if ttl and jitter:
+            jitter_offset = random.randint(-int(ttl * 0.1), int(ttl * 0.1))
+            effective_ttl = max(1, ttl + jitter_offset)
+
         try:
             serialized = json.dumps(value)
             
@@ -79,14 +99,47 @@ class CacheService:
                 compressed = zlib.compress(serialized.encode("utf-8"))
                 serialized = "zlib:" + compressed.hex()
                 
-            if ttl:
-                client.setex(cache_key, ttl, serialized)
+            client = self.redis_manager.get_client()
+            if effective_ttl:
+                client.setex(cache_key, effective_ttl, serialized)
             else:
                 client.set(cache_key, serialized)
+                
+            # Store in local memory cache as warm backup
+            self._memory_cache[cache_key] = {
+                "value": value,
+                "expires_at": time.time() + (effective_ttl if effective_ttl else 86400)
+            }
             return True
         except Exception as e:
-            logger.error(f"Failed to set cache key {cache_key}: {e}")
-            return False
+            # Save to memory fallback
+            self._memory_cache[cache_key] = {
+                "value": value,
+                "expires_at": time.time() + (effective_ttl if effective_ttl else 3600)
+            }
+            logger.debug(f"Cache set fallback to memory for {cache_key}: {e}")
+            return True
+
+    @contextmanager
+    def with_lock(self, lock_name: str, timeout_seconds: int = 10):
+        """Distributed lock context manager with Redis and in-memory fallback."""
+        lock_key = f"eaimos:lock:{lock_name}"
+        acquired = False
+        client = None
+        try:
+            client = self.redis_manager.get_client()
+            acquired = client.set(lock_key, "locked", nx=True, ex=timeout_seconds)
+        except Exception:
+            acquired = True  # fallback: allow execution
+
+        try:
+            yield acquired
+        finally:
+            if acquired and client:
+                try:
+                    client.delete(lock_key)
+                except Exception:
+                    pass
 
     def delete(self, namespace: str, key: str, org_id: Optional[str] = None) -> bool:
         """Manually invalidate/delete item from cache."""

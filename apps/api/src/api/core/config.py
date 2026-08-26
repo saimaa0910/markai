@@ -1,7 +1,7 @@
 import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import List
+from typing import List, Optional
 
 # Load appropriate .env file manually into os.environ if it exists
 try:
@@ -68,6 +68,12 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
 
+    # Optional explicit async DSN (P2-9). When omitted, DATABASE_URL is derived
+    # by swapping the driver to asyncpg.
+    ASYNC_DATABASE_URL: Optional[str] = Field(
+        default=None, validation_alias="ASYNC_DATABASE_URL"
+    )
+
     # Redis Configuration
     REDIS_URL: str = Field(
         default="redis://localhost:6379/0", validation_alias="REDIS_URL"
@@ -79,6 +85,10 @@ class Settings(BaseSettings):
     )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 days
+
+    # Dedicated Fernet master key for encrypting stored provider secrets.
+    # MUST be a separate secret from SECRET_KEY.
+    ENCRYPTION_KEY: str = Field(default="", validation_alias="ENCRYPTION_KEY")
 
     # MinIO / S3 configuration
     MINIO_ENDPOINT: str = "localhost:9000"

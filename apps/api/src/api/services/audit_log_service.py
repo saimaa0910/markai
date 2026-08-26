@@ -19,10 +19,13 @@ Event Types:
 """
 import uuid
 import logging
+import json
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.models.platform_events import AuditLog
 
 
 logger = logging.getLogger(__name__)
@@ -39,10 +42,11 @@ class AuditLogService:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
-    ) -> None:
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[uuid.UUID]:
         """
         Log a security or user event.
-        
+
         Args:
             db: Database session
             user_id: User ID who performed the action
@@ -50,24 +54,35 @@ class AuditLogService:
             ip_address: IP address of the request
             user_agent: User agent string
             details: Additional event-specific details
+            metadata: Alias for details (Sprint 8.3.1 contract)
+
+        Returns:
+            The id of the created audit log
         """
-        from api.models.audit import AuditLog
-        
+        if metadata is not None:
+            details = {**(details or {}), **metadata}
+
         audit_log = AuditLog(
-            user_id=user_id,
-            event_type=event_type,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            details=details or {},
+            actor_id=user_id,
+            action=event_type,
+            actor_ip=ip_address,
+            actor_user_agent=user_agent,
+            entity_type="users",
+            entity_id=user_id,
+            description=json.dumps(details) if details else event_type,
+            risk_level="low",
         )
-        
+
         db.add(audit_log)
         await db.commit()
-        
+        await db.refresh(audit_log)
+
         logger.info(
             f"Audit event logged: user_id={user_id}, "
             f"event_type={event_type}, ip={ip_address}"
         )
+
+        return audit_log.id
     
     @staticmethod
     async def get_user_logs(
@@ -94,13 +109,11 @@ class AuditLogService:
         Returns:
             List of audit log records
         """
-        from api.models.audit import AuditLog
-        
         # Build filter conditions
-        conditions = [AuditLog.user_id == user_id]
+        conditions = [AuditLog.actor_id == user_id]
         
         if event_type:
-            conditions.append(AuditLog.event_type == event_type)
+            conditions.append(AuditLog.action == event_type)
         
         if from_date:
             conditions.append(AuditLog.created_at >= from_date)
@@ -146,13 +159,11 @@ class AuditLogService:
         Returns:
             Total count of matching logs
         """
-        from api.models.audit import AuditLog
-        
         # Build filter conditions
-        conditions = [AuditLog.user_id == user_id]
+        conditions = [AuditLog.actor_id == user_id]
         
         if event_type:
-            conditions.append(AuditLog.event_type == event_type)
+            conditions.append(AuditLog.action == event_type)
         
         if from_date:
             conditions.append(AuditLog.created_at >= from_date)
@@ -186,12 +197,10 @@ class AuditLogService:
         Returns:
             List of recent audit log records
         """
-        from api.models.audit import AuditLog
-        
         query = select(AuditLog)
         
         if event_types:
-            query = query.where(AuditLog.event_type.in_(event_types))
+            query = query.where(AuditLog.action.in_(event_types))
         
         result = await db.execute(
             query.order_by(AuditLog.created_at.desc()).limit(limit)
@@ -216,8 +225,6 @@ class AuditLogService:
         Returns:
             List of suspicious audit log records
         """
-        from api.models.audit import AuditLog
-        
         # Define suspicious event types
         suspicious_events = [
             "login_failed",
@@ -227,7 +234,7 @@ class AuditLogService:
             "unauthorized_access",
         ]
         
-        conditions = [AuditLog.event_type.in_(suspicious_events)]
+        conditions = [AuditLog.action.in_(suspicious_events)]
         
         if from_date:
             conditions.append(AuditLog.created_at >= from_date)

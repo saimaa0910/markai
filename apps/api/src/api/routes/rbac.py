@@ -18,6 +18,11 @@ Endpoints:
 import uuid
 from datetime import datetime
 from typing import Any, List, Optional
+from api.core.deps import RoleChecker
+from api.models.membership import UserOrganization, UserRole
+
+active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -106,13 +111,11 @@ def _serialize_permission(perm: Permission) -> dict:
 # ─── Role Routes ──────────────────────────────────────────────────────────────
 
 @router.get("/roles")
-def list_roles(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_roles(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     organization_id: Optional[uuid.UUID] = Query(None),
-    include_system: bool = Query(True),
-) -> Any:
+    include_system: bool = Query(True),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """List all roles (system + org-specific)."""
     query = db.query(Role)
     if not include_system:
@@ -126,14 +129,12 @@ def list_roles(
 
 
 @router.post("/roles", status_code=status.HTTP_201_CREATED)
-def create_role(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_role(  # Sprint 8.3.1
     body: CreateRoleRequest,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: None = Depends(require_org_role("OWNER", "ADMIN")),
-) -> Any:
+    _: None = Depends(require_org_role("OWNER", "ADMIN")),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Create a custom role for an organization."""
     # Get org from header
     from api.middleware.rbac import _get_org_id_from_request
@@ -172,43 +173,58 @@ def create_role(
 
 
 @router.get("/roles/{role_id}")
-def get_role(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_role(  # Sprint 8.3.1
     role_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Get a single role by ID."""
-    role = db.query(Role).filter(Role.id == role_id).first()
+    # System roles (is_system=TRUE) are globally available;
+    # custom roles (organization-scoped) require the caller to be a member of that org.
+    stmt = select(Role).where(Role.id == role_id)
+    if not role.is_system if (role := db.execute(stmt).scalar_one_or_none()) else True:
+        # Role is system-level; no org filter needed
+        pass
+    role = db.execute(stmt).scalar_one_or_none()
+    if not role:
+        # Fall back: try without org filter for system roles
+        role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     return _serialize_role(role)
 
 
 @router.get("/roles/{role_id}/permissions")
-def get_role_permissions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_role_permissions(  # Sprint 8.3.1
     role_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Get all permissions for a role."""
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    # System roles (is_system=TRUE) are globally available;
+    # custom roles (organization-scoped) require the caller to belong to that org.
+    if not role.is_system and role.organization_id:
+        from api.models.membership import UserOrganization
+        m = db.query(UserOrganization).filter(
+            UserOrganization.user_id == current_user.id,
+            UserOrganization.organization_id == role.organization_id,
+            UserOrganization.is_revoked == False,
+        ).first()
+        if not m:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Role belongs to another organization")
     return [_serialize_permission(p) for p in role.permissions]
 
 
 @router.post("/roles/{role_id}/permissions", status_code=status.HTTP_200_OK)
-def add_permission_to_role(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def add_permission_to_role(  # Sprint 8.3.1
     role_id: uuid.UUID,
     body: AddPermissionRequest,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: None = Depends(require_org_role("OWNER", "ADMIN")),
-) -> Any:
+    _: None = Depends(require_org_role("OWNER", "ADMIN")),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Add a permission to a role."""
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
@@ -232,15 +248,13 @@ def add_permission_to_role(
 
 
 @router.delete("/roles/{role_id}/permissions/{perm_id}", status_code=status.HTTP_200_OK)
-def remove_permission_from_role(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def remove_permission_from_role(  # Sprint 8.3.1
     role_id: uuid.UUID,
     perm_id: uuid.UUID,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: None = Depends(require_org_role("OWNER", "ADMIN")),
-) -> Any:
+    _: None = Depends(require_org_role("OWNER", "ADMIN")),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Remove a permission from a role."""
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
@@ -261,12 +275,10 @@ def remove_permission_from_role(
 # ─── Permissions ──────────────────────────────────────────────────────────────
 
 @router.get("/permissions")
-def list_permissions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_permissions(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    resource: Optional[str] = Query(None),
-) -> Any:
+    resource: Optional[str] = Query(None),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """List all available permissions."""
     query = db.query(Permission)
     if resource:
@@ -278,17 +290,48 @@ def list_permissions(
 
 # ─── User Role Assignment ─────────────────────────────────────────────────────
 
+def _membership_role(db: Session, user_id: uuid.UUID, org_id: uuid.UUID) -> Optional[str]:
+    """Simple membership role string for a user in an org (Phase 20 RBAC)."""
+    from api.models.membership import UserOrganization
+
+    m = (
+        db.query(UserOrganization)
+        .filter(
+            UserOrganization.user_id == user_id,
+            UserOrganization.organization_id == org_id,
+            UserOrganization.deleted_at == None,
+        )
+        .first()
+    )
+    if not m:
+        return None
+    return m.role.value if hasattr(m.role, "value") else str(m.role)
+
+
+def _resolve_org_context(request: Request, current_user: User, db: Session) -> Optional[uuid.UUID]:
+    """Resolve the active org context without a hard fallback (Phase 20 RBAC)."""
+    from api.middleware.rbac import _get_org_id_from_request
+
+    return _get_org_id_from_request(request, current_user, db)
+
+
 @router.post("/users/{user_id}/roles", status_code=status.HTTP_201_CREATED)
-def assign_role_to_user(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def assign_role_to_user(  # Sprint 8.3.1
     user_id: uuid.UUID,
     body: AssignRoleRequest,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: None = Depends(require_org_role("OWNER", "ADMIN")),
-) -> Any:
-    """Assign a role to a user in an organization."""
+    _: None = Depends(require_org_role("OWNER", "ADMIN")),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
+    """Assign a role to a user in an organization.
+
+    Phase 20 hardening:
+    - The assignment org must be the caller's active org context (prevents an
+      ADMIN of org A from planting roles into org B via the request body).
+    - Only the org OWNER may grant the system OWNER role (prevents ADMIN
+      privilege escalation).
+    - The target user must already be a member of the org.
+    """
     from api.models.user import User as UserModel
 
     target_user = db.query(UserModel).filter(UserModel.id == user_id).first()
@@ -298,6 +341,29 @@ def assign_role_to_user(
     role = db.query(Role).filter(Role.id == body.role_id).first()
     if not role:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+
+    active_org = _resolve_org_context(request, current_user, db)
+    if not active_org or body.organization_id != active_org:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Role assignments are restricted to your active organization",
+        )
+
+    caller_role = _membership_role(db, current_user.id, body.organization_id)
+    if not caller_role:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    if role.name == "OWNER" and caller_role != "OWNER":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the organization owner can grant the OWNER role",
+        )
+
+    if not _membership_role(db, user_id, body.organization_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target user is not a member of this organization",
+        )
 
     # Check if already assigned
     existing = db.query(UserRole).filter(
@@ -348,27 +414,66 @@ def assign_role_to_user(
 
 
 @router.delete("/users/{user_id}/roles/{role_id}", status_code=status.HTTP_200_OK)
-def remove_role_from_user(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def remove_role_from_user(  # Sprint 8.3.1
     user_id: uuid.UUID,
     role_id: uuid.UUID,
     request: Request,
     organization_id: Optional[uuid.UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: None = Depends(require_org_role("OWNER", "ADMIN")),
-) -> Any:
-    """Remove a role assignment from a user."""
+    _: None = Depends(require_org_role("OWNER", "ADMIN")),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
+    """Remove a role assignment from a user.
+
+    Phase 20 hardening:
+    - Bound to the caller's active org (no cross-org revocation).
+    - ADMINs cannot revoke the system OWNER role; only the org OWNER can.
+    - The last OWNER membership cannot be demoted (org would be ownerless).
+    """
+    from api.models.membership import UserOrganization
+
+    org_id = organization_id or _resolve_org_context(request, current_user, db)
+    if not org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organization context required")
+
+    caller_role = _membership_role(db, current_user.id, org_id)
+    if not caller_role:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
     query = db.query(UserRole).filter(
         UserRole.user_id == user_id,
         UserRole.role_id == role_id,
+        UserRole.organization_id == org_id,
     )
-    if organization_id:
-        query = query.filter(UserRole.organization_id == organization_id)
 
     user_role = query.first()
     if not user_role:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role assignment not found")
+
+    role = db.query(Role).filter(Role.id == role_id).first()
+
+    if role and role.name == "OWNER":
+        if caller_role != "OWNER":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the organization owner can revoke the OWNER role",
+            )
+        owner_memberships = (
+            db.query(UserOrganization)
+            .filter(
+                UserOrganization.organization_id == org_id,
+                UserOrganization.deleted_at == None,
+            )
+            .all()
+        )
+        remaining_owners = [
+            m for m in owner_memberships
+            if (m.role.value if hasattr(m.role, "value") else str(m.role)) == "OWNER"
+        ]
+        if len(remaining_owners) <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot remove the last OWNER from the organization",
+            )
 
     db.delete(user_role)
     db.commit()
@@ -377,25 +482,23 @@ def remove_role_from_user(
     log_audit(db, current_user.id, "ROLE_REMOVED", request, {
         "target_user_id": str(user_id),
         "role_id": str(role_id),
+        "org_id": str(org_id),
     })
     return {"success": True, "message": "Role removed from user"}
 
 
 @router.get("/users/{user_id}/permissions")
-def get_user_effective_permissions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_user_effective_permissions(  # Sprint 8.3.1
     user_id: uuid.UUID,
     request: Request,
     organization_id: Optional[uuid.UUID] = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Get effective permissions for a user in an organization."""
     if not current_user.is_superuser and current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     from api.middleware.rbac import _get_user_permissions, _get_org_id_from_request
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
     org_id = organization_id or _get_org_id_from_request(request, current_user, db)
     if not org_id:

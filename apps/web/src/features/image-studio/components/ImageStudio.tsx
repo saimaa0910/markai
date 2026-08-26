@@ -100,6 +100,10 @@ export const ImageStudio: React.FC = () => {
   const [streamLogs, setStreamLogs] = useState<string[]>([]);
   const [streamProgress, setStreamProgress] = useState(0);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [runtimeMessages, setRuntimeMessages] = useState<{ type: 'info' | 'success' | 'error'; message: string }[]>([]);
+  const [generationStatus, setGenerationStatus] = useState<'idle' | 'validating' | 'connecting' | 'generating' | 'processing' | 'completed' | 'failed'>('idle');
+  const [isLeftCollapsed, setIsLeftCollapsed] = useState(false);
+  const [isRightCollapsed, setIsRightCollapsed] = useState(false);
 
   // Active generation results
   const [activeResult, setActiveResult] = useState<any>(null);
@@ -189,6 +193,8 @@ export const ImageStudio: React.FC = () => {
     if (!prompt.trim()) return;
     setIsStreaming(true);
     setStreamLogs([]);
+    setRuntimeMessages([{ type: 'info', message: 'Starting stream render…' }]);
+    setGenerationStatus('connecting');
     setStreamProgress(10);
     setActiveResult(null);
 
@@ -245,21 +251,30 @@ export const ImageStudio: React.FC = () => {
               
               if (currentEvent === 'status') {
                 setStreamLogs((prev) => [...prev, data.message]);
+                setRuntimeMessages((prev) => [...prev, { type: 'info', message: data.message }]);
+                setGenerationStatus('generating');
                 setStreamProgress((prev) => Math.min(prev + 15, 90));
               } else if (currentEvent === 'plan') {
                 setStreamLogs((prev) => [...prev, `Plan selected: ${data.thought}`]);
+                setRuntimeMessages((prev) => [...prev, { type: 'info', message: `Plan selected: ${data.thought}` }]);
               } else if (currentEvent === 'reflection') {
                 setStreamLogs((prev) => [...prev, 'Visual reflection metrics generated.']);
+                setRuntimeMessages((prev) => [...prev, { type: 'success', message: 'Visual reflection metrics generated.' }]);
               } else if (currentEvent === 'evaluation') {
                 setStreamLogs((prev) => [...prev, 'Layout creative evaluation scores completed.']);
+                setRuntimeMessages((prev) => [...prev, { type: 'success', message: 'Layout creative evaluation scores completed.' }]);
               } else if (currentEvent === 'done') {
                 setStreamProgress(100);
                 setActiveResult(data);
-                setActiveImage(data.storage_url);
+                setActiveImage(data.storage_url || null);
+                setGenerationStatus(data.status === 'failed' ? 'failed' : 'completed');
+                setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? 'Generation failed.' : 'Render completed.' }]);
                 refetchHistory();
                 setIsStreaming(false);
               } else if (currentEvent === 'error') {
                 setStreamLogs((prev) => [...prev, `Error: ${data.message}`]);
+                setRuntimeMessages((prev) => [...prev, { type: 'error', message: data.message }]);
+                setGenerationStatus('failed');
                 setIsStreaming(false);
               }
             } catch (e) {
@@ -270,12 +285,15 @@ export const ImageStudio: React.FC = () => {
       }
     } catch (err: any) {
       setStreamLogs((prev) => [...prev, `Streaming failure: ${err.message}`]);
+      setRuntimeMessages((prev) => [...prev, { type: 'error', message: err.message }]);
+      setGenerationStatus('failed');
       setIsStreaming(false);
     }
   };
 
   const handleSyncGenerate = () => {
     if (!prompt.trim()) return;
+    setGenerationStatus('validating');
     setStreamProgress(20);
     generateMutation.mutate(
       {
@@ -290,8 +308,14 @@ export const ImageStudio: React.FC = () => {
       {
         onSuccess: (data) => {
           setActiveResult(data);
-          setActiveImage(data.storage_url);
+          setActiveImage(data.storage_url || null);
+          setGenerationStatus(data.status === 'failed' ? 'failed' : 'completed');
+          setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? data.error?.message || 'Generation failed.' : 'Generation completed.' }]);
           setStreamProgress(100);
+        },
+        onError: (error: any) => {
+          setGenerationStatus('failed');
+          setRuntimeMessages((prev) => [...prev, { type: 'error', message: error?.message || 'Generation failed.' }]);
         },
       }
     );
@@ -305,7 +329,8 @@ export const ImageStudio: React.FC = () => {
       {
         onSuccess: (data) => {
           setActiveResult(data);
-          setActiveImage(data.storage_url);
+          setActiveImage(data.storage_url || null);
+          setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? data.error?.message || 'Background removal failed.' : 'Background removed.' }]);
         },
       }
     );
@@ -318,8 +343,9 @@ export const ImageStudio: React.FC = () => {
       {
         onSuccess: (data) => {
           setActiveResult(data);
-          setActiveImage(data.storage_url);
+          setActiveImage(data.storage_url || null);
           setBgPrompt('');
+          setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? data.error?.message || 'Background replacement failed.' : 'Background replaced.' }]);
         },
       }
     );
@@ -332,7 +358,8 @@ export const ImageStudio: React.FC = () => {
       {
         onSuccess: (data) => {
           setActiveResult(data);
-          setActiveImage(data.storage_url);
+          setActiveImage(data.storage_url || null);
+          setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? data.error?.message || 'Upscale failed.' : 'Upscale completed.' }]);
         },
       }
     );
@@ -345,7 +372,8 @@ export const ImageStudio: React.FC = () => {
       {
         onSuccess: (data) => {
           setActiveResult(data);
-          setActiveImage(data.storage_url);
+          setActiveImage(data.storage_url || null);
+          setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? data.error?.message || 'Variation failed.' : 'Variation completed.' }]);
         },
       }
     );
@@ -359,8 +387,9 @@ export const ImageStudio: React.FC = () => {
       {
         onSuccess: (data) => {
           setActiveResult(data);
-          setActiveImage(data.storage_url);
+          setActiveImage(data.storage_url || null);
           clearMask();
+          setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? data.error?.message || 'Inpaint failed.' : 'Inpaint completed.' }]);
         },
       }
     );
@@ -374,8 +403,9 @@ export const ImageStudio: React.FC = () => {
       {
         onSuccess: (data) => {
           setActiveResult(data);
-          setActiveImage(data.storage_url);
+          setActiveImage(data.storage_url || null);
           clearMask();
+          setRuntimeMessages((prev) => [...prev, { type: data.status === 'failed' ? 'error' : 'success', message: data.status === 'failed' ? data.error?.message || 'Outpaint failed.' : 'Outpaint completed.' }]);
         },
       }
     );
@@ -394,7 +424,9 @@ export const ImageStudio: React.FC = () => {
   return (
     <div className="flex h-[calc(100vh-4rem)] w-full overflow-hidden bg-slate-950 text-slate-100 font-sans">
       {/* LEFT PANEL: CONFIG & PROMPTS */}
-      <div className="w-1/4 min-w-[320px] max-w-[400px] border-r border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-5 overflow-y-auto backdrop-blur-md">
+      <div className={`relative border-r border-slate-800 bg-slate-900/60 backdrop-blur-md transition-all duration-200 ${isLeftCollapsed ? 'w-14 min-w-14' : 'w-1/4 min-w-[320px] max-w-[400px]'}`}>
+        {!isLeftCollapsed ? (
+          <div className="h-full p-5 flex flex-col gap-5 overflow-y-auto">
         <div>
           <h2 className="text-lg font-bold text-violet-400">Creative Configuration</h2>
           <p className="text-xs text-slate-400">Assemble visual cues and target styles</p>
@@ -536,10 +568,108 @@ export const ImageStudio: React.FC = () => {
             {isStreaming ? 'Streaming...' : '⚡ Stream Render'}
           </button>
         </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsLeftCollapsed(false)}
+            className="absolute inset-0 flex h-full w-full items-center justify-center text-slate-400 hover:text-violet-400"
+            aria-label="Expand configuration panel"
+          >
+            &gt;
+          </button>
+        )}
+        <button
+          onClick={() => setIsLeftCollapsed((prev) => !prev)}
+          className="absolute right-2 top-4 rounded-full border border-slate-700 bg-slate-950/70 px-2 py-1 text-[10px] text-slate-400 hover:text-violet-400"
+          aria-label="Toggle configuration panel"
+        >
+          {isLeftCollapsed ? '<' : '>'}
+        </button>
       </div>
 
       {/* CENTER PANEL: INTERACTIVE CANVAS */}
-      <div className="flex-1 bg-slate-950 p-6 flex flex-col items-center justify-center gap-5 relative">
+      <div className="flex-1 bg-slate-950 p-6 flex flex-col gap-5 relative overflow-y-auto">
+        <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3">
+          <div>
+            <div className="text-sm font-semibold text-white">Image Studio Workspace</div>
+            <div className="text-xs text-slate-400">Chat-style generation history with inline image previews</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${generationStatus === 'failed' ? 'bg-rose-500/15 text-rose-300' : generationStatus === 'completed' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-violet-500/15 text-violet-300'}`}>
+              {generationStatus}
+            </span>
+            <button
+              onClick={() => setIsLeftCollapsed((prev) => !prev)}
+              className="rounded-full border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400 hover:text-violet-400"
+            >
+              {isLeftCollapsed ? 'Configuration' : 'Hide Config'}
+            </button>
+            <button
+              onClick={() => setIsRightCollapsed((prev) => !prev)}
+              className="rounded-full border border-slate-700 px-2.5 py-1 text-[10px] text-slate-400 hover:text-violet-400"
+            >
+              {isRightCollapsed ? 'Console' : 'Hide Console'}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Current Prompt</div>
+            <div className="mt-2 text-sm text-slate-200">{prompt || 'No prompt yet — describe the image you want to generate.'}</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={handleSyncGenerate}
+                disabled={generateMutation.isPending || isStreaming}
+                className="rounded-lg bg-violet-600/80 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-50"
+              >
+                {generateMutation.isPending ? 'Generating…' : 'Generate'}
+              </button>
+              <button
+                onClick={() => setPrompt('')}
+                className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {history.length > 0 ? history.map((item) => (
+              <div key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">{item.prompt}</div>
+                    <div className="text-[11px] text-slate-400">{item.provider} / {item.model}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setPrompt(item.prompt);
+                        handleSyncGenerate();
+                      }}
+                      className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:border-slate-500"
+                    >
+                      Retry
+                    </button>
+                    <a href={item.storage_url} download={`creative_${item.id}.png`} className="text-[11px] text-pink-400 hover:text-pink-300">Download</a>
+                  </div>
+                </div>
+                {item.storage_url ? (
+                  <div className="mt-3 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
+                    <img src={item.storage_url} alt={item.prompt} className="h-64 w-full object-contain" />
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-xl border border-dashed border-slate-700 p-3 text-xs text-slate-500">No image asset available yet.</div>
+                )}
+              </div>
+            )) : (
+              <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 p-6 text-center text-sm text-slate-500">
+                No generations yet. Start a prompt to populate the chat history.
+              </div>
+            )}
+          </div>
+        </div>
         
         {/* Top Canvas toolbar controls */}
         {activeImage && (
@@ -677,13 +807,28 @@ export const ImageStudio: React.FC = () => {
       </div>
 
       {/* RIGHT PANEL: INSIGHTS & HISTORY */}
-      <div className="w-1/4 min-w-[320px] max-w-[400px] border-l border-slate-800 bg-slate-900/60 p-5 flex flex-col gap-6 overflow-y-auto backdrop-blur-md">
+      <div className={`relative border-l border-slate-800 bg-slate-900/60 backdrop-blur-md transition-all duration-200 ${isRightCollapsed ? 'w-14 min-w-14' : 'w-1/4 min-w-[320px] max-w-[400px]'}`}>
+        {!isRightCollapsed ? (
+          <div className="h-full p-5 flex flex-col gap-6 overflow-y-auto">
         
         {/* Scoreboard scorecard visual gauges */}
         <div>
           <h2 className="text-lg font-bold text-pink-400">Studio Insights</h2>
           <p className="text-xs text-slate-400">Layout scores and quality critiques</p>
         </div>
+
+        {runtimeMessages.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Runtime Console</div>
+            <div className="flex flex-col gap-2 max-h-40 overflow-y-auto pr-1">
+              {runtimeMessages.map((entry, index) => (
+                <div key={`${entry.message}-${index}`} className={`rounded-lg border px-2.5 py-2 text-xs ${entry.type === 'error' ? 'border-rose-500/30 bg-rose-500/10 text-rose-200' : entry.type === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-slate-700 bg-slate-900/70 text-slate-300'}`}>
+                  {entry.message}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {activeResult ? (
           <div className="flex flex-col gap-4">
@@ -771,6 +916,23 @@ export const ImageStudio: React.FC = () => {
             ))}
           </div>
         </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsRightCollapsed(false)}
+            className="absolute inset-0 flex h-full w-full items-center justify-center text-slate-400 hover:text-pink-400"
+            aria-label="Expand error console"
+          >
+            &lt;
+          </button>
+        )}
+        <button
+          onClick={() => setIsRightCollapsed((prev) => !prev)}
+          className="absolute left-2 top-4 rounded-full border border-slate-700 bg-slate-950/70 px-2 py-1 text-[10px] text-slate-400 hover:text-pink-400"
+          aria-label="Toggle error console"
+        >
+          {isRightCollapsed ? '>' : '<'}
+        </button>
       </div>
     </div>
   );

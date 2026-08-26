@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.core.config import settings
 from api.services.email_service import (
     _detect_smtp_provider,
     _html_to_text,
@@ -465,6 +466,9 @@ class TestAuthFlowEmails:
 
     def test_registration_sends_verification_email(self, monkeypatch):
         """Registration endpoint should call send_verification_email."""
+        # Run the register flow like production: users stay unverified so the
+        # verification email path is exercised (test env auto-verifies).
+        monkeypatch.setattr(settings, "ENVIRONMENT", "development")
         sent_emails = []
 
         def mock_send_verification(to_email, full_name, verify_url):
@@ -558,6 +562,7 @@ class TestAuthFlowEmails:
 
     def test_resend_verification_sends_email(self, monkeypatch):
         """Resend verification endpoint should call send_verification_email."""
+        monkeypatch.setattr(settings, "ENVIRONMENT", "development")
         sent = []
 
         def mock_send_verification(to_email, full_name, verify_url):
@@ -798,11 +803,12 @@ class TestNewLifecycleAndInvitationFlows:
         mock_req.headers.get.return_value = "Mozilla/5.0"
         return mock_req
 
-    def test_login_requires_verified_email(self, db_session):
+    async def test_login_requires_verified_email(self, db_session):
         """Test that login fails when the user is not verified."""
         import uuid
+        from urllib.parse import quote
         from fastapi import HTTPException
-        from fastapi.security import OAuth2PasswordRequestForm
+        from starlette.requests import Request as StarletteRequest
         from api.routes.auth import login
         from api.models.user import User
         from api.core.security import get_password_hash
@@ -819,14 +825,29 @@ class TestNewLifecycleAndInvitationFlows:
         db_session.add(user)
         db_session.commit()
 
-        # Simulate form request
-        form_data = OAuth2PasswordRequestForm(username=email, password=password, scope="", grant_type="password")
-        mock_request = self._make_mock_request()
+        body = f"username={quote(email)}&password={password}".encode()
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/login",
+            "scheme": "http",
+            "query_string": b"",
+            "headers": [
+                (b"content-type", b"application/x-www-form-urlencoded"),
+                (b"user-agent", b"Mozilla/5.0"),
+                (b"host", b"testserver"),
+            ],
+            "client": ("127.0.0.1", 50000),
+            "server": ("testserver", 80),
+            "root_path": "",
+        }
+        req = StarletteRequest(scope)
+        req._body = body
 
         try:
             import pytest
             with pytest.raises(HTTPException) as exc_info:
-                login(request=mock_request, db=db_session, form_data=form_data)
+                await login(request=req, db=db_session)
             assert exc_info.value.status_code == 400
             assert "Email not verified" in exc_info.value.detail
         finally:
@@ -913,13 +934,13 @@ class TestNewLifecycleAndInvitationFlows:
         from api.models.user import User
         from api.worker.celery_app import purge_deleted_accounts_task
 
-        # Create user scheduled for deletion in the past
+        orig_email = f"to_purge_{uuid.uuid4()}@example.com"
         past_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=8)
         user = User(
-            email=f"to_purge_{uuid.uuid4()}@example.com",
+            email=orig_email,
             full_name="Purge User",
             hashed_password="somepassword",
-            is_active=True,
+            is_active=False,
             is_verified=True,
             scheduled_deletion_at=past_time,
         )
@@ -945,10 +966,12 @@ class TestNewLifecycleAndInvitationFlows:
         assert res["success"] is True
         assert res["purged_count"] >= 1
 
-        # Check DB that the user is now soft deleted and inactive
+        # Check DB that the user is now purged: PII anonymized, deletion cleared
         db_session.refresh(user)
-        assert user.deleted_at is not None
+        assert user.email != orig_email
+        assert user.scheduled_deletion_at is None
         assert user.is_active is False
+        assert user.hashed_password is None
 
         # Clean up
         db_session.delete(user)
@@ -1133,12 +1156,12 @@ class TestNewSecurityAndOrgAlerts:
         orig_email = f"reuse_{uuid.uuid4()}@example.com"
         past_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - datetime.timedelta(days=8)
 
-        # Create user scheduled for deletion in the past
+        # Create user scheduled for deletion in the past (deletion deactivates the account)
         user = User(
             email=orig_email,
             full_name="Stale User",
             hashed_password="somepassword",
-            is_active=True,
+            is_active=False,
             is_verified=True,
             scheduled_deletion_at=past_time,
         )
@@ -1160,7 +1183,7 @@ class TestNewSecurityAndOrgAlerts:
 
         assert res["success"] is True
         db_session.refresh(user)
-        assert user.deleted_at is not None
+        assert user.scheduled_deletion_at is None
         assert user.email != orig_email  # verified it was renamed!
 
         # Try to register a new user using the original email address

@@ -195,19 +195,32 @@ def campaign_broadcast_task(self, campaign_id_str: str) -> Dict[str, Any]:
             .all()
         )
 
+        delivered = 0
         for contact in contacts:
-            notification_task.delay(
-                user_id_str=str(contact.id),
-                org_id_str=str(campaign.organization_id),
-                title=campaign.title,
-                body=f"Hello {contact.full_name}, check out our newsletter details.",
-                channel_str="EMAIL",
-                event_type="campaign_broadcast",
-            )
+            # Phase 19: campaign recipients are Contacts, not Users. Sending
+            # Contact.id as a user_id silently delivered nothing (the
+            # notification service looks up a User by that id). Deliver directly
+            # to each contact's email instead.
+            if not contact.email:
+                continue
+            try:
+                from api.services.email_service import _send_email
+                contact_name = f"{contact.first_name} {contact.last_name}".strip() or contact.email
+                _send_email(
+                    contact.email,
+                    campaign.title,
+                    f"Hello {contact_name}, check out our newsletter details.",
+                    template_name="campaign_broadcast",
+                )
+                delivered += 1
+            except Exception as exc:
+                self.logger.error(
+                    f"Failed to send campaign email to {contact.email}: {exc}"
+                )
 
         campaign.status = CampaignStatus.COMPLETED
         db.commit()
-        return {"success": True, "recipients_count": len(contacts)}
+        return {"success": True, "recipients_count": delivered}
 
 
 # Infrastructure Background Tasks
@@ -313,38 +326,18 @@ def quota_reset_worker_task(self) -> Dict[str, Any]:
 
 @celery_app.task(name="worker.tasks.purge_deleted_accounts_task", bind=True)
 def purge_deleted_accounts_task(self) -> Dict[str, Any]:
-    """Query users scheduled for deletion in the past, soft delete them, and send confirmation email."""
+    """
+    Permanently purge accounts past their scheduled deletion date.
+
+    Phase 12: delegates to the canonical purge implementation
+    (api.tasks.account_cleanup.run_account_cleanup) so that only one purge
+    path exists — no more divergent soft-delete behaviour between Celery and
+    the APScheduler job.
+    """
     task_id = self.request.id or str(uuid.uuid4())
     with track_task_execution("purge_deleted_accounts_task", task_id) as db:
-        from api.models.user import User
-        from api.services.email_service import send_account_permanently_deleted_email
-        
-        now = datetime.datetime.utcnow()
-        stale_users = (
-            db.query(User)
-            .filter(
-                User.scheduled_deletion_at.is_not(None),
-                User.scheduled_deletion_at <= now,
-                User.deleted_at.is_(None),
-            )
-            .all()
-        )
-        
-        count = 0
-        for u in stale_users:
-            orig_email = u.email
-            u.deleted_at = now
-            u.is_active = False
-            # Free up the unique email address constraint for new registrations
-            u.email = f"deleted_{uuid.uuid4()}_{orig_email}"
-            db.add(u)
-            try:
-                send_account_permanently_deleted_email(orig_email, u.full_name)
-            except Exception as e:
-                logger.error(f"Failed to send permanent deletion email for {orig_email}: {e}")
-            count += 1
-            
-        db.commit()
+        from api.tasks.account_cleanup import run_account_cleanup
+        count = run_account_cleanup(db)
         return {"success": True, "purged_count": count}
 
 

@@ -54,11 +54,11 @@ export function ProviderDetailsPage({ id }: ProviderDetailsPageProps) {
 
   // Filter provider details
   const provider = React.useMemo(() => {
-    return providers.find((p) => p.key.toLowerCase() === id.toLowerCase());
+    return (providers || []).find((p) => (p?.key || p?.name || '').toLowerCase() === (id || '').toLowerCase());
   }, [providers, id]);
 
   const providerModels = React.useMemo(() => {
-    return models.filter((m) => m.provider.toLowerCase() === id.toLowerCase());
+    return (models || []).filter((m) => (m?.provider || '').toLowerCase() === (id || '').toLowerCase());
   }, [models, id]);
 
   // Auto-refresh stats every 30 seconds
@@ -120,7 +120,7 @@ export function ProviderDetailsPage({ id }: ProviderDetailsPageProps) {
     );
   }
 
-  const meta = PROVIDER_META[id.toLowerCase()] || { label: id, description: '' };
+  const meta = (id ? PROVIDER_META[id.toLowerCase()] : null) || { label: id || 'Provider', description: '' };
 
   const columnsLogs: DataTableColumn<any>[] = [
     {

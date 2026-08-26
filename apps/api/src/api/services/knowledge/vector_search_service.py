@@ -6,6 +6,7 @@ Service Layer managing Dense & Hybrid Semantic Vector Search.
 
 import logging
 import uuid
+import asyncio
 from typing import Any, List, Optional
 
 from api.services.base import ServiceContext, ServiceResult
@@ -31,40 +32,60 @@ class VectorSearchService:
         self.authorizer = authorizer or container.authorizer
         self.dispatcher = dispatcher or container.dispatcher
 
-    async def search_vector_index(
+async def search_vector_index(
         self,
         ctx: ServiceContext,
         dto: VectorSearchQueryDTO,
     ) -> ServiceResult[List[VectorSearchResultDTO]]:
         try:
             results: List[VectorSearchResultDTO] = []
-            doc_id = uuid.uuid4()
+            org_uuid = ctx.get_org_id_uuid()
+            if not org_uuid:
+                return ServiceResult.fail(error="organization_id required", error_code="ORGANIZATION_REQUIRED")
 
-            for i in range(min(dto.top_k, 3)):
+            query_text = dto.query_text
+            if not query_text:
+                return ServiceResult.fail(error="query text required", error_code="QUERY_REQUIRED")
+
+            limit = dto.top_k or 5
+
+            async with self.uow_service:
+                # Run real pgvector search (P2-2) through the shared KnowledgeService.
+                from api.services.knowledge_service import KnowledgeService
+                chunks = await asyncio.to_thread(
+                    KnowledgeService.query_similar_chunks,
+                    self.uow_service.session,
+                    query_text,
+                    org_uuid,
+                    ctx.get_user_id_uuid(),
+                    limit,
+                )
+
+            for chunk in chunks:
                 results.append(
                     VectorSearchResultDTO(
-                        chunk_id=uuid.uuid4(),
-                        document_id=doc_id,
-                        score=0.92 - (i * 0.05),
-                        text_content=f"Matching knowledge snippet {i+1} for query: {dto.query_text}",
-                        metadata={"collection_id": str(dto.collection_id)},
+                        chunk_id=chunk.id,
+                        document_id=chunk.document_id,
+                        score=1.0,
+                        text_content=chunk.content,
+                        metadata=chunk.metadata_json or {},
                     )
                 )
 
             if self.dispatcher:
                 await self.dispatcher.publish(
                     VectorSearchExecuted(
-                        aggregate_id=str(dto.collection_id),
-                        tenant_id=ctx.get_org_id_str(),
+                        aggregate_id=str(org_uuid),
+                        tenant_id=str(org_uuid),
                         actor_id=ctx.get_user_id_str(),
                         correlation_id=ctx.correlation_id,
-                        collection_id=str(dto.collection_id),
-                        top_k=len(results),
+                        query_text=query_text,
+                        results_count=len(results),
+                        search_type="semantic",
                     )
                 )
-
             return ServiceResult.ok(data=results)
-
         except Exception as exc:
             logger.error(f"search_vector_index failed: {exc}", exc_info=True)
+            return ServiceResult.fail(error=str(exc), error_code="SEARCH_FAILED")
             return ServiceResult.from_exception(exc)

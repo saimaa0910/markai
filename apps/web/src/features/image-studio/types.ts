@@ -87,13 +87,19 @@ export interface ImageEvaluationMetrics {
 
 export interface ImageResponse {
   id: string;
+  status?: string;
   storage_url: string;
   provider: string;
   model: string;
   prompt: string;
-  compiled_prompt: string;
-  reflection: ImageReflectionResult;
-  evaluation: ImageEvaluationMetrics;
+  compiled_prompt?: string;
+  reflection?: ImageReflectionResult;
+  evaluation?: ImageEvaluationMetrics;
+  error?: {
+    code?: string;
+    message: string;
+    details?: Record<string, any>;
+  };
 }
 
 export interface ImageHistoryItem {

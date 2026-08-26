@@ -12,6 +12,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.core.deps import get_current_user
 from api.database.session import get_db
@@ -47,13 +48,11 @@ class RevokeSessionRequest(BaseModel):
 # ─── List Sessions ────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[SessionResponse])
-def list_sessions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_sessions(  # Sprint 8.3.1
     include_revoked: bool = False,
     request: Request = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """List all sessions for the current user."""
     query = db.query(UserSession).filter(UserSession.user_id == current_user.id)
     if not include_revoked:
@@ -83,13 +82,11 @@ def list_sessions(
 # ─── Get Session ──────────────────────────────────────────────────────────────
 
 @router.get("/{session_id}", response_model=SessionResponse)
-def get_session(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_session(  # Sprint 8.3.1
     session_id: uuid.UUID,
     request: Request = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Get a specific session by ID (must belong to current user)."""
     session = db.query(UserSession).filter(
         UserSession.id == session_id,
@@ -116,13 +113,11 @@ def get_session(
 # ─── Revoke Single Session ────────────────────────────────────────────────────
 
 @router.delete("/{session_id}", status_code=status.HTTP_200_OK)
-def revoke_session(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def revoke_session(  # Sprint 8.3.1
     session_id: uuid.UUID,
     body: RevokeSessionRequest = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Revoke a specific session (must belong to current user)."""
     session = db.query(UserSession).filter(
         UserSession.id == session_id,
@@ -151,13 +146,11 @@ def revoke_session(
 # ─── Revoke All Sessions ──────────────────────────────────────────────────────
 
 @router.delete("/", status_code=status.HTTP_200_OK)
-def revoke_all_sessions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def revoke_all_sessions(  # Sprint 8.3.1
     keep_current: bool = True,
     request: Request = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Revoke all sessions for the current user. Optionally keep the current session."""
     now = datetime.now(timezone.utc)
     current_session_id = _get_current_session_id(request) if keep_current else None
@@ -198,7 +191,6 @@ def _get_current_session_id(request: Optional[Request]) -> Optional[str]:
         return None
     from api.core.security import ALGORITHM
     from api.core.config import settings
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     from jose import jwt, JWTError
     try:
         auth = request.headers.get("Authorization", "")

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from sqlalchemy import ForeignKey, String, Boolean, Integer, Numeric, DateTime, Text, JSON
+from sqlalchemy import ForeignKey, String, Boolean, Integer, Numeric, DateTime, Text, JSON, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from api.database.base import Base
@@ -127,6 +127,18 @@ class TrustedDevice(Base):
     """
     __tablename__ = "trusted_devices"
     
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
+    
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="1",
+        comment="Optimistic locking counter",
+    )
+    
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -187,6 +199,18 @@ class MFARecoveryCode(Base):
     """
     __tablename__ = "mfa_recovery_codes"
     
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+    )
+    
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="1",
+        comment="Optimistic locking counter",
+    )
+    
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -206,12 +230,28 @@ class MFARecoveryCode(Base):
     )
 
 
+import uuid as _uuid
+
 class RateLimitLog(Base):
     """Rate Limit Log - Sprint 8.3.1 Phase 4
-    
+
     Tracks rate limit attempts and blocks for security monitoring and forensics.
     """
     __tablename__ = "rate_limit_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+        default=uuid.uuid4,
+    )
+    
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="1",
+        comment="Optimistic locking counter",
+    )
     
     endpoint: Mapped[str] = mapped_column(
         String(255), nullable=False, comment="API endpoint that was rate limited"

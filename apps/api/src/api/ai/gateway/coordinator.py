@@ -40,6 +40,124 @@ class AIGateway:
             "mistral": MistralProvider(),
             "ollama": OllamaProvider(),
         }
+        # Per-provider circuit breaker state (P2-7):
+        # provider -> {"failures": int, "open_until": float, "retry_after": float, "opened_at": float}
+        self._breaker = {}
+
+    # ── Circuit breaker (P2-7 & P3-1) ─────────────────────────────────────────
+    def _breaker_threshold(self) -> int:
+        return 5  # consecutive failures before opening the circuit
+
+    def _breaker_cooldown(self, retry_after: Optional[float] = None) -> float:
+        return (retry_after or 60.0) + 5.0
+
+    def _breaker_is_open(self, provider: str) -> Optional[float]:
+        """Return seconds remaining until circuit closes, or None if closed."""
+        from api.core.metrics_registry import (
+            ai_provider_circuit_breaker_state,
+            ai_provider_circuit_breaker_open_time_seconds,
+            ai_provider_circuit_breaker_transitions_total
+        )
+        prov_key = provider.lower()
+        state = self._breaker.get(prov_key)
+        if not state:
+            try:
+                ai_provider_circuit_breaker_state.labels(provider=prov_key).set(0)
+                ai_provider_circuit_breaker_open_time_seconds.labels(provider=prov_key).set(0)
+            except Exception:
+                pass
+            return None
+
+        now = time.time()
+        open_until = state.get("open_until", 0)
+        if open_until == 0:
+            return None
+
+        if open_until > now:
+            try:
+                ai_provider_circuit_breaker_state.labels(provider=prov_key).set(2)
+                opened_at = state.get("opened_at", now)
+                ai_provider_circuit_breaker_open_time_seconds.labels(provider=prov_key).set(max(0.0, now - opened_at))
+            except Exception:
+                pass
+            return open_until - now
+
+        # Cooldown elapsed: reset and transition to closed
+        self._breaker.pop(prov_key, None)
+        try:
+            ai_provider_circuit_breaker_state.labels(provider=prov_key).set(0)
+            ai_provider_circuit_breaker_open_time_seconds.labels(provider=prov_key).set(0)
+            ai_provider_circuit_breaker_transitions_total.labels(provider=prov_key, from_state="open", to_state="closed").inc()
+        except Exception:
+            pass
+        return None
+
+    def _breaker_record_failure(self, provider: str, retry_after: Optional[float] = None) -> None:
+        from api.core.metrics_registry import (
+            ai_provider_circuit_breaker_failures_total,
+            ai_provider_circuit_breaker_state,
+            ai_provider_circuit_breaker_transitions_total
+        )
+        prov_key = provider.lower()
+        try:
+            ai_provider_circuit_breaker_failures_total.labels(provider=prov_key).inc()
+        except Exception:
+            pass
+
+        state = self._breaker.setdefault(prov_key, {"failures": 0, "open_until": 0, "retry_after": 0, "opened_at": 0})
+        state["failures"] += 1
+        if retry_after is not None:
+            state["retry_after"] = float(retry_after)
+        if state["failures"] >= self._breaker_threshold():
+            now = time.time()
+            state["opened_at"] = now
+            state["open_until"] = now + self._breaker_cooldown(
+                state.get("retry_after") or retry_after
+            )
+            try:
+                ai_provider_circuit_breaker_state.labels(provider=prov_key).set(2)
+                ai_provider_circuit_breaker_transitions_total.labels(provider=prov_key, from_state="closed", to_state="open").inc()
+            except Exception:
+                pass
+            logger.warning(f"Circuit breaker opened for provider '{provider}' after "
+                           f"{state['failures']} consecutive failures.")
+
+    def _breaker_record_success(self, provider: str) -> None:
+        from api.core.metrics_registry import (
+            ai_provider_circuit_breaker_state,
+            ai_provider_circuit_breaker_open_time_seconds,
+            ai_provider_circuit_breaker_transitions_total
+        )
+        prov_key = provider.lower()
+        if prov_key in self._breaker:
+            self._breaker.pop(prov_key, None)
+            try:
+                ai_provider_circuit_breaker_state.labels(provider=prov_key).set(0)
+                ai_provider_circuit_breaker_open_time_seconds.labels(provider=prov_key).set(0)
+                ai_provider_circuit_breaker_transitions_total.labels(provider=prov_key, from_state="open", to_state="closed").inc()
+            except Exception:
+                pass
+        else:
+            try:
+                ai_provider_circuit_breaker_state.labels(provider=prov_key).set(0)
+                ai_provider_circuit_breaker_open_time_seconds.labels(provider=prov_key).set(0)
+            except Exception:
+                pass
+
+    def _extract_retry_after(self, exc: Exception) -> Optional[float]:
+        """Parse Retry-After from a provider 429 HTTPStatusError."""
+        resp = getattr(exc, "response", None)
+        if resp is None:
+            return None
+        if getattr(resp, "status_code", None) != 429:
+            return None
+        ra = resp.headers.get("Retry-After") if resp.headers else None
+        if not ra:
+            return None
+        try:
+            return float(ra)
+        except (TypeError, ValueError):
+            return None
 
     def _get_provider_adapter(
         self, db: Session, provider_name: str, organization_id: uuid.UUID, user_id: Optional[uuid.UUID] = None
@@ -58,20 +176,23 @@ class AIGateway:
         ).first()
 
         db_key = None
-        # 1. User-level credentials check
+        # 1. User-level credentials check — only the owning user may read their own key
         if user_id:
+            from api.models.iam import OAuthAccount  # just to ensure import context
             db_key = db.scalars(
                 select(AIProviderKey)
                 .join(AIProvider)
                 .where(
                     func.lower(AIProvider.name) == prov_name_lower,
                     AIProviderKey.user_id == user_id,
-                    AIProviderKey.is_active == True
+                    AIProviderKey.is_active == True,
+                    # Ensure the caller is the same user who owns the key
+                    AIProviderKey.user_id == user_id,
                 )
             ).first()
 
         # 2. Org-level credentials check
-        if not db_key:
+        if not db_key and organization_id:
             db_key = db.scalars(
                 select(AIProviderKey)
                 .join(AIProvider)
@@ -79,7 +200,7 @@ class AIGateway:
                     func.lower(AIProvider.name) == prov_name_lower,
                     AIProviderKey.organization_id == organization_id,
                     AIProviderKey.user_id == None,
-                    AIProviderKey.is_active == True
+                    AIProviderKey.is_active == True,
                 )
             ).first()
 
@@ -89,6 +210,11 @@ class AIGateway:
                 decrypted_key = decrypt_key(db_key.api_key)
             except Exception:
                 pass
+        elif db_prov and db_prov.config and db_prov.config.get("api_key"):
+            try:
+                decrypted_key = decrypt_key(db_prov.config["api_key"])
+            except Exception:
+                decrypted_key = db_prov.config.get("api_key")
 
         # Adapter class mapping
         from api.ai.providers.openai import OpenAIProvider
@@ -111,7 +237,9 @@ class AIGateway:
             "ollama": OllamaProvider,
         }
 
-        adapter_cls = adapters.get(prov_name_lower, GroqProvider)
+        adapter_cls = adapters.get(prov_name_lower)
+        if not adapter_cls:
+            raise ValueError(f"Unknown or unsupported AI provider: '{provider_name}'")
         base_url = db_prov.base_url if db_prov else None
 
         env_key_names = {
@@ -165,11 +293,27 @@ class AIGateway:
         latency_ms: int,
         status: str,
         error_message: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> None:
         """
         Write execution metrics log audit to database usage table.
         Also triggers structured JSON logging, trace collection, and Prometheus reporting.
+
+        Idempotency (P2-4): when a request_id is provided, an existing success/failure
+        record for the same request_id is not duplicated, preventing double-charge on
+        retries and fallback paths.
         """
+        if request_id:
+            existing_usage = db.scalars(
+                select(AITokenUsage).where(
+                    AITokenUsage.request_id == request_id,
+                    AITokenUsage.status == status,
+                )
+            ).first()
+            if existing_usage:
+                logger.debug(f"Duplicate usage record skipped for request_id={request_id}")
+                return
+
         usage_old = AITokenUsage(
             organization_id=organization_id,
             user_id=user_id,
@@ -182,6 +326,7 @@ class AIGateway:
             latency_ms=latency_ms,
             status=status,
             error_message=error_message,
+            request_id=request_id,
         )
         db.add(usage_old)
 
@@ -550,12 +695,15 @@ class AIGateway:
         user_id: uuid.UUID,
         temperature: float = 0.7,
         rag_enabled: bool = False,
+        request_id: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """
         Orchestrate chat execution with automated routing, retry, and failover.
         """
         self._check_and_seed_limit(db, organization_id)
+        if not request_id:
+            request_id = str(uuid.uuid4())
         
         # 1. AI Security Pipeline Validation (Input Scanner)
         sec_pipeline = AISecurityPipeline()
@@ -666,6 +814,12 @@ class AIGateway:
             for attempt in range(max_retries):
                 start_time = time.perf_counter()
                 try:
+                    open_after = self._breaker_is_open(provider_name)
+                    if open_after is not None:
+                        raise RuntimeError(
+                            f"Provider '{provider_name}' circuit breaker open for {open_after:.0f}s"
+                        )
+
                     self._validate_request(db, organization_id, user_id, model_meta)
                     adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                     if not adapter:
@@ -714,6 +868,8 @@ class AIGateway:
                     except Exception:
                         pass
 
+                    self._breaker_record_success(provider_name)
+
                     self._log_usage(
                         db=db,
                         organization_id=organization_id,
@@ -725,6 +881,7 @@ class AIGateway:
                         cost_usd=cost,
                         latency_ms=latency_ms,
                         status="success",
+                        request_id=request_id,
                     )
 
                     self._log_routing(
@@ -769,7 +926,9 @@ class AIGateway:
                 except Exception as e:
                     last_error = e
                     retry_count += 1
-                    time.sleep((2 ** attempt) * 0.1)
+                    retry_after = self._extract_retry_after(e)
+                    self._breaker_record_failure(provider_name, retry_after)
+                    time.sleep((2 ** attempt) * 0.1 + (retry_after or 0))
 
             try:
                 cache.set("blacklist", f"model:{model_meta.model_name}", "failed", ttl=300)
@@ -790,6 +949,7 @@ class AIGateway:
                 latency_ms=0,
                 status="failure",
                 error_message=str(last_error),
+                request_id=request_id,
             )
 
             if idx < len(candidates) - 1:
@@ -823,17 +983,11 @@ class AIGateway:
             error_message=str(last_error)
         )
         from api.core.config import settings
-        if settings.ENVIRONMENT != "production" and last_error is None:
-            logger.warning("AI Gateway provider execution fallback. Returning structured answer.")
-            return {
-                "content": "Sample AI response generated by Enterprise AI Gateway pipeline for prompt execution.",
-                "prompt_tokens": 40,
-                "completion_tokens": 20,
-                "model": candidates[0].model_name if candidates else "gateway-default",
-                "provider": candidates[0].provider if candidates else "system",
-            }
-
-        raise RuntimeError(f"AI Gateway failed to execute chat requests: {str(last_error)}")
+        _ = settings  # environment no longer gates a fabricated fallback (P1-1/P2-1)
+        err_str = str(last_error) if last_error else "Unknown error occurred"
+        if ("image" in err_str.lower() or "vision" in err_str.lower()) and ("support" in err_str.lower() or "unsupported" in err_str.lower()):
+            err_str = "The selected model does not support image input. Please select a vision-capable model (e.g. GPT-4o, Claude 3.5 Sonnet) or use text-only mode."
+        raise RuntimeError(f"AI Gateway failed to execute chat requests: {err_str}")
 
     def generate(
         self,
@@ -897,12 +1051,15 @@ class AIGateway:
         organization_id: uuid.UUID,
         user_id: uuid.UUID,
         temperature: float = 0.7,
+        request_id: Optional[str] = None,
         **kwargs,
     ) -> Generator[Dict[str, Any], None, None]:
         """
         Execute streaming chat completion yielding chunk dictionaries.
         """
         self._check_and_seed_limit(db, organization_id)
+        if not request_id:
+            request_id = str(uuid.uuid4())
         
         sec_pipeline = AISecurityPipeline()
         user_contents = [m["content"] for m in messages if m["role"] == "user"]
@@ -981,6 +1138,12 @@ class AIGateway:
             for attempt in range(max_retries):
                 start_time = time.perf_counter()
                 try:
+                    open_after = self._breaker_is_open(provider_name)
+                    if open_after is not None:
+                        raise RuntimeError(
+                            f"Provider '{provider_name}' circuit breaker open for {open_after:.0f}s"
+                        )
+
                     self._validate_request(db, organization_id, user_id, model_meta)
                     adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                     if not adapter:
@@ -994,7 +1157,11 @@ class AIGateway:
                     )
 
                     content_accum = []
+                    usage = {"prompt_tokens": 0, "completion_tokens": 0}
                     for chunk in generator_chunks:
+                        if chunk.get("done"):
+                            usage = chunk.get("usage") or usage
+                            continue
                         if "content" in chunk:
                             content_accum.append(chunk["content"])
                         yield chunk
@@ -1013,8 +1180,9 @@ class AIGateway:
                     if not sec_out_report["allowed"]:
                         raise RuntimeError("Response blocked by AI Security Pipeline output checks.")
 
-                    prompt_tokens = len(messages[-1]["content"].split()) if messages else 10
-                    completion_tokens = len(full_content.split())
+                    # Real token accounting from provider usage payload (P2-4)
+                    prompt_tokens = usage.get("prompt_tokens") or len(messages[-1]["content"].split()) if messages else 0
+                    completion_tokens = usage.get("completion_tokens") or len(full_content.split())
                     cost = self._calculate_cost(
                         prompt_tokens,
                         completion_tokens,
@@ -1030,6 +1198,8 @@ class AIGateway:
                     except Exception:
                         pass
 
+                    self._breaker_record_success(provider_name)
+
                     self._log_usage(
                         db=db,
                         organization_id=organization_id,
@@ -1041,6 +1211,7 @@ class AIGateway:
                         cost_usd=cost,
                         latency_ms=latency_ms,
                         status="success",
+                        request_id=request_id,
                     )
 
                     self._log_routing(
@@ -1064,7 +1235,9 @@ class AIGateway:
                 except Exception as e:
                     last_error = e
                     retry_count += 1
-                    time.sleep((2 ** attempt) * 0.1)
+                    retry_after = self._extract_retry_after(e)
+                    self._breaker_record_failure(provider_name, retry_after)
+                    time.sleep((2 ** attempt) * 0.1 + (retry_after or 0))
 
             try:
                 cache.set("blacklist", f"model:{model_meta.model_name}", "failed", ttl=300)
@@ -1085,6 +1258,7 @@ class AIGateway:
                 latency_ms=0,
                 status="failure",
                 error_message=str(last_error),
+                request_id=request_id,
             )
 
             if idx < len(candidates) - 1:
@@ -1101,15 +1275,7 @@ class AIGateway:
                 )
 
         from api.core.config import settings
-        if settings.ENVIRONMENT != "production" and last_error is None:
-            logger.warning("AI Gateway streaming execution fallback. Yielding structured tokens stream.")
-            yield {
-                "content": "Sample streaming response generated by Enterprise AI Gateway pipeline.",
-                "prompt_tokens": 10,
-                "completion_tokens": 10,
-            }
-            return
-
+        _ = settings  # environment no longer gates a fabricated fallback (P1-1/P2-1)
         raise RuntimeError(f"AI Gateway streaming failed: {str(last_error)}")
 
     def embeddings(
@@ -1118,9 +1284,12 @@ class AIGateway:
         text: str,
         organization_id: uuid.UUID,
         user_id: uuid.UUID,
+        request_id: Optional[str] = None,
         **kwargs,
     ) -> List[float]:
         self._check_and_seed_limit(db, organization_id)
+        if not request_id:
+            request_id = str(uuid.uuid4())
         
         sec_pipeline = AISecurityPipeline()
         sec_report = sec_pipeline.validate_input(
@@ -1163,6 +1332,12 @@ class AIGateway:
 
             start_time = time.perf_counter()
             try:
+                open_after = self._breaker_is_open(provider_name)
+                if open_after is not None:
+                    raise RuntimeError(
+                        f"Provider '{provider_name}' circuit breaker open for {open_after:.0f}s"
+                    )
+
                 self._validate_request(db, organization_id, user_id, model_meta)
                 adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                 if not adapter:
@@ -1176,6 +1351,8 @@ class AIGateway:
                 self._update_credit_usage(db, organization_id, cost)
                 sec_pipeline.update_quota_tokens(db, organization_id, user_id, len(text.split()), cost)
 
+                self._breaker_record_success(provider_name)
+
                 self._log_usage(
                     db=db,
                     organization_id=organization_id,
@@ -1187,6 +1364,7 @@ class AIGateway:
                     cost_usd=cost,
                     latency_ms=latency_ms,
                     status="success",
+                    request_id=request_id,
                 )
                 self._log_routing(
                     db=db,
@@ -1208,6 +1386,8 @@ class AIGateway:
             except Exception as e:
                 last_error = e
                 retry_count += 1
+                retry_after = self._extract_retry_after(e)
+                self._breaker_record_failure(provider_name, retry_after)
                 try:
                     cache.set("blacklist", f"model:{model_meta.model_name}", "failed", ttl=300)
                 except Exception:
@@ -1234,9 +1414,12 @@ class AIGateway:
         image_url: str,
         organization_id: uuid.UUID,
         user_id: uuid.UUID,
+        request_id: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         self._check_and_seed_limit(db, organization_id)
+        if not request_id:
+            request_id = str(uuid.uuid4())
         
         sec_pipeline = AISecurityPipeline()
         sec_report = sec_pipeline.validate_input(
@@ -1279,6 +1462,12 @@ class AIGateway:
 
             start_time = time.perf_counter()
             try:
+                open_after = self._breaker_is_open(provider_name)
+                if open_after is not None:
+                    raise RuntimeError(
+                        f"Provider '{provider_name}' circuit breaker open for {open_after:.0f}s"
+                    )
+
                 self._validate_request(db, organization_id, user_id, model_meta)
                 adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                 if not adapter:
@@ -1307,6 +1496,8 @@ class AIGateway:
                 self._update_credit_usage(db, organization_id, cost)
                 sec_pipeline.update_quota_tokens(db, organization_id, user_id, 200, cost)
 
+                self._breaker_record_success(provider_name)
+
                 self._log_usage(
                     db=db,
                     organization_id=organization_id,
@@ -1318,6 +1509,7 @@ class AIGateway:
                     cost_usd=cost,
                     latency_ms=latency_ms,
                     status="success",
+                    request_id=request_id,
                 )
                 self._log_routing(
                     db=db,
@@ -1339,6 +1531,8 @@ class AIGateway:
             except Exception as e:
                 last_error = e
                 retry_count += 1
+                retry_after = self._extract_retry_after(e)
+                self._breaker_record_failure(provider_name, retry_after)
                 try:
                     cache.set("blacklist", f"model:{model_meta.model_name}", "failed", ttl=300)
                 except Exception:
@@ -1365,9 +1559,12 @@ class AIGateway:
         schema: Dict[str, Any],
         organization_id: uuid.UUID,
         user_id: uuid.UUID,
+        request_id: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         self._check_and_seed_limit(db, organization_id)
+        if not request_id:
+            request_id = str(uuid.uuid4())
         
         sec_pipeline = AISecurityPipeline()
         user_contents = [m["content"] for m in messages if m["role"] == "user"]
@@ -1416,6 +1613,12 @@ class AIGateway:
 
             start_time = time.perf_counter()
             try:
+                open_after = self._breaker_is_open(provider_name)
+                if open_after is not None:
+                    raise RuntimeError(
+                        f"Provider '{provider_name}' circuit breaker open for {open_after:.0f}s"
+                    )
+
                 self._validate_request(db, organization_id, user_id, model_meta)
                 adapter = self._get_provider_adapter(db, provider_name, organization_id, user_id=user_id)
                 if not adapter:
@@ -1441,6 +1644,8 @@ class AIGateway:
                 self._update_credit_usage(db, organization_id, cost)
                 sec_pipeline.update_quota_tokens(db, organization_id, user_id, 100, cost)
 
+                self._breaker_record_success(provider_name)
+
                 self._log_usage(
                     db=db,
                     organization_id=organization_id,
@@ -1452,6 +1657,7 @@ class AIGateway:
                     cost_usd=cost,
                     latency_ms=latency_ms,
                     status="success",
+                    request_id=request_id,
                 )
                 self._log_routing(
                     db=db,
@@ -1473,6 +1679,8 @@ class AIGateway:
             except Exception as e:
                 last_error = e
                 retry_count += 1
+                retry_after = self._extract_retry_after(e)
+                self._breaker_record_failure(provider_name, retry_after)
                 try:
                     cache.set("blacklist", f"model:{model_meta.model_name}", "failed", ttl=300)
                 except Exception:

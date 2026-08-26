@@ -14,11 +14,12 @@ from api.models.membership import OrganizationInvitation, UserOrganization, User
 from api.models.organization import Organization
 from api.models.user import User
 from api.routes.auth import log_audit
-from api.schemas.organization import OrganizationCreate, OrganizationResponse, OrganizationMemberResponse
+from api.schemas.organization import OrganizationCreate, OrganizationUpdate, OrganizationResponse, OrganizationMemberResponse
 
 from api.services.base import ServiceContext
 from api.services.core import OrganizationService, CreateOrganizationDTO, get_organization_service
 from api.services.email_service import send_invitation_email
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -33,11 +34,10 @@ def slugify(text: str) -> str:
     "/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_organization(
-    org_in: OrganizationCreate,
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1: Auth enforcement
+    org_in: OrganizationCreate,  # Sprint 8.3.1: Auth enforcement
     current_user: User = Depends(get_current_user),
     org_service: OrganizationService = Depends(get_organization_service),
-) -> Any:
+    _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Create a new organization using OrganizationService.
     """
@@ -135,15 +135,19 @@ class InviteMemberRequest(BaseModel):
     temporary_password: Optional[str] = None
 
 
+class MemberRoleUpdate(BaseModel):
+    role: UserRole
+
+
 @router.patch("/{organization_id}", response_model=OrganizationResponse)
 def update_organization(
     organization_id: uuid.UUID,
-    name: str,
+    org_in: OrganizationUpdate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(owner_admin_checker),
 ) -> Any:
     """
-    Update organization name. Only OWNER or ADMIN.
+    Update organization name/slug. Only OWNER or ADMIN.
     """
     org = db.query(Organization).filter(Organization.id == organization_id).first()
     if not org:
@@ -151,8 +155,20 @@ def update_organization(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found",
         )
-    
-    org.name = name
+
+    if org_in.name is not None:
+        org.name = org_in.name
+    if org_in.slug is not None:
+        existing_slug = db.query(Organization).filter(
+            Organization.slug == org_in.slug, Organization.id != organization_id
+        ).first()
+        if existing_slug:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Organization slug already in use",
+            )
+        org.slug = org_in.slug
+
     db.commit()
     db.refresh(org)
     return org
@@ -198,13 +214,14 @@ def delete_organization(
 def update_member_role(
     organization_id: uuid.UUID,
     user_id: uuid.UUID,
-    role: UserRole,
+    body: MemberRoleUpdate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(owner_admin_checker),
 ) -> Any:
     """
     Update member role in the organization. Only OWNER or ADMIN.
     """
+    role = body.role
     target_membership = (
         db.query(UserOrganization)
         .filter(
@@ -343,7 +360,15 @@ def invite_member(
             hashed_password=hashed_password,
             full_name="Invited User",
             is_active=True,
+            # Temp-password invitees are intentionally left unverified; they
+            # sign in once with the temporary password (see login flow).
             is_verified=False,
+            # Phase 5: store temp-password state in the EXPLICIT columns that
+            # the enforcement middleware reads (metadata_json kept for the
+            # frontend, which still reads it).
+            change_password_required=True,
+            temporary_password=hashed_password,
+            temporary_password_expires_at=datetime.now(timezone.utc) + timedelta(hours=72),
             metadata_json={"is_temporary_password": True, "change_password_required": True}
         )
         db.add(user)

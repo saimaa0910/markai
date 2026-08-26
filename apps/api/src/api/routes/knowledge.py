@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import shutil
 import datetime
@@ -9,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from api.services.storage_service import MinIOService
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_, desc, func, text
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.database.session import get_db
 from api.core.deps import RoleChecker, get_current_user
@@ -66,13 +68,11 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/collections", response_model=CollectionResponse, status_code=status.HTTP_201_CREATED)
-def create_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_collection(  # Sprint 8.3.1
     col_in: CollectionCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     col = KnowledgeCollection(
         name=col_in.name,
         description=col_in.description,
@@ -89,11 +89,9 @@ def create_collection(
 
 
 @router.get("/collections", response_model=List[CollectionResponse])
-def list_collections(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_collections(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return (
         db.query(KnowledgeCollection)
         .filter(
@@ -106,12 +104,10 @@ def list_collections(
 
 
 @router.get("/collections/{collection_id}", response_model=CollectionResponse)
-def get_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_collection(  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     col = (
         db.query(KnowledgeCollection)
         .filter(
@@ -127,14 +123,12 @@ def get_collection(
 
 
 @router.patch("/collections/{collection_id}", response_model=CollectionResponse)
-def update_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_collection(  # Sprint 8.3.1
     collection_id: uuid.UUID,
     col_in: CollectionUpdate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     col = (
         db.query(KnowledgeCollection)
         .filter(
@@ -157,12 +151,10 @@ def update_collection(
 
 
 @router.delete("/collections/{collection_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_collection(  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     col = (
         db.query(KnowledgeCollection)
         .filter(
@@ -179,12 +171,10 @@ def delete_collection(
 
 
 @router.post("/collections/{collection_id}/archive", response_model=CollectionResponse)
-def archive_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def archive_collection(  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     col = db.query(KnowledgeCollection).filter(KnowledgeCollection.id == collection_id).first()
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -195,12 +185,10 @@ def archive_collection(
 
 
 @router.post("/collections/{collection_id}/favorite", response_model=CollectionResponse)
-def favorite_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def favorite_collection(  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     col = db.query(KnowledgeCollection).filter(KnowledgeCollection.id == collection_id).first()
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -211,12 +199,10 @@ def favorite_collection(
 
 
 @router.post("/collections/{collection_id}/pin", response_model=CollectionResponse)
-def pin_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def pin_collection(  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     col = db.query(KnowledgeCollection).filter(KnowledgeCollection.id == collection_id).first()
     if not col:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -230,13 +216,11 @@ def pin_collection(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/folders", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
-def create_folder(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_folder(  # Sprint 8.3.1
     folder_in: FolderCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     fld = KnowledgeFolder(
         name=folder_in.name,
         collection_id=folder_in.collection_id,
@@ -252,11 +236,9 @@ def create_folder(
 
 
 @router.get("/folders", response_model=List[FolderResponse])
-def list_folders(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_folders(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return (
         db.query(KnowledgeFolder)
         .filter(
@@ -268,14 +250,12 @@ def list_folders(
 
 
 @router.patch("/folders/{folder_id}", response_model=FolderResponse)
-def update_folder(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_folder(  # Sprint 8.3.1
     folder_id: uuid.UUID,
     fld_in: FolderUpdate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     fld = (
         db.query(KnowledgeFolder)
         .filter(
@@ -298,12 +278,10 @@ def update_folder(
 
 
 @router.delete("/folders/{folder_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_folder(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_folder(  # Sprint 8.3.1
     folder_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     fld = (
         db.query(KnowledgeFolder)
         .filter(
@@ -323,11 +301,9 @@ def delete_folder(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/documents", response_model=List[KnowledgeDocumentResponse])
-def list_documents(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_documents(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return (
         db.query(KnowledgeDocument)
         .filter(
@@ -339,12 +315,10 @@ def list_documents(
 
 
 @router.get("/documents/{document_id}", response_model=KnowledgeDocumentResponse)
-def get_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = (
         db.query(KnowledgeDocument)
         .filter(
@@ -360,14 +334,12 @@ def get_document(
 
 
 @router.patch("/documents/{document_id}", response_model=KnowledgeDocumentResponse)
-def update_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     doc_in: KnowledgeDocumentUpdate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = (
         db.query(KnowledgeDocument)
         .filter(
@@ -390,12 +362,10 @@ def update_document(
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     doc = (
         db.query(KnowledgeDocument)
         .filter(
@@ -412,12 +382,10 @@ def delete_document(
 
 
 @router.post("/documents/{document_id}/archive", response_model=KnowledgeDocumentResponse)
-def archive_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def archive_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -428,12 +396,10 @@ def archive_document(
 
 
 @router.post("/documents/{document_id}/favorite", response_model=KnowledgeDocumentResponse)
-def favorite_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def favorite_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -444,12 +410,10 @@ def favorite_document(
 
 
 @router.post("/documents/{document_id}/pin", response_model=KnowledgeDocumentResponse)
-def pin_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def pin_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -460,13 +424,11 @@ def pin_document(
 
 
 @router.post("/documents/{document_id}/duplicate", response_model=KnowledgeDocumentResponse)
-def duplicate_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def duplicate_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(KnowledgeDocument.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -506,8 +468,7 @@ def duplicate_document(
 
 
 @router.post("/upload", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_202_ACCEPTED)
-def upload_and_index_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def upload_and_index_document(  # Sprint 8.3.1
     file: UploadFile = File(...),
     collection_id: Optional[uuid.UUID] = Form(None),
     folder_id: Optional[uuid.UUID] = Form(None),
@@ -517,15 +478,19 @@ def upload_and_index_document(
     embedding_model: str = Form("text-embedding-3-small"),
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Standard upload and vector indexing route. Saves locally and triggers background task.
     """
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     doc_id = uuid.uuid4()
+    ALLOWED_EXTENSIONS = {"txt", "pdf", "csv", "json", "md", "py", "html"}
     filename = file.filename or "untitled.txt"
     ext = filename.split(".")[-1] if "." in filename else "TXT"
+    # Sanitize: keep only alphanumeric chars; fallback to txt if not allowed
+    ext = re.sub(r"[^a-zA-Z0-9]", "", ext).lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        ext = "txt"
     local_filename = f"{doc_id}.{ext}"
     file_path = os.path.join(UPLOAD_DIR, local_filename)
 
@@ -606,8 +571,7 @@ def upload_and_index_document(
 
 
 @router.post("/bulk-upload", status_code=status.HTTP_202_ACCEPTED)
-def bulk_upload_documents(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def bulk_upload_documents(  # Sprint 8.3.1
     files: List[UploadFile] = File(...),
     collection_id: Optional[uuid.UUID] = Form(None),
     folder_id: Optional[uuid.UUID] = Form(None),
@@ -617,8 +581,7 @@ def bulk_upload_documents(
     embedding_model: str = Form("text-embedding-3-small"),
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     jobs = []
     for file in files:
         doc = upload_and_index_document(
@@ -641,11 +604,9 @@ def bulk_upload_documents(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/queue", response_model=List[ProcessingJobResponse])
-def list_processing_queue(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_processing_queue(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return (
         db.query(KnowledgeProcessingJob)
         .filter(KnowledgeProcessingJob.organization_id == membership.organization_id)
@@ -655,12 +616,10 @@ def list_processing_queue(
 
 
 @router.post("/queue/{job_id}/cancel", status_code=status.HTTP_200_OK)
-def cancel_processing_job(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def cancel_processing_job(  # Sprint 8.3.1
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     job = (
         db.query(KnowledgeProcessingJob)
         .filter(
@@ -688,13 +647,11 @@ def cancel_processing_job(
 
 
 @router.post("/queue/{job_id}/retry", status_code=status.HTTP_200_OK)
-def retry_processing_job(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def retry_processing_job(  # Sprint 8.3.1
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     job = (
         db.query(KnowledgeProcessingJob)
         .filter(
@@ -735,12 +692,10 @@ def retry_processing_job(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/documents/{document_id}/versions", response_model=List[DocumentVersionResponse])
-def get_document_versions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_document_versions(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id
@@ -752,12 +707,10 @@ def get_document_versions(
 
 @router.get("/documents/{document_id}/content")
 @router.get("/documents/{document_id}/preview")
-def get_document_content_and_preview(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_document_content_and_preview(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id
@@ -803,13 +756,11 @@ def get_document_content_and_preview(
 
 
 @router.post("/documents/{document_id}/versions/{version}/restore", response_model=KnowledgeDocumentResponse)
-def restore_document_version(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def restore_document_version(  # Sprint 8.3.1
     document_id: uuid.UUID,
     version: int,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id
@@ -868,14 +819,12 @@ def restore_document_version(
 
 
 @router.get("/documents/{document_id}/versions/compare", response_model=VersionCompareResponse)
-def compare_document_versions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def compare_document_versions(  # Sprint 8.3.1
     document_id: uuid.UUID,
     version_a: int,
     version_b: int,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     ver_a = db.query(KnowledgeDocumentVersion).filter(
         KnowledgeDocumentVersion.document_id == document_id,
         KnowledgeDocumentVersion.version == version_a
@@ -907,13 +856,11 @@ def compare_document_versions(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/search", response_model=List[SearchResultItem])
-def search_vector_base(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def search_vector_base(  # Sprint 8.3.1
     req: KnowledgeSearchRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     # 1. Embed query
     gateway = AIGateway()
     query_embedding = gateway.embeddings(db, req.query_text, membership.organization_id, current_user.id)
@@ -952,13 +899,11 @@ def search_vector_base(
 
 
 @router.post("/rag", response_model=RAGQueryResponse)
-def execute_rag_pipeline(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def execute_rag_pipeline(  # Sprint 8.3.1
     req: RAGQueryRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     RAG endpoint resolving enterprise cognitive answers.
     """
@@ -980,12 +925,10 @@ def execute_rag_pipeline(
 
 
 @router.get("/search/history", response_model=List[SearchHistoryResponse])
-def get_search_history(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_search_history(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return (
         db.query(KnowledgeSearchHistory)
         .filter(
@@ -999,13 +942,11 @@ def get_search_history(
 
 
 @router.post("/search/saved", response_model=SavedSearchResponse)
-def save_search_query(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def save_search_query(  # Sprint 8.3.1
     req: SavedSearchCreate,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     saved = KnowledgeSavedSearch(
         name=req.name,
         query_text=req.query_text,
@@ -1021,12 +962,10 @@ def save_search_query(
 
 
 @router.get("/search/saved", response_model=List[SavedSearchResponse])
-def list_saved_searches(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_saved_searches(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return (
         db.query(KnowledgeSavedSearch)
         .filter(
@@ -1041,11 +980,9 @@ def list_saved_searches(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/dashboard/stats", response_model=KnowledgeDashboardResponse)
-def get_dashboard_summary(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_dashboard_summary(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     org_id = membership.organization_id
     
     doc_count = db.query(KnowledgeDocument).filter(KnowledgeDocument.organization_id == org_id, KnowledgeDocument.deleted_at.is_(None)).count()
@@ -1114,13 +1051,11 @@ def get_dashboard_summary(
 
 
 @router.post("/", response_model=KnowledgeDocumentResponse, status_code=status.HTTP_201_CREATED)
-def upload_document_legacy(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def upload_document_legacy(  # Sprint 8.3.1
     doc_in: Any = Body(...), # Use generic to avoid import compile order issues, parsed dynamically
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     # Resolve import dynamically
     from api.schemas.ai import KnowledgeUploadRequest
     from pydantic import ValidationError
@@ -1190,13 +1125,11 @@ def upload_document_legacy(
 
 
 @router.post("/query", response_model=Any)
-def query_similar_chunks_legacy(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def query_similar_chunks_legacy(  # Sprint 8.3.1
     query_in: Any = Body(...),
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     from api.schemas.ai import QuerySimilarChunksRequest
     from api.ai.gateway.coordinator import AIGateway
     
@@ -1220,13 +1153,11 @@ def query_similar_chunks_legacy(
 
 
 @router.post("/documents/{document_id}/rebuild", response_model=KnowledgeDocumentResponse)
-def rebuild_document_embeddings(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def rebuild_document_embeddings(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id,
@@ -1287,13 +1218,11 @@ def rebuild_document_embeddings(
 
 
 @router.post("/collections/{collection_id}/rebuild", response_model=Dict[str, Any])
-def rebuild_collection_embeddings(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def rebuild_collection_embeddings(  # Sprint 8.3.1
     collection_id: uuid.UUID,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     col = db.query(KnowledgeCollection).filter(
         KnowledgeCollection.id == collection_id,
         KnowledgeCollection.organization_id == membership.organization_id,
@@ -1356,12 +1285,10 @@ def rebuild_collection_embeddings(
 
 
 @router.get("/search/autocomplete", response_model=List[str])
-def search_autocomplete_suggestions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def search_autocomplete_suggestions(  # Sprint 8.3.1
     q: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if not q or len(q) < 2:
         return []
     # Match query term against document titles
@@ -1385,14 +1312,12 @@ def search_autocomplete_suggestions(
 
 
 @router.post("/documents/{document_id}/replace", response_model=KnowledgeDocumentResponse)
-def replace_document_file(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def replace_document_file(  # Sprint 8.3.1
     document_id: uuid.UUID,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id,
@@ -1476,14 +1401,12 @@ def replace_document_file(
 
 
 @router.post("/documents/{document_id}/move", response_model=KnowledgeDocumentResponse)
-def move_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def move_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     collection_id: Optional[uuid.UUID] = Body(None, embed=True),
     folder_id: Optional[uuid.UUID] = Body(None, embed=True),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id,
@@ -1503,12 +1426,10 @@ def move_document(
 
 
 @router.post("/documents/{document_id}/restore", response_model=KnowledgeDocumentResponse)
-def restore_soft_deleted_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def restore_soft_deleted_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id,
@@ -1523,12 +1444,10 @@ def restore_soft_deleted_document(
 
 
 @router.delete("/documents/{document_id}/purge", status_code=status.HTTP_204_NO_CONTENT)
-def purge_permanent_delete_document(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def purge_permanent_delete_document(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id,
@@ -1559,13 +1478,11 @@ def purge_permanent_delete_document(
 
 
 @router.patch("/documents/{document_id}/tags", response_model=KnowledgeDocumentResponse)
-def update_document_tags(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_document_tags(  # Sprint 8.3.1
     document_id: uuid.UUID,
     tags: List[str] = Body(...),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id,
@@ -1584,12 +1501,10 @@ def update_document_tags(
 
 
 @router.get("/documents/{document_id}/preview")
-def preview_document_content(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def preview_document_content(  # Sprint 8.3.1
     document_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-):
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),):
     doc = db.query(KnowledgeDocument).filter(
         KnowledgeDocument.id == document_id,
         KnowledgeDocument.organization_id == membership.organization_id,
@@ -1597,7 +1512,12 @@ def preview_document_content(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
         
+    ALLOWED_EXTENSIONS = {"txt", "pdf", "csv", "json", "md", "py", "html"}
     ext = doc.file_type.lower()
+    # Sanitize and validate against allowed extensions
+    ext = re.sub(r"[^a-zA-Z0-9]", "", ext).lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        ext = "txt"
     local_filename = f"{doc.id}.{ext}"
     
     # Retrieve raw bytes from MinIO or disk fallback
@@ -1606,6 +1526,11 @@ def preview_document_content(
         content_bytes = MinIOService.download_file_bytes(local_filename)
     except Exception:
         file_path = os.path.join(UPLOAD_DIR, local_filename)
+        # Defense-in-depth: ensure resolved path stays within UPLOAD_DIR
+        real_upload_dir = os.path.realpath(UPLOAD_DIR)
+        real_file_path = os.path.realpath(file_path)
+        if not real_file_path.startswith(real_upload_dir + os.sep) and real_file_path != real_upload_dir:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid file path")
         if os.path.exists(file_path):
             with open(file_path, "rb") as f:
                 content_bytes = f.read()
@@ -1632,12 +1557,10 @@ def preview_document_content(
 
 
 @router.get("/search/autocomplete", response_model=List[str])
-def search_autocomplete_suggestions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def search_autocomplete_suggestions(  # Sprint 8.3.1
     q: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     if not q or len(q) < 2:
         return []
     docs = db.query(KnowledgeDocument).filter(
@@ -1662,13 +1585,11 @@ class SaveAgentImageRequest(BaseModel):
 
 
 @router.post("/save-agent-image", response_model=KnowledgeDocumentResponse)
-def save_agent_image(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def save_agent_image(  # Sprint 8.3.1
     req: SaveAgentImageRequest,
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     # 1. Check if the collection "Agents Workspace" exists. If not, create it.
     collection = db.scalars(
         select(KnowledgeCollection).where(
@@ -1731,7 +1652,6 @@ def save_agent_image(
     
     # Try to find a FileAsset matching this url to get actual file size
     from api.models.file_asset import FileAsset
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     file_asset = db.scalars(
         select(FileAsset).where(
             FileAsset.organization_id == membership.organization_id,

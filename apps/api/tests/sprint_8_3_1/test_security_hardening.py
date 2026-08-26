@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.main import app
 from api.models.user import User
-from api.models.security import TrustedDevice, MFARecoveryCode, RateLimitLog, AuditLog
+from api.models.security import TrustedDevice, MFARecoveryCode, RateLimitLog
+from api.models.auth import AuditLog
 from api.services.device_trust_service import DeviceTrustService
 from api.services.mfa_recovery_service import MFARecoveryService
 from api.services.rate_limit_service import RateLimitService

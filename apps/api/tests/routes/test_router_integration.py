@@ -44,6 +44,10 @@ def test_create_organization_route_service_integration():
     mock_user.id = uuid.uuid4()
     app.dependency_overrides[get_current_user] = lambda: mock_user
 
+    # Override the Sprint 8.3.1 auth-enforcement dependency (service wiring test)
+    from api.middleware.auth_enforcement import enforce_all_auth_policies as enforce_all
+    app.dependency_overrides[enforce_all] = lambda: None
+
     try:
         response = client.post(
             "/api/v1/organizations/",
@@ -83,6 +87,10 @@ def test_create_prompt_route_service_integration():
     mock_membership.organization_id = uuid.uuid4()
     mock_membership.role = UserRole.ADMIN
     app.dependency_overrides[active_member] = lambda: mock_membership
+
+    # Override the Sprint 8.3.1 auth-enforcement dependency (service wiring test)
+    from api.middleware.auth_enforcement import enforce_all_auth_policies as enforce_all
+    app.dependency_overrides[enforce_all] = lambda: None
 
     try:
         response = client.post(

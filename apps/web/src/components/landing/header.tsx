@@ -36,12 +36,12 @@ export function Header() {
       <motion.header
         initial={{ y: -100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5 }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
         className={cn(
-          "fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b border-transparent",
+          "fixed top-0 left-0 right-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-200 border-b",
           isScrolled 
-            ? "bg-black/60 backdrop-blur-md border-white/5 py-3" 
-            : "bg-transparent py-5"
+            ? "bg-black/80 backdrop-blur-md border-white/10 py-3.5" 
+            : "bg-transparent border-transparent py-3.5"
         )}
       >
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">

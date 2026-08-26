@@ -1,4 +1,5 @@
 from typing import Any
+import os
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -39,6 +40,13 @@ allowed_origins = list(set(dev_origins + configured_origins))
 
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(TelemetryMiddleware)
+
+# Phase 13: register the DB-backed rate limiting middleware.
+# Disabled previously only for test environment isolation; now always enabled
+# with per-test cleanup in conftest.py to prevent cross-test counter bleed.
+from api.middleware.rate_limiting import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -52,6 +60,10 @@ app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(auth_session.router, prefix=settings.API_V1_STR)  # Sprint 8.3.1: Session management
 app.include_router(auth_lifecycle.router, prefix=settings.API_V1_STR)  # Sprint 8.3.1: Lifecycle management
 app.include_router(account_lifecycle.router, prefix=settings.API_V1_STR)  # Sprint 8.3.1 Phase 3: Account lifecycle
+# Sprint 8.3.1 Phase 4: Security hardening routers (prefixes hardcoded in module)
+app.include_router(device_trust.router)
+app.include_router(mfa_recovery.router)
+app.include_router(audit_logs.router)
 app.include_router(users.router, prefix=settings.API_V1_STR)
 app.include_router(organizations.router, prefix=settings.API_V1_STR)
 app.include_router(crm.companies_router, prefix=settings.API_V1_STR)
@@ -158,36 +170,38 @@ def on_startup():
 
         user_exists = db.query(User).first()
         if not user_exists:
-            # Seed default admin user
-            admin_user = User(
-                email="admin@viptant.ai",
-                hashed_password=get_password_hash("adminpassword"),
-                full_name="Default Administrator",
-                is_active=True,
-            )
-            db.add(admin_user)
-            db.commit()
-            db.refresh(admin_user)
-            
-            # Seed default organization
-            org = Organization(
-                name="Viptant Enterprise",
-                slug="viptant-enterprise",
-            )
-            db.add(org)
-            db.commit()
-            db.refresh(org)
-            
-            # Seed Owner membership
-            membership = UserOrganization(
-                user_id=admin_user.id,
-                organization_id=org.id,
-                role=UserRole.OWNER,
-            )
-            db.add(membership)
-            db.commit()
-            
-            print("Successfully seeded initial tenant organization and admin user credentials.")
+            # Seed default admin user only when explicitly configured
+            admin_password = os.environ.get("DEFAULT_ADMIN_PASSWORD")
+            if admin_password:
+                admin_user = User(
+                    email="admin@viptant.ai",
+                    hashed_password=get_password_hash(admin_password),
+                    full_name="Default Administrator",
+                    is_active=True,
+                )
+                db.add(admin_user)
+                db.commit()
+                db.refresh(admin_user)
+                
+                # Seed default organization
+                org = Organization(
+                    name="Viptant Enterprise",
+                    slug="viptant-enterprise",
+                )
+                db.add(org)
+                db.commit()
+                db.refresh(org)
+                
+                # Seed Owner membership
+                membership = UserOrganization(
+                    user_id=admin_user.id,
+                    organization_id=org.id,
+                    role=UserRole.OWNER,
+                )
+                db.add(membership)
+                db.commit()
+                
+                print("Successfully seeded initial tenant organization and admin user credentials.")
             
         # Initialize AgentRegistry and sync manifests to database
         try:
@@ -214,6 +228,7 @@ def on_startup():
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Catch-all exception handler returning standardized error formatting.
+    Does not leak raw exception strings (P1-9).
     """
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -222,8 +237,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
                 "message": "An unexpected error occurred on the server.",
-                "details": {"type": type(exc).__name__, "error": str(exc)},
             },
+        },
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
         },
     )
 

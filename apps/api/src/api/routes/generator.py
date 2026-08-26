@@ -9,8 +9,8 @@ from api.models.membership import UserOrganization, UserRole
 from api.models.content_generator import GeneratedContent
 from api.models.content_variant import ContentVariant
 from api.services.llm import LLMGateway
-from api.schemas.generator import (
 from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
+from api.schemas.generator import (
     GeneratedContentCreate,
     GeneratedContentResponse,
     VariantRateRequest,

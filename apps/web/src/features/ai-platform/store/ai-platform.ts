@@ -1,5 +1,30 @@
 import { create } from 'zustand';
 
+// LocalStorage persistence helpers with SSR safety
+const FAVORITES_STORAGE_KEY = 'ai_platform_favorites';
+
+const getPersistedFavorites = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(FAVORITES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn('Failed to load favorites from localStorage:', err);
+    return [];
+  }
+};
+
+const persistFavorites = (favorites: string[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favorites));
+  } catch (err) {
+    console.warn('Failed to save favorites to localStorage:', err);
+  }
+};
+
 interface AIPlatformState {
   // Provider / Model filters
   selectedProvider: string | null;
@@ -20,6 +45,8 @@ interface AIPlatformState {
   // Model favorites
   favorites: string[];
   toggleFavorite: (modelId: string) => void;
+  initializeFavorites: () => void;
+  setFavorites: (favorites: string[]) => void;
   
   // Model comparison list
   comparisonModels: string[];
@@ -42,12 +69,22 @@ export const useAIPlatformStore = create<AIPlatformState>((set) => ({
   timeRange: '7d',
   setTimeRange: (timeRange) => set({ timeRange }),
   
-  favorites: [],
-  toggleFavorite: (modelId) => set((state) => ({
-    favorites: state.favorites.includes(modelId)
+  favorites: getPersistedFavorites(),
+  initializeFavorites: () => {
+    const loaded = getPersistedFavorites();
+    set({ favorites: loaded });
+  },
+  setFavorites: (favorites) => {
+    persistFavorites(favorites);
+    set({ favorites });
+  },
+  toggleFavorite: (modelId) => set((state) => {
+    const nextFavorites = state.favorites.includes(modelId)
       ? state.favorites.filter((id) => id !== modelId)
-      : [...state.favorites, modelId]
-  })),
+      : [...state.favorites, modelId];
+    persistFavorites(nextFavorites);
+    return { favorites: nextFavorites };
+  }),
   
   comparisonModels: [],
   addToComparison: (modelId) => set((state) => ({

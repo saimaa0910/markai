@@ -71,33 +71,62 @@ export default function Dashboard() {
     { name: 'Campaign Conversion', value: `${conversionRate}%`, change: '-1.8%', isPositive: false, icon: Megaphone, desc: 'Ratio of won/closed leads' },
   ];
 
-  // Visual Mock Chart Data
-  const leadTrendData = [
-    { name: 'Jan', value: 4000 },
-    { name: 'Feb', value: 3000 },
-    { name: 'Mar', value: 5000 },
-    { name: 'Apr', value: 4500 },
-    { name: 'May', value: 6000 },
-    { name: 'Jun', value: 5500 },
-    { name: 'Jul', value: 7000 },
-  ];
+  // Derived chart data from real API responses (P2-6: no fabricated mock series).
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const leadTrendData = React.useMemo(() => {
+    const buckets: Record<string, number> = {};
+    for (const lead of leads) {
+      if (!lead.created_at) continue;
+      const d = new Date(lead.created_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+      buckets[key] = (buckets[key] || 0) + 1;
+    }
+    const entries = Object.entries(buckets).sort(([a], [b]) => a.localeCompare(b)).slice(-7);
+    return entries.map(([key, value]) => ({
+      name: monthNames[parseInt(key.slice(5, 7), 10) - 1],
+      value,
+    }));
+  }, [leads]);
 
-  const aiGenerationsData = [
-    { name: 'Mon', count: 12 },
-    { name: 'Tue', count: 19 },
-    { name: 'Wed', count: 15 },
-    { name: 'Thu', count: 28 },
-    { name: 'Fri', count: 22 },
-    { name: 'Sat', count: 8 },
-    { name: 'Sun', count: 14 },
-  ];
+  const aiGenerationsData = React.useMemo(() => {
+    const buckets: Record<string, number> = {};
+    for (const c of copies) {
+      if (!c.created_at) continue;
+      const d = new Date(c.created_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+      buckets[key] = (buckets[key] || 0) + 1;
+    }
+    const entries = Object.entries(buckets).sort(([a], [b]) => a.localeCompare(b)).slice(-7);
+    return entries.map(([key, value]) => ({
+      name: monthNames[parseInt(key.slice(5, 7), 10) - 1],
+      count: value,
+    }));
+  }, [copies]);
 
-  const recentActivities = [
-    { id: 1, type: 'campaign', action: 'Campaign draft optimized by AI assistant', time: '10m ago', meta: 'Summer Product Line' },
-    { id: 2, type: 'crm', action: 'New lead qualified automatically by CRM inbound', time: '1h ago', meta: 'Jessica Vance ($12,500)' },
-    { id: 3, type: 'ai', action: 'Variant B Direct CTA copy rated "Preferred"', time: '3h ago', meta: 'OpenAI GPT-4o' },
-    { id: 4, type: 'org', action: 'Slack integration connection verified', time: '1d ago', meta: 'Workspace webhook active' },
-  ];
+  const recentActivities = React.useMemo(() => {
+    const items: { id: number; type: string; action: string; time: string; meta: string }[] = [];
+    for (const lead of leads) {
+      if (!lead.created_at) continue;
+      items.push({
+        id: items.length + 1,
+        type: 'crm',
+        action: 'Lead created in CRM',
+        time: new Date(lead.created_at).toLocaleDateString(),
+        meta: lead.name || lead.company || 'Unknown lead',
+      });
+    }
+    for (const conv of conversations) {
+      if (!conv.created_at) continue;
+      items.push({
+        id: items.length + 1,
+        type: 'ai',
+        action: 'AI conversation recorded',
+        time: new Date(conv.created_at).toLocaleDateString(),
+        meta: conv.title || conv.id || 'Conversation',
+      });
+    }
+    return items.sort((a, b) => (a.time > b.time ? -1 : 1)).slice(0, 6);
+  }, [leads, conversations]);
 
   return (
     <div className="flex flex-col gap-8 max-w-[1400px] mx-auto pb-12">

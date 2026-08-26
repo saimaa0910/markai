@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowLeft, Save, Sparkles } from 'lucide-react';
 import { cn } from '@eaimos/shared';
 
-export default function CreateWorkflowPage() {
+function CreateWorkflowContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -265,5 +265,13 @@ export default function CreateWorkflowPage() {
       </div>
 
     </div>
+  );
+}
+
+export default function CreateWorkflowPage() {
+  return (
+    <React.Suspense fallback={<div className="text-neutral-500 text-xs py-8 text-center animate-pulse">Loading workflow editor...</div>}>
+      <CreateWorkflowContent />
+    </React.Suspense>
   );
 }

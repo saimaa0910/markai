@@ -2,6 +2,7 @@ import uuid
 from typing import Any, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.database.session import get_db
 from api.core.deps import RoleChecker, get_current_user
@@ -53,12 +54,10 @@ from api.services.ai import PromptService as ServicePromptService, CreatePromptD
 
 
 @router.post("/", response_model=PromptResponse, status_code=status.HTTP_201_CREATED)
-async def create_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+async def create_prompt(  # Sprint 8.3.1
     prompt_in: PromptCreate,
     membership: UserOrganization = Depends(active_member),
-    prompt_service: ServicePromptService = Depends(get_prompt_service),
-) -> Any:
+    prompt_service: ServicePromptService = Depends(get_prompt_service),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     role_val = membership.role.value if hasattr(membership.role, "value") else str(membership.role)
     role_mapping = {
         "OWNER": "super_admin",
@@ -99,8 +98,7 @@ async def create_prompt(
 
 
 @router.get("/", response_model=dict)
-def list_prompts(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_prompts(  # Sprint 8.3.1
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     category: Optional[str] = None,
@@ -108,8 +106,7 @@ def list_prompts(
     collection_id: Optional[uuid.UUID] = None,
     status_filter: Optional[str] = Query(None, alias="status"),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompts, total = PromptRepository.list_by_organization(
         db=db,
         organization_id=membership.organization_id,
@@ -131,100 +128,82 @@ def list_prompts(
 # -------------------------------------------------------------------
 
 @router.get("/folders", response_model=List[PromptFolderResponse])
-def list_folders(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_folders(  # Sprint 8.3.1
     collection_id: Optional[uuid.UUID] = None,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return FolderService.list_folders(
         db=db, organization_id=membership.organization_id, collection_id=collection_id
     )
 
 
 @router.post("/folders", response_model=PromptFolderResponse, status_code=status.HTTP_201_CREATED)
-def create_folder(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_folder(  # Sprint 8.3.1
     folder_in: PromptFolderCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return FolderService.create_folder(
         db=db, folder_in=folder_in, organization_id=membership.organization_id, user_id=membership.user_id
     )
 
 
 @router.get("/collections", response_model=List[PromptCollectionResponse])
-def list_collections(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_collections(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return CollectionService.list_collections(db=db, organization_id=membership.organization_id)
 
 
 @router.post("/collections", response_model=PromptCollectionResponse, status_code=status.HTTP_201_CREATED)
-def create_collection(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_collection(  # Sprint 8.3.1
     col_in: PromptCollectionCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return CollectionService.create_collection(
         db=db, col_in=col_in, organization_id=membership.organization_id, user_id=membership.user_id
     )
 
 
 @router.get("/categories", response_model=List[PromptCategoryResponse])
-def list_categories(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_categories(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return CategoryService.list_categories(db=db, organization_id=membership.organization_id)
 
 
 @router.post("/categories", response_model=PromptCategoryResponse, status_code=status.HTTP_201_CREATED)
-def create_category(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_category(  # Sprint 8.3.1
     cat_in: PromptCategoryCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return CategoryService.create_category(
         db=db, cat_in=cat_in, organization_id=membership.organization_id
     )
 
 
 @router.get("/tags", response_model=List[PromptTagResponse])
-def list_tags(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_tags(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return TagService.list_tags(db=db, organization_id=membership.organization_id)
 
 
 @router.post("/tags", response_model=PromptTagResponse, status_code=status.HTTP_201_CREATED)
-def create_tag(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_tag(  # Sprint 8.3.1
     tag_in: PromptTagCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return TagService.create_tag(
         db=db, tag_in=tag_in, organization_id=membership.organization_id
     )
 
 
 @router.get("/audit-logs", response_model=dict)
-def list_audit_logs(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_audit_logs(  # Sprint 8.3.1
     prompt_id: Optional[uuid.UUID] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     logs = AuditLogRepository.list_by_org(
         db=db, organization_id=membership.organization_id, limit=limit
     )
@@ -238,12 +217,10 @@ def list_audit_logs(
 
 
 @router.post("/search", response_model=dict)
-def search_prompts(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def search_prompts(  # Sprint 8.3.1
     search_req: PromptSearchRequest,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompts, total = PromptRepository.search(
         db=db,
         organization_id=membership.organization_id,
@@ -271,12 +248,10 @@ def search_prompts(
 # -------------------------------------------------------------------
 
 @router.get("/{identifier}", response_model=PromptResponse)
-def get_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_prompt(  # Sprint 8.3.1
     identifier: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompt = _resolve_prompt(db, identifier, membership.organization_id)
     if not prompt:
         raise HTTPException(
@@ -287,13 +262,11 @@ def get_prompt(
 
 
 @router.put("/{identifier}", response_model=PromptResponse)
-def update_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_prompt(  # Sprint 8.3.1
     identifier: str,
     prompt_in: PromptUpdate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompt = _resolve_prompt(db, identifier, membership.organization_id)
     name = prompt.name if prompt else identifier
 
@@ -308,12 +281,10 @@ def update_prompt(
 
 
 @router.delete("/{identifier}", status_code=status.HTTP_200_OK)
-def delete_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_prompt(  # Sprint 8.3.1
     identifier: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompt = _resolve_prompt(db, identifier, membership.organization_id)
     name = prompt.name if prompt else identifier
 
@@ -328,12 +299,10 @@ def delete_prompt(
 
 
 @router.post("/{identifier}/restore", response_model=PromptResponse)
-def restore_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def restore_prompt(  # Sprint 8.3.1
     identifier: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompt = _resolve_prompt(db, identifier, membership.organization_id, include_deleted=True)
     name = prompt.name if prompt else identifier
 
@@ -347,12 +316,10 @@ def restore_prompt(
 
 
 @router.delete("/{identifier}/purge", status_code=status.HTTP_204_NO_CONTENT)
-def purge_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def purge_prompt(  # Sprint 8.3.1
     identifier: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     prompt = _resolve_prompt(db, identifier, membership.organization_id, include_deleted=True)
     name = prompt.name if prompt else identifier
 
@@ -366,13 +333,11 @@ def purge_prompt(
 
 
 @router.post("/{identifier}/clone", response_model=PromptResponse, status_code=status.HTTP_201_CREATED)
-def clone_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def clone_prompt(  # Sprint 8.3.1
     identifier: str,
     body: dict = Body(default={}),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     new_name = body.get("new_name") if body else None
     if not new_name:
         raise HTTPException(
@@ -394,12 +359,10 @@ def clone_prompt(
 
 
 @router.post("/{identifier}/archive", response_model=PromptResponse)
-def archive_prompt(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def archive_prompt(  # Sprint 8.3.1
     identifier: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Archive a prompt by setting is_archived=True on the LATEST version."""
     # First resolve by id/name to get the canonical name
     prompt = _resolve_prompt(db, identifier, membership.organization_id)
@@ -412,7 +375,6 @@ def archive_prompt(
     # Archive ALL versions of this prompt (by name) to ensure latest is archived
     from sqlalchemy import update as sa_update
     from api.models.prompt import Prompt as PromptModel
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     db.execute(
         sa_update(PromptModel)
         .where(
@@ -438,12 +400,10 @@ from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 
 
 
 @router.post("/{identifier}/favorite", status_code=status.HTTP_200_OK)
-def toggle_favorite(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def toggle_favorite(  # Sprint 8.3.1
     identifier: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompt = _resolve_prompt(db, identifier, membership.organization_id)
     name = prompt.name if prompt else identifier
 
@@ -454,12 +414,10 @@ def toggle_favorite(
 
 
 @router.post("/{identifier}/pin", status_code=status.HTTP_200_OK)
-def toggle_pin(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def toggle_pin(  # Sprint 8.3.1
     identifier: str,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     prompt = _resolve_prompt(db, identifier, membership.organization_id)
     if not prompt:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Prompt '{identifier}' not found.")

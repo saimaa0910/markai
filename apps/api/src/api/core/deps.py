@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import Depends, HTTPException, Header, status
+from fastapi import Depends, HTTPException, Header, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import ValidationError
@@ -32,7 +32,7 @@ def get_current_user(
                 detail="Invalid token type",
             )
         user_id = payload.get("sub")
-        token_jti = payload.get("jti")
+        session_ref = payload.get("session_id") or payload.get("jti")
         if user_id is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -51,9 +51,9 @@ def get_current_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    if token_jti:
+    if session_ref:
         try:
-            session_uuid = uuid.UUID(str(token_jti))
+            session_uuid = uuid.UUID(str(session_ref))
         except ValueError:
             session_uuid = None
 
@@ -75,6 +75,20 @@ def get_current_user(
                 db.add(session)
                 db.commit()
     return user
+
+
+def get_current_admin_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Dependency that ensures the authenticated user is a superuser (admin).
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The user does not have enough privileges",
+        )
+    return current_user
 
 
 def get_current_user_allow_inactive(
@@ -116,6 +130,28 @@ def get_active_organization_id(
     Extract active organization from X-Organization-ID request header.
     """
     return x_organization_id
+
+
+def get_user_org_membership(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserOrganization:
+    """
+    Get the current user's active organization membership.
+    Raises 403 if user is not a member of any organization.
+    """
+    membership = (
+        db.query(UserOrganization)
+        .filter(UserOrganization.user_id == current_user.id)
+        .filter(UserOrganization.is_revoked == False)
+        .first()
+    )
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is not a member of any organization",
+        )
+    return membership
 
 
 class RoleChecker:
@@ -236,3 +272,59 @@ class PermissionChecker:
             )
 
         return membership
+
+
+def get_service_context(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> "ServiceContext":
+    """
+    Dependency that constructs a ServiceContext for the current request.
+    """
+    from api.services.base import ServiceContext
+
+    # Resolve organization_id from header if present
+    org_id_str = request.headers.get("x-organization-id")
+    org_uuid = None
+    if org_id_str:
+        try:
+            org_uuid = uuid.UUID(org_id_str)
+        except ValueError:
+            pass
+            
+    # If no header, maybe find first organization of user
+    if not org_uuid and current_user:
+        user_org = db.query(UserOrganization).filter(UserOrganization.user_id == current_user.id).first()
+        if user_org:
+            org_uuid = user_org.organization_id
+
+    # Resolve roles & permissions
+    roles = []
+    permissions = set()
+    if org_uuid and current_user:
+        user_roles = db.query(UserOrganization).filter(
+            UserOrganization.user_id == current_user.id,
+            UserOrganization.organization_id == org_uuid,
+        ).all()
+        for ur in user_roles:
+            roles.append(ur.role.value if hasattr(ur.role, 'value') else str(ur.role))
+            
+        try:
+            from api.middleware.rbac import _get_user_permissions
+            permissions = _get_user_permissions(current_user.id, org_uuid, db)
+        except Exception:
+            pass
+
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+
+    return ServiceContext(
+        user_id=current_user.id,
+        organization_id=org_uuid,
+        roles=roles,
+        permissions=permissions,
+        client_ip=client_ip,
+        user_agent=user_agent,
+        is_super_admin=current_user.is_superuser,
+    )

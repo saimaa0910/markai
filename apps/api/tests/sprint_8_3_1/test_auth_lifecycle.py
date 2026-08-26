@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.main import app
 from api.models.user import User
-from api.models.auth import PasswordResetToken, EmailVerificationToken
+from api.models import PasswordResetToken, EmailVerificationToken
 from api.services.auth_lifecycle_service import AuthLifecycleService
 from api.core.security import get_password_hash, verify_password
 
@@ -308,6 +308,7 @@ class TestAccountLockout:
         """Test successful login resets failed login count."""
         # Set failed count
         test_user.failed_login_count = 2
+        test_user.is_verified = True
         await db.commit()
         
         response = client.post(

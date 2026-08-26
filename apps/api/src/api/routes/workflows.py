@@ -31,12 +31,10 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
     response_model=WorkflowDefinitionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_workflow_definition(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_workflow_definition(  # Sprint 8.3.1
     workflow_in: WorkflowDefinitionCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     wf = WorkflowDefinition(
         name=workflow_in.name,
         description=workflow_in.description,
@@ -56,13 +54,11 @@ def create_workflow_definition(
 
 
 @router.get("/definitions", response_model=PaginatedResponse[WorkflowDefinitionResponse])
-def list_workflow_definitions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_workflow_definitions(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-) -> Any:
+    page_size: int = Query(20, ge=1, le=100),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     skip = (page - 1) * page_size
     items = (
         db.query(WorkflowDefinition)
@@ -88,12 +84,10 @@ def list_workflow_definitions(
 
 
 @router.get("/definitions/{wf_id}", response_model=WorkflowDefinitionResponse)
-def get_workflow_definition(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_workflow_definition(  # Sprint 8.3.1
     wf_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     wf = (
         db.query(WorkflowDefinition)
         .filter(
@@ -112,13 +106,11 @@ def get_workflow_definition(
 
 
 @router.patch("/definitions/{wf_id}", response_model=WorkflowDefinitionResponse)
-def update_workflow_definition(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_workflow_definition(  # Sprint 8.3.1
     wf_id: uuid.UUID,
     workflow_in: WorkflowDefinitionUpdate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     wf = (
         db.query(WorkflowDefinition)
         .filter(
@@ -144,12 +136,10 @@ def update_workflow_definition(
 
 
 @router.delete("/definitions/{wf_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_workflow_definition(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_workflow_definition(  # Sprint 8.3.1
     wf_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     wf = (
         db.query(WorkflowDefinition)
         .filter(
@@ -177,13 +167,11 @@ def delete_workflow_definition(
     response_model=WorkflowExecutionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def execute_workflow(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def execute_workflow(  # Sprint 8.3.1
     wf_id: uuid.UUID,
     run_in: WorkflowExecutionCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     wf = (
         db.query(WorkflowDefinition)
         .filter(
@@ -216,14 +204,12 @@ def execute_workflow(
 
 
 @router.get("/executions", response_model=PaginatedResponse[WorkflowExecutionResponse])
-def list_workflow_executions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_workflow_executions(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     workflow_id: Optional[uuid.UUID] = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-) -> Any:
+    page_size: int = Query(20, ge=1, le=100),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     skip = (page - 1) * page_size
     filters = [
         WorkflowExecution.organization_id == membership.organization_id,
@@ -251,12 +237,10 @@ def list_workflow_executions(
 
 
 @router.get("/executions/{exec_id}/steps", response_model=List[WorkflowStepResponse])
-def list_execution_steps(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_execution_steps(  # Sprint 8.3.1
     exec_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     # Verify execution access
     execution = (
         db.query(WorkflowExecution)

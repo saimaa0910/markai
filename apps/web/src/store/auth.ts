@@ -1,6 +1,19 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+// P2-11: lightweight session marker cookie consumed by src/middleware.ts route guard.
+const SESSION_COOKIE = 'eaimos.session';
+
+function setSessionCookie() {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${SESSION_COOKIE}=1; path=/; SameSite=Lax; max-age=2592000`;
+}
+
+function clearSessionCookie() {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${SESSION_COOKIE}=; path=/; SameSite=Lax; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+}
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -41,17 +54,23 @@ export const useAuthStore = create<AuthState>()(
       activeOrg: null,
       organizations: [],
       
-      setAuth: (accessToken, refreshToken, user) => set({ accessToken, refreshToken, user }),
+      setAuth: (accessToken, refreshToken, user) => {
+        set({ accessToken, refreshToken, user });
+        setSessionCookie();
+      },
       setOrganizations: (organizations) => set({ organizations }),
       setActiveOrg: (activeOrg) => set({ activeOrg }),
-      
-      logout: () => set({ 
-        accessToken: null, 
-        refreshToken: null, 
-        user: null, 
-        activeOrg: null, 
-        organizations: [] 
-      }),
+
+      logout: () => {
+        clearSessionCookie();
+        set({
+          accessToken: null,
+          refreshToken: null,
+          user: null,
+          activeOrg: null,
+          organizations: [],
+        });
+      },
     }),
     {
       name: 'eaimos-auth-storage',

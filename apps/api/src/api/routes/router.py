@@ -98,10 +98,8 @@ class FailoverEventResponse(BaseModel):
 
 
 @router.get("/strategies")
-def get_routing_strategies(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+def get_routing_strategies(  # Sprint 8.3.1
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return [
         {"id": "cheapest", "name": "Cheapest", "description": "Prioritize lowest priced model based on token registry rates."},
         {"id": "fastest", "name": "Fastest", "description": "Prioritize model with lowest average round-trip latency."},
@@ -114,11 +112,9 @@ def get_routing_strategies(
 
 
 @router.get("/rules", response_model=List[RoutingPolicyResponse])
-def list_routing_policies(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_routing_policies(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     policies = db.scalars(
         select(AIRoutingPolicy)
         .where(
@@ -131,12 +127,10 @@ def list_routing_policies(
 
 
 @router.post("/rules", response_model=RoutingPolicyResponse, status_code=status.HTTP_201_CREATED)
-def create_routing_policy(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_routing_policy(  # Sprint 8.3.1
     req: PolicyRuleCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     policy = AIRoutingPolicy(
         name=req.name,
         scope=req.scope,
@@ -155,13 +149,11 @@ def create_routing_policy(
 
 
 @router.put("/rules/{id}", response_model=RoutingPolicyResponse)
-def update_routing_policy(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_routing_policy(  # Sprint 8.3.1
     id: uuid.UUID,
     req: PolicyRuleUpdate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     policy = db.query(AIRoutingPolicy).filter(
         AIRoutingPolicy.id == id,
         (AIRoutingPolicy.organization_id == None) |
@@ -180,12 +172,10 @@ def update_routing_policy(
 
 
 @router.delete("/rules/{id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_routing_policy(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_routing_policy(  # Sprint 8.3.1
     id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     policy = db.query(AIRoutingPolicy).filter(
         AIRoutingPolicy.id == id,
         AIRoutingPolicy.organization_id == membership.organization_id
@@ -198,12 +188,10 @@ def delete_routing_policy(
 
 
 @router.post("/simulate")
-def simulate_routing(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def simulate_routing(  # Sprint 8.3.1
     req: SimulationRequest,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     router_engine = ModelRouter()
     candidates = router_engine.route(
         db=db,
@@ -247,11 +235,9 @@ def simulate_routing(
 
 
 @router.get("/analytics")
-def get_router_analytics(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_router_analytics(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     usages = db.scalars(
         select(AIRoutingLog)
         .where(AIRoutingLog.organization_id == membership.organization_id)
@@ -296,11 +282,9 @@ def get_router_analytics(
 
 
 @router.get("/failovers", response_model=List[FailoverEventResponse])
-def get_failover_logs(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_failover_logs(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     failovers = db.scalars(
         select(AIFailoverEvent)
         .where(AIFailoverEvent.organization_id == membership.organization_id)
@@ -311,11 +295,9 @@ def get_failover_logs(
 
 
 @router.get("/health")
-def get_router_health(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_router_health(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     models = db.scalars(select(AIModelRegistry)).all()
     
     results = []

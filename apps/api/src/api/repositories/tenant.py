@@ -17,6 +17,7 @@ from typing import (
     Union,
 )
 import uuid
+import datetime
 
 from api.database.base import Base
 from api.repositories.base import BaseRepository
@@ -31,6 +32,7 @@ from api.repositories.pagination import (
 )
 from api.repositories.query_builder import QueryOptions
 from api.repositories.sorting import SortParam
+from sqlalchemy import delete, insert, update as sql_update
 
 ModelType = TypeVar("ModelType", bound=Base)
 
@@ -271,3 +273,144 @@ class TenantRepository(BaseRepository[ModelType], ITenantRepository[ModelType]):
             actor_id=actor_id,
             expected_version=expected_version,
         )
+
+    # ── Tenant-Scoped Restore / Hard Delete / Bulk Operations ──────────────────
+
+    async def restore(
+        self,
+        session: Any,
+        entity_or_id: Union[ModelType, uuid.UUID, str],
+        actor_id: Optional[str] = None,
+        organization_id: Optional[uuid.UUID] = None,
+    ) -> ModelType:
+        org_id = organization_id or self.organization_id
+        if isinstance(entity_or_id, self.model):
+            entity = entity_or_id
+        else:
+            entity = await super().restore(
+                session, entity_or_id, actor_id, organization_id
+            )
+            if not entity:
+                raise EntityNotFoundError(self.model.__name__, entity_or_id)
+        if hasattr(entity, "deleted_at"):
+            if entity.organization_id != org_id:
+                raise TenantViolationError(
+                    entity_name=self.model.__name__,
+                    attempted_org_id=entity.organization_id,
+                    context_org_id=org_id,
+                )
+            entity.deleted_at = None
+        if actor_id and hasattr(entity, "updated_by"):
+            entity.updated_by = actor_id
+        await self._flush(session)
+        return entity
+
+    async def hard_delete(
+        self,
+        session: Any,
+        id: Union[uuid.UUID, str],
+        organization_id: Optional[uuid.UUID] = None,
+    ) -> bool:
+        org_id = organization_id or self.organization_id
+        stmt = delete(self.model).where(self.model.id == id)
+        if hasattr(self.model, "organization_id"):
+            stmt = stmt.where(self.model.organization_id == org_id)
+        res = await self._execute(session, stmt)
+        return res.rowcount > 0
+
+    async def bulk_delete(
+        self,
+        session: Any,
+        ids: Sequence[Union[uuid.UUID, str]],
+        soft: bool = True,
+        actor_id: Optional[str] = None,
+        organization_id: Optional[uuid.UUID] = None,
+    ) -> int:
+        org_id = organization_id or self.organization_id
+        if not ids:
+            return 0
+        if soft and hasattr(self.model, "deleted_at"):
+            values: Dict[str, Any] = {"deleted_at": datetime.datetime.now(datetime.timezone.utc)}
+            stmt = sql_update(self.model).where(
+                self.model.id.in_(ids), self.model.organization_id == org_id
+            ).values(**values)
+        else:
+            stmt = delete(self.model).where(
+                self.model.id.in_(ids), self.model.organization_id == org_id
+            )
+        res = await self._execute(session, stmt)
+        return res.rowcount
+
+    async def bulk_insert(
+        self,
+        session: Any,
+        objs_in: List[Dict[str, Any]],
+        actor_id: Optional[str] = None,
+        organization_id: Optional[uuid.UUID] = None,
+    ) -> int:
+        org_id = organization_id or self.organization_id
+        if not objs_in:
+            return 0
+        prepared = []
+        for item in objs_in:
+            d = dict(item)
+            d["organization_id"] = org_id
+            if actor_id:
+                if hasattr(self.model, "created_by"):
+                    d["created_by"] = actor_id
+                if hasattr(self.model, "updated_by"):
+                    d["updated_by"] = actor_id
+            prepared.append(d)
+        stmt = insert(self.model).values(prepared)
+        res = await self._execute(session, stmt)
+        return res.rowcount or len(prepared)
+
+    async def bulk_update(
+        self,
+        session: Any,
+        updates: List[Dict[str, Any]],
+        organization_id: Optional[uuid.UUID] = None,
+    ) -> int:
+        org_id = organization_id or self.organization_id
+        if not updates:
+            return 0
+        count = 0
+        for item in updates:
+            item_id = item.get("id")
+            if not item_id:
+                continue
+            payload = {k: v for k, v in item.items() if k != "id"}
+            payload["organization_id"] = org_id
+            stmt = sql_update(self.model).where(self.model.id == item_id).values(**payload)
+            res = await self._execute(session, stmt)
+            count += res.rowcount
+        return count
+
+    async def bulk_upsert(
+        self,
+        session: Any,
+        records: List[Dict[str, Any]],
+        index_elements: List[str],
+        organization_id: Optional[uuid.UUID] = None,
+    ) -> int:
+        org_id = organization_id or self.organization_id
+        if not records:
+            return 0
+        count = 0
+        for rec in records:
+            # Check existence by index elements, scoped to org
+            filters = [
+                FilterParam(field=k, operator="eq", value=rec[k])
+                for k in index_elements
+                if k in rec
+            ]
+            existing = await self.find_one(
+                session, filters=filters, include_deleted=True
+            )
+            if existing:
+                await self.update(session, existing, rec, organization_id=org_id)
+            else:
+                rec["organization_id"] = org_id
+                await self.create(session, rec, organization_id=org_id)  # type: ignore
+            count += 1
+        return count

@@ -1,14 +1,26 @@
 import base64
 import hashlib
+import logging
 from cryptography.fernet import Fernet
 from api.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def get_fernet() -> Fernet:
     """
-    Derive a 32-byte Fernet key from settings.SECRET_KEY.
+    Return a Fernet cipher backed by the dedicated ENCRYPTION_KEY.
+    Falls back to a key derived from SECRET_KEY only when ENCRYPTION_KEY is
+    unset, so previously encrypted values remain readable during migration.
     """
-    key_hash = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
+    master = settings.ENCRYPTION_KEY
+    if not master:
+        logger.warning(
+            "ENCRYPTION_KEY is not configured; deriving the Fernet key from "
+            "SECRET_KEY. Set ENCRYPTION_KEY to a dedicated secret."
+        )
+        master = settings.SECRET_KEY
+    key_hash = hashlib.sha256(master.encode()).digest()
     key_b64 = base64.urlsafe_b64encode(key_hash)
     return Fernet(key_b64)
 

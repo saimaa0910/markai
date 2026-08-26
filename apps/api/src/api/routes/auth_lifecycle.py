@@ -14,23 +14,30 @@ Security:
 """
 
 import hashlib
+import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from jose import jwt, JWTError
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from api.core.config import settings
 from api.core.deps import get_current_user
-from api.core.security import get_password_hash, verify_password
+from api.core.security import ALGORITHM, get_password_hash, verify_password
 from api.database.session import get_db
+from api.models import PasswordResetToken, EmailVerificationToken
 from api.models.auth import AuditLog
-from api.models.iam import OrganizationInvitation
+from api.models.iam import RefreshToken, UserSession
+from api.models.membership import OrganizationInvitation, UserOrganization, UserRole
 from api.models.user import User
 from api.middleware.auth_enforcement import require_active_account
+
+logger = logging.getLogger(__name__)
 from api.services.email_service import send_invitation_email
 
 router = APIRouter(prefix="/auth", tags=["authentication-lifecycle"])
@@ -91,21 +98,132 @@ class RestoreAccountResponse(BaseModel):
     message: str
 
 
+class PasswordResetRequest(BaseModel):
+    """Request to start a password reset."""
+    email: EmailStr
+
+
+class VerifyResetTokenRequest(BaseModel):
+    """Request to verify a password reset token."""
+    token: str
+
+
+class ResetPasswordPayload(BaseModel):
+    """Request to set a new password with a reset token."""
+    token: str
+    new_password: str
+
+
+class VerifyEmailPayload(BaseModel):
+    """Request to verify an email address with a token."""
+    token: str
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Helper Functions
 # ──────────────────────────────────────────────────────────────────────────────
 
-def log_audit(db: Session, user_id: UUID, action: str, request: Request, metadata: dict = None):
-    """Log audit event."""
-    audit = AuditLog(
-        user_id=user_id,
-        action=action,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        metadata=metadata or {},
-    )
-    db.add(audit)
-    db.commit()
+def _find_reset_token_sync(db: Session, token: str) -> Optional[PasswordResetToken]:
+    """Locate an unused, unexpired reset token (hashed or plaintext lookup)."""
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    for candidate in (token_hash, token):
+        found = (
+            db.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.token_hash == candidate,
+                PasswordResetToken.is_used == False,
+                PasswordResetToken.expires_at > now,
+            )
+            .first()
+        )
+        if found:
+            return found
+    return None
+
+
+def _find_verification_token_sync(db: Session, token: str) -> Optional[EmailVerificationToken]:
+    """Locate an unused, unexpired email verification token (hashed or plaintext lookup)."""
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    for candidate in (token_hash, token):
+        found = (
+            db.query(EmailVerificationToken)
+            .filter(
+                EmailVerificationToken.token_hash == candidate,
+                EmailVerificationToken.is_used == False,
+                EmailVerificationToken.expires_at > now,
+            )
+            .first()
+        )
+        if found:
+            return found
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helper Functions
+# ──────────────────────────────────────────────────────────────────────────────
+
+def log_audit(db: Session, user_id: UUID, action: str, request: Request, metadata: dict = None, organization_id: Optional[uuid.UUID] = None, risk_level: str = "low"):
+    """Persist an immutable audit log entry (Phase 21: org-attributed, best-effort)."""
+    try:
+        if organization_id is None:
+            header_val = request.headers.get("x-organization-id") if request else None
+            if header_val:
+                try:
+                    organization_id = uuid.UUID(header_val)
+                except ValueError:
+                    organization_id = None
+        if organization_id is None:
+            from api.models.membership import UserOrganization
+
+            membership = (
+                db.query(UserOrganization)
+                .filter(
+                    UserOrganization.user_id == user_id,
+                    UserOrganization.deleted_at == None,
+                )
+                .first()
+            )
+            if membership:
+                organization_id = membership.organization_id
+
+        description = f"Action: {action}"
+        if metadata:
+            description += f" - {metadata}"
+
+        audit = AuditLog(
+            organization_id=organization_id,
+            actor_id=user_id,
+            action=action,
+            actor_ip=request.client.host if request.client else None,
+            actor_user_agent=request.headers.get("user-agent") if request else None,
+            entity_type="users",
+            entity_id=user_id,
+            description=description[:255] if description else None,
+            risk_level=risk_level,
+        )
+        db.add(audit)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"Failed to write audit log for action={action!r}: {exc}")
+
+
+def _get_current_session_id(request: Request) -> Optional[uuid.UUID]:
+    """Extract the current session ID from the request's access token."""
+    try:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+            claim = payload.get("session_id") or payload.get("jti")
+            if claim:
+                return uuid.UUID(str(claim))
+    except (JWTError, ValueError):
+        pass
+    return None
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -145,10 +263,22 @@ def resend_invitation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invitation not found or already accepted.",
         )
-    
-    # TODO: Check if current_user is admin of invitation.organization_id
-    # For now, we'll allow any authenticated user to resend (permissive for MVP)
-    
+
+    # Phase 10: only an OWNER/ADMIN of the invitation's organization may resend.
+    membership = (
+        db.query(UserOrganization)
+        .filter(
+            UserOrganization.organization_id == invitation.organization_id,
+            UserOrganization.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not membership or membership.role not in (UserRole.OWNER, UserRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an organization admin can resend invitations",
+        )
+
     # Generate new token and extend expiration
     new_token = secrets.token_urlsafe(32)
     new_token_hash = hashlib.sha256(new_token.encode()).hexdigest()
@@ -161,7 +291,7 @@ def resend_invitation(
     # Send new invitation email
     try:
         # Build accept URL with invitation token
-        accept_url = f"{settings.FRONTEND_URL}/auth/accept-invitation?token={new_token}"
+        accept_url = f"{settings.FRONTEND_URL}/auth/invitation?token={new_token}"
         
         send_invitation_email(
             to_email=invitation.email,
@@ -280,7 +410,32 @@ def change_password(
         current_user.temporary_password = None
     if hasattr(current_user, 'temporary_password_expires_at'):
         current_user.temporary_password_expires_at = None
-    
+
+    # Phase 4: a password change logs out every OTHER session (and revokes
+    # their refresh tokens) so a compromised credential stops working
+    # elsewhere. The session that performed the change is kept active.
+    now = datetime.now(timezone.utc)
+    current_session_id = _get_current_session_id(request)
+    other_sessions_query = db.query(UserSession).filter(
+        UserSession.user_id == current_user.id,
+        UserSession.is_revoked == False,
+    )
+    if current_session_id:
+        other_sessions_query = other_sessions_query.filter(UserSession.id != current_session_id)
+    other_sessions = other_sessions_query.all()
+
+    for s in other_sessions:
+        s.is_revoked = True
+        s.revoked_at = now
+        s.revocation_reason = "password_change"
+
+    if other_sessions:
+        db.query(RefreshToken).filter(
+            RefreshToken.session_id.in_([s.id for s in other_sessions]),
+            RefreshToken.user_id == current_user.id,
+            RefreshToken.is_revoked == False,
+        ).update({RefreshToken.is_revoked: True})
+
     db.commit()
     
     # Audit log
@@ -413,10 +568,11 @@ def restore_account(
             detail="Incorrect password.",
         )
     
-    # Restore account
+    # Restore account — Phase 7: also re-activate so the user can log in again.
     user.deletion_requested_at = None
     user.scheduled_deletion_at = None
     user.deletion_reason = None
+    user.is_active = True
     db.commit()
     
     # Audit log
@@ -427,8 +583,151 @@ def restore_account(
         request,
         {},
     )
-    
+
     return RestoreAccountResponse(
         success=True,
         message="Account restored successfully.",
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Password Reset
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_200_OK)
+def request_password_reset(
+    body: PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Request a password reset. Returns 200 even for unknown emails (anti-enumeration)."""
+    user = db.query(User).filter(User.email == body.email).first()
+    if user:
+        # Invalidate any previous unused tokens
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.is_used == False,
+        ).update({"is_used": True})
+
+        raw_token = secrets.token_urlsafe(32)
+        db_token = PasswordResetToken(
+            user_id=user.id,
+            token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            is_used=False,
+        )
+        db.add(db_token)
+        db.commit()
+        log_audit(db, user.id, "PASSWORD_RESET_REQUESTED", request, {})
+
+    return {"message": "If an account exists with that email, a password reset link has been sent."}
+
+
+@router.post("/password-reset/verify", status_code=status.HTTP_200_OK)
+def verify_reset_token(
+    body: VerifyResetTokenRequest,
+    db: Session = Depends(get_db),
+):
+    """Verify that a password reset token is valid."""
+    db_token = _find_reset_token_sync(db, body.token)
+    if not db_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+    return {"valid": True}
+
+
+@router.post("/password-reset/reset", status_code=status.HTTP_200_OK)
+def reset_password(
+    body: ResetPasswordPayload,
+    db: Session = Depends(get_db),
+):
+    """Set a new password using a valid reset token."""
+    db_token = _find_reset_token_sync(db, body.token)
+    if not db_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user = db.query(User).filter(User.id == db_token.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not found",
+        )
+
+    user.hashed_password = get_password_hash(body.new_password)
+    user.password_changed_at = datetime.now(timezone.utc)
+    db_token.is_used = True
+    db_token.used_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"message": "Password reset successfully."}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Email Verification
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@router.post("/email-verification/request", status_code=status.HTTP_200_OK)
+def request_email_verification(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Request an email verification token for the current user."""
+    if current_user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already verified",
+        )
+
+    # Invalidate any previous unused tokens
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == current_user.id,
+        EmailVerificationToken.is_used == False,
+    ).update({"is_used": True})
+
+    raw_token = secrets.token_urlsafe(32)
+    db_token = EmailVerificationToken(
+        user_id=current_user.id,
+        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        is_used=False,
+    )
+    db.add(db_token)
+    db.commit()
+
+    return {"message": "Verification email sent.", "success": True}
+
+
+@router.post("/email-verification/verify", status_code=status.HTTP_200_OK)
+def verify_email(
+    body: VerifyEmailPayload,
+    db: Session = Depends(get_db),
+):
+    """Verify an email address using a valid verification token."""
+    db_token = _find_verification_token_sync(db, body.token)
+    if not db_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token",
+        )
+
+    user = db.query(User).filter(User.id == db_token.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User not found",
+        )
+
+    user.is_verified = True
+    user.email_verified_at = datetime.now(timezone.utc)
+    db_token.is_used = True
+    db_token.used_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"message": "Email verified successfully.", "success": True}

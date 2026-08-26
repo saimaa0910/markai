@@ -22,7 +22,7 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-background text-foreground font-sans">
       <div className="relative z-10 flex flex-1 flex-col justify-center bg-card/70 px-6 py-12 sm:px-16 lg:px-24 xl:px-32">
         <div className="mx-auto w-full max-w-md">
-          <BrandLogo size="md" onClick={() => router.push('/')} />
+          <BrandLogo size="md" onClick={() => router.push('/')} className="mb-8" />
           {children}
         </div>
       </div>

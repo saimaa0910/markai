@@ -11,6 +11,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
 
+from sqlalchemy import delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from api.models.iam import UserSession
 from api.repositories.iam_repository import UserSessionRepository
 from api.services.base import (
@@ -62,6 +65,31 @@ from api.services.session_enhancement import enhance_session_metadata
 logger = logging.getLogger("eaimos.iam.session")
 
 
+# ─── Sync/Async Session Helpers ───────────────────────────────────────────────
+
+async def _session_execute(db, stmt):
+    """Execute a statement against either an async or sync session."""
+    if isinstance(db, AsyncSession):
+        return await db.execute(stmt)
+    return db.execute(stmt)
+
+
+async def _session_commit(db):
+    """Commit against either an async or sync session."""
+    if isinstance(db, AsyncSession):
+        await db.commit()
+    else:
+        db.commit()
+
+
+async def _session_refresh(db, obj):
+    """Refresh an object against either an async or sync session."""
+    if isinstance(db, AsyncSession):
+        await db.refresh(obj)
+    else:
+        db.refresh(obj)
+
+
 class SessionService:
     """
     Enterprise IAM Session Domain Service.
@@ -95,13 +123,12 @@ class SessionService:
         ctx: ServiceContext,
         dto: CreateSessionDTO,
     ) -> ServiceResult[SessionResponseDTO]:
-        """
-        Issue a new authenticated session.
+        """Issue a new authenticated session.
 
-        Business Rules:
+        Business rules (instance interface, matches ISessionService):
         - Enforces SecurityPolicy.max_concurrent_sessions
         - Records device metadata and geolocation for audit
-        - Publishes UserLoggedIn domain event
+        - Caches the new session and publishes UserLoggedIn domain event
         """
         try:
             SessionPolicy.can_create(self.authorizer, ctx)
@@ -112,15 +139,12 @@ class SessionService:
             async with self.uow_service:
                 repo: UserSessionRepository = self.uow_service.get_repository(UserSessionRepository)
 
-                # Enforce concurrent session limit
                 active_sessions = await repo.list_user_sessions(
                     session=self.uow_service.session,
                     user_id=dto.user_id,
                 )
                 active_non_revoked = [s for s in active_sessions if not s.is_revoked]
-                max_sessions = dto.ttl_minutes  # use policy lookup in full integration
 
-                # Default platform ceiling if policy not loaded
                 validate_max_concurrent_sessions(
                     active_session_count=len(active_non_revoked),
                     max_allowed=MAX_SESSIONS_PER_USER,
@@ -146,17 +170,12 @@ class SessionService:
                     actor_id=ctx.get_user_id_uuid(),
                 )
 
-                # Sprint 8.3.1 Phase 2: Enhance session with device detection
                 enhance_session_metadata(
                     session,
                     user_agent=dto.user_agent,
                     ip_address=dto.ip_address,
                     city=dto.city,
                     country_code=dto.country_code,
-                    # Optional: Add region, latitude, longitude if available in dto
-                    # region=dto.region if hasattr(dto, 'region') else None,
-                    # latitude=dto.latitude if hasattr(dto, 'latitude') else None,
-                    # longitude=dto.longitude if hasattr(dto, 'longitude') else None,
                 )
 
                 self.uow_service.add_event(
@@ -175,11 +194,8 @@ class SessionService:
 
             response = session_to_response_dto(session)
 
-            # Cache the new session
             cache_key = session_cache_key(session.id)
             await self.cache.set(cache_key, response.model_dump(mode="json"), ttl=SESSION_KEY_TTL)
-
-            # Invalidate user session list cache
             await self.cache.delete(user_sessions_list_key(dto.user_id))
 
             logger.info(
@@ -195,6 +211,46 @@ class SessionService:
         except Exception as exc:
             logger.error(f"create_session failed: {exc}", exc_info=True)
             return ServiceResult.from_exception(exc)
+
+    @staticmethod
+    async def create_session_row(
+        db,
+        user_id,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        device_info: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Create a new authenticated session row (DB convenience helper).
+
+        Accepts either an async ``AsyncSession`` or a sync ``Session``.
+        Returns a plain dict (user_id, ip_address, user_agent, session_token).
+        """
+        device_info = device_info or {}
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=SESSION_TTL_MINUTES)
+        session = UserSession(
+            user_id=user_id,
+            session_token=str(uuid.uuid4()),
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_name=device_info.get("name") or device_info.get("device_name"),
+            device_type=device_info.get("type") or device_info.get("device_type"),
+            browser=device_info.get("browser"),
+            os=device_info.get("os"),
+            expires_at=expires_at,
+            last_active_at=datetime.now(timezone.utc),
+        )
+        db.add(session)
+        await _session_commit(db)
+        await _session_refresh(db, session)
+        return {
+            "user_id": str(session.user_id),
+            "ip_address": session.ip_address,
+            "user_agent": session.user_agent,
+            "session_token": str(session.id),
+            "id": str(session.id),
+        }
 
     # ─── Get ──────────────────────────────────────────────────────────────────
 
@@ -294,7 +350,39 @@ class SessionService:
             logger.error(f"list_user_sessions failed for {user_id}: {exc}", exc_info=True)
             return ServiceResult.from_exception(exc)
 
-    # ─── Revoke Single ────────────────────────────────────────────────────────
+    # ─── List (test-facing) ───────────────────────────────────────────────────
+
+    @staticmethod
+    async def get_user_sessions(
+        db,
+        user_id,
+        include_revoked: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Return all sessions for a user as plain dicts."""
+        stmt = select(UserSession).where(UserSession.user_id == user_id)
+        if not include_revoked:
+            stmt = stmt.where(UserSession.is_revoked == False)
+        stmt = stmt.order_by(UserSession.last_active_at.desc())
+        result = await _session_execute(db, stmt)
+        sessions = result.scalars().all()
+        return [
+            {
+                "id": str(s.id),
+                "user_id": str(s.user_id),
+                "ip_address": s.ip_address,
+                "user_agent": s.user_agent,
+                "device_name": s.device_name,
+                "device_type": s.device_type,
+                "created_at": s.created_at,
+                "last_activity_at": s.last_active_at,
+                "expires_at": s.expires_at,
+                "is_active": not s.is_revoked,
+                "is_revoked": s.is_revoked,
+            }
+            for s in sessions
+        ]
+
+    # ─── Revoke Single (interface) ────────────────────────────────────────────
 
     async def revoke_session(
         self,
@@ -348,7 +436,6 @@ class SessionService:
                     event_kwargs["revoked_by"] = ctx.get_user_id_str()
                 self.uow_service.add_event(event_cls(**event_kwargs))
 
-            # Invalidate caches
             await self.cache.delete(session_cache_key(session_id))
             await self.cache.delete(user_sessions_list_key(session.user_id))
 
@@ -357,6 +444,56 @@ class SessionService:
         except Exception as exc:
             logger.error(f"revoke_session failed for {session_id}: {exc}", exc_info=True)
             return ServiceResult.from_exception(exc)
+
+    @staticmethod
+    async def revoke_session_row(
+        db,
+        session_id,
+        user_id=None,
+        reason: str = "logout",
+    ) -> None:
+        """Revoke a single session row with a documented reason (DB helper)."""
+        stmt = select(UserSession).where(UserSession.id == session_id)
+        if user_id is not None:
+            stmt = stmt.where(UserSession.user_id == user_id)
+        result = await _session_execute(db, stmt)
+        session = result.scalars().first()
+        if session is None:
+            return
+        session.is_revoked = True
+        session.revoked_at = datetime.now(timezone.utc)
+        session.revocation_reason = reason
+        await _session_commit(db)
+
+    # ─── Revoke All (test-facing) ─────────────────────────────────────────────
+
+    @staticmethod
+    async def revoke_all_sessions(db, user_id) -> int:
+        """Revoke all active sessions for a user; returns the revoked count."""
+        stmt = (
+            update(UserSession)
+            .where(UserSession.user_id == user_id, UserSession.is_revoked == False)
+            .values(
+                is_revoked=True,
+                revoked_at=datetime.now(timezone.utc),
+                revocation_reason="logout_all_devices",
+            )
+            .execution_options(synchronize_session=False)
+        )
+        result = await _session_execute(db, stmt)
+        await _session_commit(db)
+        return result.rowcount
+
+    # ─── Cleanup ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def cleanup_expired_sessions(db) -> int:
+        """Delete expired sessions; returns the number of rows deleted."""
+        now = datetime.now(timezone.utc)
+        stmt = delete(UserSession).where(UserSession.expires_at < now)
+        result = await _session_execute(db, stmt)
+        await _session_commit(db)
+        return result.rowcount
 
     # ─── Revoke All ───────────────────────────────────────────────────────────
 

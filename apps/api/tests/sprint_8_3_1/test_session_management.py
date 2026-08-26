@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.main import app
 from api.models.user import User
-from api.models.auth import Session
-from api.services.session_service import SessionService
+from api.models.iam import UserSession as Session
+from api.services.iam.session_service import SessionService
 from api.core.security import create_access_token, get_password_hash
 
 
@@ -38,7 +38,7 @@ async def test_user(db: AsyncSession):
 
 
 @pytest.fixture
-async def test_session(db: AsyncSession, test_user: User):
+async def sample_session(db: AsyncSession, test_user: User):
     """Create a test session."""
     session = Session(
         user_id=test_user.id,
@@ -58,7 +58,7 @@ class TestSessionListing:
     """Test GET /api/v1/auth/sessions endpoint."""
     
     @pytest.mark.asyncio
-    async def test_list_sessions_success(self, client, test_user, test_session, db):
+    async def test_list_sessions_success(self, client, test_user, sample_session, db):
         """Test listing user sessions successfully."""
         # Create access token
         token = create_access_token(data={"sub": str(test_user.id)})
@@ -73,7 +73,7 @@ class TestSessionListing:
         data = response.json()
         assert "sessions" in data
         assert len(data["sessions"]) >= 1
-        assert data["sessions"][0]["id"] == str(test_session.id)
+        assert data["sessions"][0]["id"] == str(sample_session.id)
     
     @pytest.mark.asyncio
     async def test_list_sessions_unauthorized(self, client):
@@ -100,21 +100,21 @@ class TestSessionRevocation:
     """Test DELETE /api/v1/auth/sessions/{id} endpoint."""
     
     @pytest.mark.asyncio
-    async def test_revoke_session_success(self, client, test_user, test_session, db):
+    async def test_revoke_session_success(self, client, test_user, sample_session, db):
         """Test revoking a specific session."""
         token = create_access_token(data={"sub": str(test_user.id)})
         
         response = client.delete(
-            f"/api/v1/auth/sessions/{test_session.id}",
+            f"/api/v1/auth/sessions/{sample_session.id}",
             headers={"Authorization": f"Bearer {token}"},
         )
         
         assert response.status_code == 204
         
         # Verify session is revoked
-        await db.refresh(test_session)
-        assert not test_session.is_active
-        assert test_session.revoked_at is not None
+        await db.refresh(sample_session)
+        assert not sample_session.is_active
+        assert sample_session.revoked_at is not None
     
     @pytest.mark.asyncio
     async def test_revoke_session_not_found(self, client, test_user):
@@ -130,7 +130,7 @@ class TestSessionRevocation:
         assert response.status_code == 404
     
     @pytest.mark.asyncio
-    async def test_revoke_other_user_session(self, client, test_user, test_session, db):
+    async def test_revoke_other_user_session(self, client, test_user, sample_session, db):
         """Test that users cannot revoke other users' sessions."""
         # Create another user
         other_user = User(
@@ -145,7 +145,7 @@ class TestSessionRevocation:
         # Try to revoke test_user's session as other_user
         token = create_access_token(data={"sub": str(other_user.id)})
         response = client.delete(
-            f"/api/v1/auth/sessions/{test_session.id}",
+            f"/api/v1/auth/sessions/{sample_session.id}",
             headers={"Authorization": f"Bearer {token}"},
         )
         
@@ -190,7 +190,7 @@ class TestRevokeAllSessions:
             assert not session.is_active
     
     @pytest.mark.asyncio
-    async def test_revoke_all_excludes_current(self, client, test_user, test_session, db):
+    async def test_revoke_all_excludes_current(self, client, test_user, sample_session, db):
         """Test that revoking all sessions excludes current session."""
         # This depends on implementation - some systems keep current session active
         token = create_access_token(data={"sub": str(test_user.id)})
@@ -204,8 +204,8 @@ class TestRevokeAllSessions:
         assert response.status_code == 200
         
         # Current session should still be active
-        await db.refresh(test_session)
-        assert test_session.is_active
+        await db.refresh(sample_session)
+        assert sample_session.is_active
 
 
 class TestSessionService:
@@ -214,7 +214,7 @@ class TestSessionService:
     @pytest.mark.asyncio
     async def test_create_session(self, db, test_user):
         """Test creating a new session."""
-        session_data = await SessionService.create_session(
+        session_data = await SessionService.create_session_row(
             db=db,
             user_id=test_user.id,
             ip_address="192.168.1.1",
@@ -227,7 +227,7 @@ class TestSessionService:
         assert "session_token" in session_data
     
     @pytest.mark.asyncio
-    async def test_get_user_sessions(self, db, test_user, test_session):
+    async def test_get_user_sessions(self, db, test_user, sample_session):
         """Test retrieving user sessions."""
         sessions = await SessionService.get_user_sessions(
             db=db,
@@ -236,20 +236,20 @@ class TestSessionService:
         )
         
         assert len(sessions) >= 1
-        assert any(s["id"] == str(test_session.id) for s in sessions)
+        assert any(s["id"] == str(sample_session.id) for s in sessions)
     
     @pytest.mark.asyncio
-    async def test_revoke_session(self, db, test_user, test_session):
+    async def test_revoke_session(self, db, test_user, sample_session):
         """Test revoking a session."""
-        await SessionService.revoke_session(
+        await SessionService.revoke_session_row(
             db=db,
-            session_id=test_session.id,
+            session_id=sample_session.id,
             user_id=test_user.id,
         )
         
-        await db.refresh(test_session)
-        assert not test_session.is_active
-        assert test_session.revoked_at is not None
+        await db.refresh(sample_session)
+        assert not sample_session.is_active
+        assert sample_session.revoked_at is not None
     
     @pytest.mark.asyncio
     async def test_revoke_all_sessions(self, db, test_user):
@@ -327,17 +327,17 @@ class TestSessionSecurity:
         assert response.status_code == 401
     
     @pytest.mark.asyncio
-    async def test_revoked_session_rejected(self, client, test_user, test_session, db):
+    async def test_revoked_session_rejected(self, client, test_user, sample_session, db):
         """Test that revoked sessions are rejected."""
         # Revoke session
-        test_session.is_active = False
-        test_session.revoked_at = datetime.now(timezone.utc)
+        sample_session.is_active = False
+        sample_session.revoked_at = datetime.now(timezone.utc)
         await db.commit()
         
         # Try to use revoked session
         token = create_access_token(data={
             "sub": str(test_user.id),
-            "session_id": str(test_session.id),
+            "session_id": str(sample_session.id),
         })
         
         response = client.get(

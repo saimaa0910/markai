@@ -2,6 +2,7 @@ from typing import Dict, Any, List
 
 # Providers default strategy ranking
 DEFAULT_PROVIDER_PRIORITY = [
+    "google",
     "pollinations",
     "huggingface",
     "cloudflare",
@@ -12,7 +13,6 @@ DEFAULT_PROVIDER_PRIORITY = [
     "replicate",
     "stability",
     "openai",
-    "google",
     "ideogram",
 ]
 

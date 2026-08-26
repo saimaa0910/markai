@@ -124,7 +124,7 @@ export function MFARecovery() {
                       {codeObj.used ? '••••••••' : codeObj.code}
                     </code>
                     {codeObj.used && (
-                      <Badge variant="secondary" className="ml-2">Used</Badge>
+                      <Badge variant="neutral" className="ml-2">Used</Badge>
                     )}
                   </div>
                   {!codeObj.used && (
@@ -152,11 +152,10 @@ export function MFARecovery() {
       {/* New Codes Dialog */}
       {showNewCodesDialog && (
         <Dialog
-          open={showNewCodesDialog}
+          isOpen={showNewCodesDialog}
           onClose={handleCloseDialog}
           title="🔐 Your New Recovery Codes"
           description="Save these codes in a safe place. Each code can only be used once."
-          size="lg"
         >
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-2">

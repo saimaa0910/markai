@@ -138,10 +138,6 @@ def check_account_status(user: User) -> None:
     # Check is_active flag
     if not user.is_active:
         raise AccountInactiveError()
-    
-    # Check account lockout
-    if user.locked_until and user.locked_until > datetime.now(timezone.utc):
-        raise AccountLockedError(locked_until=user.locked_until)
 
 
 def check_password_change_required(user: User) -> None:

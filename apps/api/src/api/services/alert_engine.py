@@ -238,3 +238,51 @@ class AlertEngine:
         except Exception as e:
             logger.warning(f"Failed to dispatch custom webhook alert: {e}")
             return False
+
+    @classmethod
+    def check_prolonged_circuit_breaker_alert(
+        cls,
+        db: Session,
+        provider: str,
+        open_duration_seconds: float,
+        threshold_seconds: float = 300.0,
+        organization_id: Optional[uuid.UUID] = None
+    ) -> Optional[AIAlert]:
+        """
+        Trigger a critical incident alert if a provider's circuit breaker has
+        remained continuously open beyond the threshold (default: 300 seconds).
+        """
+        if open_duration_seconds < threshold_seconds:
+            return None
+
+        # Check if an active alert for this provider's circuit breaker already exists to prevent duplicate spam
+        existing_incident = db.query(AIIncident).filter(
+            AIIncident.component == f"circuit_breaker_{provider.lower()}",
+            AIIncident.status == "active"
+        ).first()
+
+        if existing_incident:
+            return None
+
+        incident = cls.report_incident(
+            db=db,
+            component=f"circuit_breaker_{provider.lower()}",
+            service="ai_gateway",
+            severity="critical",
+            root_cause=f"AI Provider '{provider}' circuit breaker continuously open for {int(open_duration_seconds)}s (> {int(threshold_seconds)}s threshold)",
+            organization_id=organization_id
+        )
+
+        msg = (
+            f"CRITICAL: AI Provider Circuit Breaker for '{provider}' has been open for "
+            f"{int(open_duration_seconds)}s exceeding the {int(threshold_seconds)}s limit."
+        )
+        return cls.trigger_alert(
+            db=db,
+            alert_type="AI_CIRCUIT_BREAKER_PROLONGED_OPEN",
+            message=msg,
+            severity="critical",
+            organization_id=organization_id,
+            incident_id=incident.id
+        )
+

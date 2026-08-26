@@ -139,11 +139,11 @@
 
 /* ─── Scroll jitter & CLS prevention ────────────────────────────────────── */
 /*
-  Force the browser to always reserve scrollbar width so layout never
+  Force the browser to reserve scrollbar width so layout never
   shifts when content height crosses the viewport threshold.
 */
 html {
-  overflow-y: scroll;
+  overflow-y: auto;
   scrollbar-gutter: stable;
   scroll-behavior: smooth;
   text-size-adjust: 100%;
@@ -151,18 +151,16 @@ html {
 }
 
 /*
-  Prevent double-scrollbars: body itself must NOT scroll independently;
-  only the inner content areas scroll.
+  Prevent double-scrollbars: outer body does not scroll independently;
+  inner content containers handle scrolling.
 */
 body {
   margin: 0;
-  min-height: 100dvh;
+  min-height: 100vh;
   overflow-x: hidden;
-  overflow-y: auto;
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: var(--font-geist-sans, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
-  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 :root:not(.dark) body {
@@ -173,7 +171,7 @@ body {
 }
 
 @supports (height: 100dvh) {
-  body { height: 100dvh; }
+  body { min-height: 100dvh; }
 }
 
 ::selection {
@@ -203,12 +201,13 @@ body {
   background: hsl(var(--scrollbar-thumb-hover));
 }
 
+/* Global color and visual transitions without transform to prevent animation jitter */
 *, *::before, *::after {
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
-svg, canvas, video, img {
-  transition: none;
+svg, canvas, video, img, [data-framer-motion], .recharts-surface, .recharts-wrapper, .recharts-tooltip-wrapper {
+  transition: none !important;
 }
 
 /* ─── Reduced-motion support ─────────────────────────────────────────────── */
@@ -223,11 +222,10 @@ svg, canvas, video, img {
 
 /* ─── Overflow / sticky header fixes ────────────────────────────────────── */
 
-/* Dashboard wrapper — single scrollable column, header sticks */
+/* Dashboard wrapper — single scrollable column */
 .dashboard-content {
   overflow-y: auto;
   overflow-x: hidden;
-  height: 100dvh;
   overscroll-behavior-y: contain;
 }
 
@@ -305,14 +303,6 @@ svg, canvas, video, img {
   background-color: hsl(var(--surface)) !important;
 }
 
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50%       { transform: translateY(-10px); }
-}
-.animate-float { animation: float 5s ease-in-out infinite; }
-.animate-float-slow { animation: float 7s ease-in-out infinite; }
-.animate-float-delayed { animation: float 6s ease-in-out 1.5s infinite; }
-
 /* ─── Focus-visible ring for accessibility ───────────────────────────────── */
 *:focus-visible {
   outline: 2px solid hsl(var(--ring));
@@ -329,7 +319,10 @@ svg, canvas, video, img {
 @keyframes gradient-x { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 .animate-gradient-x { background-size: 200% auto; animation: gradient-x 4s ease infinite; }
 
-@keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
 .animate-float { animation: float 5s ease-in-out infinite; }
 .animate-float-slow { animation: float 7s ease-in-out infinite; }
 .animate-float-delayed { animation: float 6s ease-in-out 1.5s infinite; }

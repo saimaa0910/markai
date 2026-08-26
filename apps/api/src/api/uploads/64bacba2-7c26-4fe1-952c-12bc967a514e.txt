@@ -1,0 +1,1 @@
+All API routes must apply rate limits. Specifically, AI playground routes are restricted to 10 requests per minute to prevent provider billing spikes. High throughput integrations should request exemption headers.

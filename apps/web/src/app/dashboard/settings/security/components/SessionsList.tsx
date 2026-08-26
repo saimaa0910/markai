@@ -92,7 +92,7 @@ export function SessionsList() {
                   {session.device_name || `${session.device_type || 'Unknown'} Device`}
                 </h3>
                 {session.is_current && (
-                  <Badge variant="success">Current Session</Badge>
+                  <Badge variant="neutral">Current Session</Badge>
                 )}
               </div>
               
@@ -128,27 +128,26 @@ export function SessionsList() {
       {/* Revoke All Dialog */}
       {showRevokeAllDialog && (
         <Dialog
-          open={showRevokeAllDialog}
+          isOpen={showRevokeAllDialog}
           onClose={() => setShowRevokeAllDialog(false)}
           title="Revoke All Other Sessions?"
           description="This will log you out from all other devices. Your current session will remain active."
-          actions={
-            <>
-              <Button
-                variant="outline"
-                onClick={() => setShowRevokeAllDialog(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={handleRevokeAllOtherSessions}
-              >
-                Revoke All
-              </Button>
-            </>
-          }
-        />
+        >
+          <div className="flex gap-2 pt-4 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setShowRevokeAllDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleRevokeAllOtherSessions}
+            >
+              Revoke All
+            </Button>
+          </div>
+        </Dialog>
       )}
     </div>
   );

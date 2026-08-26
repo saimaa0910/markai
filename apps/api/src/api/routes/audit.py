@@ -15,6 +15,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.core.deps import get_current_user
 from api.database.session import get_db
@@ -57,19 +58,66 @@ class AuditStatsResponse(BaseModel):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _require_admin_or_superuser(current_user: User) -> None:
-    """Raise 403 if user is not superuser or org admin."""
-    if not current_user.is_superuser:
-        # We allow org admins/owners to view audit logs for their org
-        # (The route filters by org context automatically)
-        pass  # We'll filter by org in the query below
+def _resolve_org_context(request: Request, current_user: User, db: Session) -> Optional[uuid.UUID]:
+    """
+    Resolve the caller's own organization context.
+
+    The client-supplied ``organization_id`` is NEVER trusted: the resolved org
+    is always one the current user actually belongs to. The X-Organization-ID
+    header is honored only when the user is a member of that organization;
+    otherwise the user's first active membership is used.
+    """
+    from api.models.membership import UserOrganization
+
+    memberships = (
+        db.query(UserOrganization)
+        .filter(
+            UserOrganization.user_id == current_user.id,
+            UserOrganization.is_revoked == False,
+        )
+        .all()
+    )
+    if not memberships:
+        return None
+    org_ids = [m.organization_id for m in memberships]
+
+    header_val = request.headers.get("x-organization-id")
+    if header_val:
+        try:
+            header_org = uuid.UUID(header_val)
+        except ValueError:
+            header_org = None
+        if header_org and header_org in org_ids:
+            return header_org
+    return org_ids[0]
+
+
+def _require_admin_or_superuser(current_user: User, db: Session, org_id: uuid.UUID) -> None:
+    """Raise 403 unless the user is a superuser or an OWNER/ADMIN of org_id."""
+    if current_user.is_superuser:
+        return
+    from api.models.membership import UserOrganization
+
+    membership = (
+        db.query(UserOrganization)
+        .filter(
+            UserOrganization.user_id == current_user.id,
+            UserOrganization.organization_id == org_id,
+            UserOrganization.is_revoked == False,
+        )
+        .first()
+    )
+    if not membership or membership.role.value not in ("OWNER", "ADMIN"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Audit logs require organization admin or owner access",
+        )
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/logs", response_model=List[AuditLogResponse])
-def list_audit_logs(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_audit_logs(  # Sprint 8.3.1
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -85,43 +133,30 @@ def list_audit_logs(
     # Pagination
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
+    _auth: None = Depends(enforce_all_auth_policies),
 ) -> Any:
     """
     List audit log entries with optional filtering.
 
-    Superusers see all logs. Org members see only their org's logs.
+    Superusers see all logs. Org admins/owners see only their own org's logs.
     """
     query = db.query(AuditLog)
 
     # Access control
-    if not current_user.is_superuser:
-        # Determine org context
-        org_ctx = organization_id
-        if not org_ctx:
-            # Try from header
-            header_val = request.headers.get("x-organization-id")
-            if header_val:
-                try:
-                    org_ctx = uuid.UUID(header_val)
-                except ValueError:
-                    pass
-        if not org_ctx:
-            # First membership
-            from api.models.membership import UserOrganization
-            m = db.query(UserOrganization).filter(
-                UserOrganization.user_id == current_user.id
-            ).first()
-            if m:
-                org_ctx = m.organization_id
-
+    if current_user.is_superuser:
+        if organization_id:
+            query = query.filter(AuditLog.organization_id == organization_id)
+    else:
+        # Client-supplied organization_id is ignored; scope is derived from the
+        # caller's own membership and admin/owner role is enforced.
+        org_ctx = _resolve_org_context(request, current_user, db)
         if not org_ctx:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No organization context available",
             )
+        _require_admin_or_superuser(current_user, db, org_ctx)
         query = query.filter(AuditLog.organization_id == org_ctx)
-    elif organization_id:
-        query = query.filter(AuditLog.organization_id == organization_id)
 
     # Apply filters
     if action:
@@ -146,38 +181,30 @@ def list_audit_logs(
 
 
 @router.get("/logs/{log_id}", response_model=AuditLogResponse)
-def get_audit_log(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_audit_log(  # Sprint 8.3.1
     log_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> Any:
+    current_user: User = Depends(get_current_user),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Get a single audit log entry by ID."""
     log = db.query(AuditLog).filter(AuditLog.id == log_id).first()
     if not log:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit log not found")
 
-    # Non-superusers can only see logs from their orgs
-    if not current_user.is_superuser and log.organization_id:
-        from api.models.membership import UserOrganization
-        m = db.query(UserOrganization).filter(
-            UserOrganization.user_id == current_user.id,
-            UserOrganization.organization_id == log.organization_id,
-        ).first()
-        if not m:
+    # Non-superusers can only see logs from their own orgs, as owner/admin
+    if not current_user.is_superuser:
+        if not log.organization_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        _require_admin_or_superuser(current_user, db, log.organization_id)
 
     return log
 
 
 @router.get("/stats")
-def get_audit_stats(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_audit_stats(  # Sprint 8.3.1
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    organization_id: Optional[uuid.UUID] = Query(None),
-) -> Any:
+    organization_id: Optional[uuid.UUID] = Query(None),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """
     Return summary statistics for audit logs.
     """
@@ -185,20 +212,18 @@ def get_audit_stats(
 
     query = db.query(AuditLog)
 
-    if not current_user.is_superuser:
-        org_ctx = organization_id
+    if current_user.is_superuser:
+        if organization_id:
+            query = query.filter(AuditLog.organization_id == organization_id)
+    else:
+        org_ctx = _resolve_org_context(request, current_user, db)
         if not org_ctx:
-            from api.models.membership import UserOrganization
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
-            m = db.query(UserOrganization).filter(
-                UserOrganization.user_id == current_user.id
-            ).first()
-            if m:
-                org_ctx = m.organization_id
-        if org_ctx:
-            query = query.filter(AuditLog.organization_id == org_ctx)
-    elif organization_id:
-        query = query.filter(AuditLog.organization_id == organization_id)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No organization context available",
+            )
+        _require_admin_or_superuser(current_user, db, org_ctx)
+        query = query.filter(AuditLog.organization_id == org_ctx)
 
     total = query.count()
 

@@ -12,7 +12,7 @@ import { apiClient } from '@/services/api-client';
 interface SearchItem {
   id: string;
   name: string;
-  category: 'Pages' | 'Leads' | 'Contacts' | 'Companies' | 'Prompts' | 'Conversations' | 'Knowledge' | 'Files' | 'Quick Actions';
+  category: 'Pages' | 'Leads' | 'Contacts' | 'Companies' | 'Prompts' | 'Conversations' | 'Knowledge' | 'Files' | 'Models' | 'Providers' | 'Campaigns' | 'Quick Actions';
   subtitle?: string;
   action: () => void;
 }
@@ -88,33 +88,68 @@ export function CommandPalette() {
     enabled: commandPaletteOpen && !!activeOrg,
   });
 
+  const { data: models = [] } = useQuery<any[]>({
+    queryKey: ['models', activeOrg?.id],
+    queryFn: async () => {
+      const res = await apiClient.get('/ai/models/');
+      return res.data || [];
+    },
+    enabled: commandPaletteOpen && !!activeOrg,
+  });
+
+  const { data: providers = [] } = useQuery<any[]>({
+    queryKey: ['providers', activeOrg?.id],
+    queryFn: async () => {
+      const res = await apiClient.get('/ai/providers/');
+      return res.data || [];
+    },
+    enabled: commandPaletteOpen && !!activeOrg,
+  });
+
+  const { data: campaigns = [] } = useQuery<any[]>({
+    queryKey: ['campaigns', activeOrg?.id],
+    queryFn: async () => {
+      const res = await apiClient.get('/campaigns/');
+      return res.data || [];
+    },
+    enabled: commandPaletteOpen && !!activeOrg,
+  });
+
   const items = React.useMemo(() => {
     const searchItems: SearchItem[] = [];
 
     // Static Navigation Pages
     const pages = [
-      { name: 'Workspace Hub / Dashboard', path: '/dashboard' },
+      { name: 'Core Platform Hub / Dashboard', path: '/dashboard' },
       { name: 'CRM Pipeline (Leads, Contacts)', path: '/dashboard/crm' },
-      { name: 'Campaigns Center', path: '/dashboard/campaigns' },
-      { name: 'AI Chat playground', path: '/dashboard/ai/chat' },
+      { name: 'Marketing Campaigns', path: '/dashboard/campaigns' },
       { name: 'AI Providers Monitor', path: '/dashboard/ai/providers' },
       { name: 'AI Model Registry', path: '/dashboard/ai/models' },
-      { name: 'AI Playground Sandbox', path: '/dashboard/ai/playground' },
-      { name: 'AI Model Comparison Lab', path: '/dashboard/ai/compare' },
       { name: 'AI Provider Health Center', path: '/dashboard/ai/health' },
       { name: 'AI Platform Admin Console', path: '/dashboard/ai/admin' },
       { name: 'AI Token Usage & Costs', path: '/dashboard/ai/usage' },
       { name: 'AI Latency Analytics', path: '/dashboard/ai/analytics' },
       { name: 'AI Gateway Router', path: '/dashboard/ai/router' },
-      { name: 'AI Provider Settings', path: '/dashboard/ai/settings' },
-      { name: 'Knowledge Base Ingestion', path: '/dashboard/knowledge' },
-      { name: 'Prompt Library Templates', path: '/dashboard/prompts' },
-      { name: 'AI Conversation History', path: '/dashboard/conversations' },
+      { name: 'AI Security Center', path: '/dashboard/ai/security' },
+      { name: 'AI Infrastructure', path: '/dashboard/ai/infrastructure' },
+      { name: 'AI Observability', path: '/dashboard/ai/observability' },
+      { name: 'AI Workspace', path: '/dashboard/playground/workspace' },
+      { name: 'AI Playground / Sandbox', path: '/dashboard/playground/sandbox' },
+      { name: 'Agent Sandbox', path: '/dashboard/playground/agent-sandbox' },
+      { name: 'AI Conversations', path: '/dashboard/playground/conversations' },
+      { name: 'AI Model Comparison Lab', path: '/dashboard/playground/compare' },
+      { name: 'Image Studio Creative', path: '/dashboard/playground/image-studio' },
+      { name: 'Social Studio Publisher', path: '/dashboard/playground/social-studio' },
+      { name: 'Prompt Platform Templates', path: '/dashboard/prompts' },
+      { name: 'Knowledge Base Dashboard', path: '/dashboard/knowledge' },
+      { name: 'Knowledge Documents', path: '/dashboard/knowledge/documents' },
+      { name: 'Knowledge File Storage Assets', path: '/dashboard/knowledge/files' },
+      { name: 'AI Agents Management', path: '/dashboard/agents' },
+      { name: 'Workflow Engine Visual Builder', path: '/dashboard/workflows' },
       { name: 'Executive Analytics Hub', path: '/dashboard/analytics' },
-      { name: 'Integration Connections', path: '/dashboard/integrations' },
-      { name: 'Team Member Management', path: '/dashboard/users' },
-      { name: 'File Storage Assets', path: '/dashboard/files' },
-      { name: 'Settings', path: '/dashboard/settings' },
+      { name: 'Team Members (Users & Teams)', path: '/dashboard/settings/users' },
+      { name: 'Integration Connectors', path: '/dashboard/settings/integrations' },
+      { name: 'Platform Settings', path: '/dashboard/settings' },
     ];
 
     pages.forEach((p) => {
@@ -125,6 +160,48 @@ export function CommandPalette() {
         subtitle: 'Navigation Link',
         action: () => {
           router.push(p.path);
+          setCommandPaletteOpen(false);
+        },
+      });
+    });
+
+    // Dynamic Models
+    models.forEach((m) => {
+      searchItems.push({
+        id: `model-${m.id}`,
+        name: m.name,
+        category: 'Models',
+        subtitle: `${m.provider} · ${(m.context_window / 1000).toFixed(0)}k context`,
+        action: () => {
+          router.push('/dashboard/ai/models');
+          setCommandPaletteOpen(false);
+        },
+      });
+    });
+
+    // Dynamic Providers
+    providers.forEach((pr) => {
+      searchItems.push({
+        id: `provider-${pr.id}`,
+        name: pr.name,
+        category: 'Providers',
+        subtitle: `Status: ${pr.status} | Latency: ${pr.latency_ms ?? 0}ms`,
+        action: () => {
+          router.push('/dashboard/ai/providers');
+          setCommandPaletteOpen(false);
+        },
+      });
+    });
+
+    // Dynamic Campaigns
+    campaigns.forEach((c) => {
+      searchItems.push({
+        id: `campaign-${c.id}`,
+        name: c.name,
+        category: 'Campaigns',
+        subtitle: `Status: ${c.status} · Budget: $${c.budget}`,
+        action: () => {
+          router.push('/dashboard/campaigns');
           setCommandPaletteOpen(false);
         },
       });
@@ -194,7 +271,7 @@ export function CommandPalette() {
         category: 'Conversations',
         subtitle: `AI Conversation session`,
         action: () => {
-          router.push('/dashboard/conversations');
+          router.push('/dashboard/playground/conversations');
           setCommandPaletteOpen(false);
         },
       });
@@ -222,7 +299,7 @@ export function CommandPalette() {
         category: 'Files',
         subtitle: `Stored asset | size: ${(f.file_size / 1024).toFixed(1)} KB`,
         action: () => {
-          router.push('/dashboard/files');
+          router.push('/dashboard/knowledge/files');
           setCommandPaletteOpen(false);
         },
       });

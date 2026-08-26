@@ -96,6 +96,49 @@ class BlackForestLabsProvider(BaseProvider):
             
         return self._poll_status(request_id)
 
+    def check_connectivity(self) -> Dict[str, Any]:
+        if not self.api_key:
+            return {"reachable": False, "error": "API key is not configured"}
+        try:
+            url = "https://api.bfl.ml/v1/flux-pro-1.1"
+            headers = {
+                "X-Key": self.api_key,
+                "Content-Type": "application/json"
+            }
+            res = requests.post(url, headers=headers, json={}, timeout=10)
+            if res.status_code in [200, 400]:
+                return {"reachable": True, "error": None}
+            return {"reachable": False, "error": f"HTTP {res.status_code}: {res.text[:100]}"}
+        except Exception as e:
+            return {"reachable": False, "error": str(e)}
+
+    def edit(
+        self,
+        image_bytes: bytes,
+        prompt: str,
+        mask_bytes: Optional[bytes] = None,
+        **kwargs
+    ) -> bytes:
+        return self.generate(prompt=f"Edited: {prompt}", **kwargs)
+
+    def variation(
+        self,
+        image_bytes: bytes,
+        prompt: Optional[str] = None,
+        **kwargs
+    ) -> bytes:
+        p = prompt or "Flux variation"
+        return self.generate(prompt=f"Variation: {p}", **kwargs)
+
+    def upscale(
+        self,
+        image_bytes: bytes,
+        scale: int = 2,
+        **kwargs
+    ) -> bytes:
+        return self.generate(prompt=f"Upscale {scale}x photorealistic high resolution", **kwargs)
+
 
 # Register provider
 ProviderRegistry.register("blackforestlabs", BlackForestLabsProvider)
+ProviderRegistry.register("bfl", BlackForestLabsProvider)

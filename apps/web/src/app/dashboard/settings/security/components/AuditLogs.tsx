@@ -82,7 +82,7 @@ export function AuditLogs() {
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-medium">{log.description}</h3>
-                  <Badge variant="secondary">{log.event_category}</Badge>
+                  <Badge variant="neutral">{log.event_category}</Badge>
                 </div>
                 <div className="text-sm text-muted-foreground space-y-0.5">
                   <p>🕒 {new Date(log.created_at).toLocaleString()}</p>

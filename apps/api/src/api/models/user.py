@@ -156,6 +156,28 @@ class User(Base):
         String(500), nullable=True, comment="Optional reason provided by user"
     )
     
+    # ── Sprint 8.3.1 Phase 1: Authentication Hardening ─────────────────────
+    is_locked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="FALSE",
+        comment="Whether the account is locked",
+    )
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0",
+        comment="Number of failed login attempts since last success",
+    )
+    change_password_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="FALSE",
+        comment="Whether user must change their password on next login",
+    )
+    temporary_password: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True,
+        comment="Encrypted temporary password for first login",
+    )
+    temporary_password_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Expiry time for temporary password",
+    )
+    
     # ── Sprint 8.3.1 Phase 3: Account Lifecycle & Data Management ────────────
     deactivated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True,

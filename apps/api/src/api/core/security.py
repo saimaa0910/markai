@@ -37,13 +37,18 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(
-    subject: Union[str, Any],
+    subject: Union[str, Any] = None,
     expires_delta: Union[timedelta, None] = None,
     token_id: Union[str, uuid.UUID, None] = None,
+    data: Union[dict, None] = None,
 ) -> str:
     """
     Generate a JWT access token for the subject.
     """
+    sub = subject
+    if data and "sub" in data:
+        sub = data["sub"]
+
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
@@ -52,10 +57,16 @@ def create_access_token(
         )
     to_encode = {
         "exp": expire,
-        "sub": str(subject),
+        "sub": str(sub),
         "type": "access",
         "jti": str(token_id or uuid.uuid4()),
     }
+    # Carry extra claims (e.g. session_id) from data into the token payload.
+    if data:
+        for key, value in data.items():
+            if key == "sub":
+                continue
+            to_encode[key] = value
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
     return str(encoded_jwt)
 

@@ -28,12 +28,10 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
     response_model=OrganizationMemoryResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_organization_memory(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def create_organization_memory(  # Sprint 8.3.1
     entry_in: OrganizationMemoryCreate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return MemoryManager.write_org_memory(
         db=db,
         organization_id=membership.organization_id,
@@ -45,14 +43,12 @@ def create_organization_memory(
 
 
 @router.get("/organization", response_model=PaginatedResponse[OrganizationMemoryResponse])
-def list_organization_memories(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_organization_memories(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     category: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-) -> Any:
+    page_size: int = Query(20, ge=1, le=100),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     skip = (page - 1) * page_size
     filters = [
         OrganizationMemory.organization_id == membership.organization_id,
@@ -79,13 +75,11 @@ def list_organization_memories(
 
 
 @router.patch("/organization/{entry_id}", response_model=OrganizationMemoryResponse)
-def update_organization_memory(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_organization_memory(  # Sprint 8.3.1
     entry_id: uuid.UUID,
     entry_in: OrganizationMemoryUpdate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     entry = (
         db.query(OrganizationMemory)
         .filter(
@@ -111,12 +105,10 @@ def update_organization_memory(
 
 
 @router.delete("/organization/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_organization_memory(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def delete_organization_memory(  # Sprint 8.3.1
     entry_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> None:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> None:
     entry = (
         db.query(OrganizationMemory)
         .filter(
@@ -138,12 +130,10 @@ def delete_organization_memory(
 
 
 @router.delete("/sessions/{session_id}/clear", status_code=status.HTTP_200_OK)
-def clear_session_memory(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def clear_session_memory(  # Sprint 8.3.1
     session_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     cleared_count = MemoryManager.clear_session_memory(
         db=db, session_id=session_id, organization_id=membership.organization_id
     )
@@ -153,12 +143,10 @@ def clear_session_memory(
 # --- AGENT & SESSION MEMORY RETRIEVAL ENDPOINTS ---
 
 @router.get("/sessions/{session_id}", response_model=List[AgentMemoryResponse])
-def get_session_memories(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_session_memories(  # Sprint 8.3.1
     session_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """List short term memories for a session."""
     session = db.query(AgentSession).filter(
         AgentSession.id == session_id,
@@ -178,15 +166,13 @@ def get_session_memories(
 
 
 @router.post("/sessions/{session_id}", response_model=AgentMemoryResponse, status_code=status.HTTP_201_CREATED)
-def write_session_memory(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def write_session_memory(  # Sprint 8.3.1
     session_id: uuid.UUID,
     key: str = Query(...),
     value: str = Query(...),
     importance: float = Query(0.5),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Upsert short term memory for a session."""
     session = db.query(AgentSession).filter(
         AgentSession.id == session_id,
@@ -209,12 +195,10 @@ def write_session_memory(
 
 
 @router.get("/agents/{agent_id}", response_model=List[AgentMemoryResponse])
-def get_agent_long_term_memories(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_agent_long_term_memories(  # Sprint 8.3.1
     agent_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """List long term memories for an agent."""
     agent = db.query(AgentDefinition).filter(
         AgentDefinition.id == agent_id,
@@ -233,15 +217,13 @@ def get_agent_long_term_memories(
 
 
 @router.post("/agents/{agent_id}", response_model=AgentMemoryResponse, status_code=status.HTTP_201_CREATED)
-def write_agent_long_term_memory(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def write_agent_long_term_memory(  # Sprint 8.3.1
     agent_id: uuid.UUID,
     key: str = Query(...),
     value: str = Query(...),
     importance: float = Query(0.5),
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Upsert long term memory for an agent."""
     agent = db.query(AgentDefinition).filter(
         AgentDefinition.id == agent_id,
@@ -263,12 +245,10 @@ def write_agent_long_term_memory(
 
 
 @router.delete("/agents/{agent_id}/clear", status_code=status.HTTP_200_OK)
-def clear_agent_long_term_memory(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def clear_agent_long_term_memory(  # Sprint 8.3.1
     agent_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     """Clear all long term memories for an agent."""
     agent = db.query(AgentDefinition).filter(
         AgentDefinition.id == agent_id,

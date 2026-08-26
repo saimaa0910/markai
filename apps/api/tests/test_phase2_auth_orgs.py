@@ -23,9 +23,12 @@ def test_phase2_forgot_reset_password(db_session) -> None:
     assert res.status_code == 200
     assert res.json()["success"] is True
 
-    # 3. Get the user's ID
+    # Get the user's ID
     user = db_session.query(User).filter(User.email == email).first()
     assert user is not None
+    # Verify the registered email (login requires a verified account)
+    user.is_verified = True
+    db_session.commit()
     
     # Generate token
     from api.core.security import create_access_token
@@ -54,7 +57,12 @@ def test_phase2_organization_management_and_invitations(db_session) -> None:
         "org_name": "Owner Org"
     })
     assert reg_res.status_code == 201
-    
+
+    # Verify owner email so login is permitted
+    owner = db_session.query(User).filter(User.email == owner_email).first()
+    owner.is_verified = True
+    db_session.commit()
+
     # Login as owner
     login_res = client.post("/api/v1/auth/login", data={
         "username": owner_email,

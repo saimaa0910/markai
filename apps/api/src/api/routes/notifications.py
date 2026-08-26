@@ -23,15 +23,13 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
 
 
 @router.get("/", response_model=PaginatedResponse[NotificationResponse])
-def list_notifications(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def list_notifications(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     is_read: Optional[bool] = Query(None),
     channel: Optional[NotificationChannel] = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-) -> Any:
+    page_size: int = Query(20, ge=1, le=100),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     skip = (page - 1) * page_size
     filters = [
         Notification.user_id == membership.user_id,
@@ -62,12 +60,10 @@ def list_notifications(
 
 
 @router.post("/{notification_id}/read", response_model=NotificationResponse)
-def mark_notification_as_read(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def mark_notification_as_read(  # Sprint 8.3.1
     notification_id: uuid.UUID,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     notification = (
         db.query(Notification)
         .filter(
@@ -90,11 +86,9 @@ def mark_notification_as_read(
 
 
 @router.post("/read-all", status_code=status.HTTP_200_OK)
-def mark_all_notifications_as_read(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def mark_all_notifications_as_read(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     notifications = (
         db.query(Notification)
         .filter(
@@ -112,24 +106,20 @@ def mark_all_notifications_as_read(
 
 
 @router.get("/preferences", response_model=List[NotificationPreferenceResponse])
-def get_notification_preferences(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_notification_preferences(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     return NotificationService.get_user_preferences(
         db=db, user_id=membership.user_id, organization_id=membership.organization_id
     )
 
 
 @router.patch("/preferences/{pref_id}", response_model=NotificationPreferenceResponse)
-def update_notification_preference(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def update_notification_preference(  # Sprint 8.3.1
     pref_id: uuid.UUID,
     pref_in: NotificationPreferenceUpdate,
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member),
-) -> Any:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     pref = (
         db.query(NotificationPreference)
         .filter(

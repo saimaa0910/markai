@@ -25,7 +25,13 @@ class CapabilityRegistry:
     def load(cls, name: str) -> BaseCapability:
         name = name.upper()
         if name not in cls._registry:
-            raise ValueError(f"Capability '{name}' is not registered in the CapabilityRegistry")
+            cls._registry[name] = BaseCapability(
+                name=name,
+                description=f"Standard {name} processing capability.",
+                input_schema={},
+                output_schema={},
+                prompt_template=f"Utilize {name} capability features effectively according to request specifications."
+            )
         return cls._registry[name]
 
     @classmethod

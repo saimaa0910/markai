@@ -91,6 +91,10 @@ def upgrade() -> None:
         sa.Column('revoke_reason', sa.Text(), nullable=True, comment='Reason for revocation'),
         sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text('NOW()')),
         sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text('NOW()')),
+        sa.Column('deleted_at', sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column('created_by', sa.String(), nullable=True),
+        sa.Column('updated_by', sa.String(), nullable=True),
+        sa.Column('version', sa.Integer(), nullable=False, server_default='1'),
     )
     
     # Indexes for trusted_devices
@@ -98,14 +102,12 @@ def upgrade() -> None:
         'idx_trusted_devices_user_active',
         'trusted_devices',
         ['user_id', 'is_active'],
-        comment='Fast lookup of user\'s active trusted devices',
     )
     
     op.create_index(
         'idx_trusted_devices_fingerprint',
         'trusted_devices',
         ['device_fingerprint'],
-        comment='Fast device fingerprint lookup',
     )
     
     op.create_index(
@@ -113,7 +115,6 @@ def upgrade() -> None:
         'trusted_devices',
         ['expires_at'],
         postgresql_where=sa.text('expires_at IS NOT NULL'),
-        comment='Partial index for expiring devices (cleanup job)',
     )
     
     # ========================================================================
@@ -129,6 +130,11 @@ def upgrade() -> None:
         sa.Column('used_at', sa.TIMESTAMP(timezone=True), nullable=True, comment='When code was used'),
         sa.Column('used_from_ip', sa.String(45), nullable=True, comment='IP address where code was used'),
         sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text('NOW()')),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text('NOW()')),
+        sa.Column('deleted_at', sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column('created_by', sa.String(), nullable=True),
+        sa.Column('updated_by', sa.String(), nullable=True),
+        sa.Column('version', sa.Integer(), nullable=False, server_default='1'),
     )
     
     # Indexes for mfa_recovery_codes
@@ -136,14 +142,12 @@ def upgrade() -> None:
         'idx_mfa_recovery_codes_user',
         'mfa_recovery_codes',
         ['user_id'],
-        comment='Fast lookup of user\'s recovery codes',
     )
     
     op.create_index(
         'idx_mfa_recovery_codes_active',
         'mfa_recovery_codes',
         ['user_id', 'is_used'],
-        comment='Fast lookup of unused recovery codes',
     )
     
     # ========================================================================
@@ -161,6 +165,11 @@ def upgrade() -> None:
         sa.Column('window_end', sa.TIMESTAMP(timezone=True), nullable=False, comment='End of rate limit window'),
         sa.Column('blocked', sa.Boolean(), nullable=False, server_default='FALSE', comment='Whether request was blocked'),
         sa.Column('created_at', sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text('NOW()')),
+        sa.Column('updated_at', sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text('NOW()')),
+        sa.Column('deleted_at', sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column('created_by', sa.String(), nullable=True),
+        sa.Column('updated_by', sa.String(), nullable=True),
+        sa.Column('version', sa.Integer(), nullable=False, server_default='1'),
     )
     
     # Indexes for rate_limit_log
@@ -168,14 +177,12 @@ def upgrade() -> None:
         'idx_rate_limit_log_ip_endpoint',
         'rate_limit_log',
         ['ip_address', 'endpoint', 'window_end'],
-        comment='Fast rate limit checks by IP and endpoint',
     )
     
     op.create_index(
         'idx_rate_limit_log_user',
         'rate_limit_log',
         ['user_id', 'created_at'],
-        comment='User rate limit history',
     )
 
 

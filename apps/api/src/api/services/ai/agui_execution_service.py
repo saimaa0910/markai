@@ -63,18 +63,18 @@ class AGUIExecutionService:
 
             rendered = render_res.unwrap()
 
-            # 2. Mock AGUI response chunk stream / payload
-            response_payload = {
-                "prompt_id": str(dto.prompt_id),
-                "rendered_text": rendered.rendered_text,
-                "model_used": "gpt-4o",
-                "output_text": f"AGUI Response generated for prompt '{rendered.title}'.",
-                "agui_ui_schema": {
-                    "component": "Card",
-                    "props": {"title": rendered.title, "status": "success"},
-                },
-            }
+            # 2. Execute prompt through model router (P2-3): real model call via gateway.
+            # If no real model is configured, return a structured failure rather
+            # than a mock/gpt-4o payload.
+            if not self.router_service:
+                return ServiceResult.fail(
+                    error="No model router service configured; cannot execute prompt without a connected AI provider.",
+                    error_code="NO_MODEL_CONFIGURED",
+                )
 
+            response_payload = await self.router_service.execute_prompt(
+                dto, rendered_text=rendered.rendered_text
+            )
             return ServiceResult.ok(data=response_payload)
 
         except Exception as exc:

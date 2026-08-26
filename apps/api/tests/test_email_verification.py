@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.core.config import settings
 from api.database.session import get_db
 from api.database.base import Base
 from api.models.user import User
@@ -48,8 +49,9 @@ def unverified_user(db):
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 class TestEmailVerificationTokenCreation:
-    def test_token_created_on_register(self, client, db):
+    def test_token_created_on_register(self, client, db, monkeypatch):
         """Registration creates a DB verification token."""
+        monkeypatch.setattr(settings, "ENVIRONMENT", "development")
         with patch("api.routes.auth.send_verification_email", return_value=True):
             res = client.post("/api/v1/auth/register", json={
                 "email": "newuser@example.com",
@@ -67,8 +69,9 @@ class TestEmailVerificationTokenCreation:
         assert token is not None
         assert token.expires_at is not None
 
-    def test_token_is_hashed_not_plaintext(self, client, db):
+    def test_token_is_hashed_not_plaintext(self, client, db, monkeypatch):
         """Stored token_hash must be a SHA-256 hex (64 chars), not raw token."""
+        monkeypatch.setattr(settings, "ENVIRONMENT", "development")
         with patch("api.routes.auth.send_verification_email", return_value=True):
             client.post("/api/v1/auth/register", json={
                 "email": "hashed@example.com",

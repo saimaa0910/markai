@@ -1,5 +1,6 @@
 import uuid
 import os
+import re
 import shutil
 import datetime
 from typing import List, Optional, Any
@@ -7,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, or_, and_, func
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.database.session import get_db
 from api.core.deps import RoleChecker, get_current_user
@@ -767,8 +769,11 @@ async def upload_attachment(
     from api.routes.files import UPLOAD_DIR
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     file_id = uuid.uuid4()
+    ALLOWED_EXTENSIONS = {"txt", "pdf", "csv", "json", "md", "py", "html"}
     extension = file.filename.split(".")[-1] if "." in file.filename else ""
-    local_filename = f"{file_id}.{extension}" if extension else f"{file_id}"
+    # Sanitize: keep only alphanumeric chars; default to plain filename if not allowed
+    extension = re.sub(r"[^a-zA-Z0-9]", "", extension).lower()
+    local_filename = f"{file_id}.{extension}" if extension and extension in ALLOWED_EXTENSIONS else f"{file_id}"
     file_path = os.path.join(UPLOAD_DIR, local_filename)
 
     with open(file_path, "wb") as buffer:
@@ -847,15 +852,22 @@ async def upload_voice_and_transcribe(
     if not groq_key:
         from api.models.ai_platform import AIProvider, AIProviderKey
         from api.core.encryption import decrypt_key
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
         from sqlalchemy import func
-        prov = db.query(AIProvider).filter(func.lower(AIProvider.name) == "groq").first()
+        from api.repositories.ai_gateway_repository import AIProviderRepository, AIProviderKeyRepository
+        from api.repositories.filters import FilterParam, FilterOperator
+        prov = AIProviderRepository().find_one_sync(
+            db,
+            [FilterParam(field="name", operator=FilterOperator.EQ, value="groq")],
+        )
         if prov:
-            key_record = db.query(AIProviderKey).filter(
-                AIProviderKey.provider_id == prov.id,
-                AIProviderKey.organization_id == membership.organization_id,
-                AIProviderKey.is_active == True
-            ).first()
+            key_record = AIProviderKeyRepository().find_one_sync(
+                db,
+                [
+                    FilterParam(field="provider_id", operator=FilterOperator.EQ, value=prov.id),
+                    FilterParam(field="organization_id", operator=FilterOperator.EQ, value=membership.organization_id),
+                    FilterParam(field="is_active", operator=FilterOperator.EQ, value=True),
+                ],
+            )
             if key_record:
                 try:
                     groq_key = decrypt_key(key_record.api_key)

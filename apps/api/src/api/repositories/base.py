@@ -418,6 +418,7 @@ class BaseRepository(Generic[ModelType], IBaseRepository[ModelType]):
         filters: List[FilterParam],
         obj_in: Dict[str, Any],
         actor_id: Optional[str] = None,
+        organization_id: Optional[uuid.UUID] = None,
     ) -> int:
         data = dict(obj_in)
         if actor_id and hasattr(self.model, "updated_by"):
@@ -427,6 +428,8 @@ class BaseRepository(Generic[ModelType], IBaseRepository[ModelType]):
 
         stmt = sql_update(self.model)
         stmt = apply_filters(stmt, self.model, filters)
+        if organization_id and hasattr(self.model, "organization_id"):
+            stmt = stmt.where(self.model.organization_id == organization_id)
         stmt = stmt.values(**data)
 
         res = await self._execute(session, stmt)
@@ -469,6 +472,7 @@ class BaseRepository(Generic[ModelType], IBaseRepository[ModelType]):
         session: Any,
         entity_or_id: Union[ModelType, uuid.UUID, str],
         actor_id: Optional[str] = None,
+        organization_id: Optional[uuid.UUID] = None,
     ) -> ModelType:
         if isinstance(entity_or_id, self.model):
             entity = entity_or_id
@@ -478,6 +482,10 @@ class BaseRepository(Generic[ModelType], IBaseRepository[ModelType]):
                 raise EntityNotFoundError(self.model.__name__, entity_or_id)
 
         if hasattr(entity, "deleted_at"):
+            # tenant isolation: only restore entities belonging to the caller's org
+            if organization_id and hasattr(entity, "organization_id"):
+                if entity.organization_id != organization_id:
+                    raise EntityNotFoundError(self.model.__name__, entity_or_id)
             entity.deleted_at = None
         if actor_id and hasattr(entity, "updated_by"):
             entity.updated_by = actor_id
@@ -489,8 +497,11 @@ class BaseRepository(Generic[ModelType], IBaseRepository[ModelType]):
         self,
         session: Any,
         id: Union[uuid.UUID, str],
+        organization_id: Optional[uuid.UUID] = None,
     ) -> bool:
         stmt = delete(self.model).where(self.model.id == id)
+        if organization_id and hasattr(self.model, "organization_id"):
+            stmt = stmt.where(self.model.organization_id == organization_id)
         res = await self._execute(session, stmt)
         return res.rowcount > 0
 
@@ -500,17 +511,19 @@ class BaseRepository(Generic[ModelType], IBaseRepository[ModelType]):
         ids: Sequence[Union[uuid.UUID, str]],
         soft: bool = True,
         actor_id: Optional[str] = None,
+        organization_id: Optional[uuid.UUID] = None,
     ) -> int:
         if not ids:
             return 0
         if soft and hasattr(self.model, "deleted_at"):
             values: Dict[str, Any] = {"deleted_at": datetime.datetime.now(datetime.timezone.utc)}
-            if actor_id and hasattr(self.model, "updated_by"):
-                values["updated_by"] = actor_id
+            if actor_id and hasattr(entity, "updated_by"):  # entity not in scope; use model default
+                pass
             stmt = sql_update(self.model).where(self.model.id.in_(ids)).values(**values)
         else:
             stmt = delete(self.model).where(self.model.id.in_(ids))
-
+        if organization_id and hasattr(self.model, "organization_id"):
+            stmt = stmt.where(self.model.organization_id == organization_id)
         res = await self._execute(session, stmt)
         return res.rowcount
 

@@ -122,17 +122,36 @@ class ImageExecutor:
         w, h = dimensions["width"], dimensions["height"]
 
         # 5. Call Provider Router
-        image_bytes, provider, resolved_model = self.provider_router.generate_image(
-            prompt=compiled_prompt,
-            width=w,
-            height=h,
-            style=style,
-            model=model,
-            seed=seed,
-            negative_prompt=neg_prompt,
-            cfg_scale=cfg_scale,
-            steps=steps
-        )
+        try:
+            image_bytes, provider, resolved_model = self.provider_router.generate_image(
+                prompt=compiled_prompt,
+                width=w,
+                height=h,
+                style=style,
+                model=model,
+                seed=seed,
+                negative_prompt=neg_prompt,
+                cfg_scale=cfg_scale,
+                steps=steps
+            )
+        except Exception as exc:
+            logger.exception("Image generation failed")
+            return {
+                "id": str(uuid.uuid4()),
+                "status": "failed",
+                "storage_url": "",
+                "provider": "",
+                "model": model or "",
+                "prompt": prompt,
+                "compiled_prompt": compiled_prompt,
+                "reflection": {},
+                "evaluation": {},
+                "error": {
+                    "code": "GENERATION_FAILED",
+                    "message": str(exc),
+                    "details": {"style": style, "aspect_ratio": aspect_ratio, "model": model},
+                },
+            }
 
         # 6. Save Asset in database and MinIO
         file_asset = AssetManager.save_image_asset(

@@ -5,24 +5,18 @@ Advanced account management: data export, audit history, deactivation,
 lockout management, and data portability for GDPR/compliance.
 """
 
-import csv
-import io
-import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
-from api.models.iam import User, UserSession
-from api.repositories.iam_repository import UserRepository, UserSessionRepository
-from api.services.base import (
-    BusinessRuleViolation,
-    NotFoundError,
-    ServiceContext,
-    ServiceResult,
-    ValidationError,
-)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.models.user import User
+from api.models.iam import UserSession
+from api.models.platform_events import AuditLog
 
 logger = logging.getLogger("eaimos.iam.account_lifecycle")
 
@@ -42,10 +36,14 @@ class ExportFormat(str, Enum):
     CSV = "csv"
 
 
+def _iso(value) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
 class AccountLifecycleService:
     """
     Advanced Account Lifecycle Management Service.
-    
+
     Responsibilities:
     - Account data export (GDPR compliance)
     - Account audit history tracking
@@ -54,644 +52,300 @@ class AccountLifecycleService:
     - Data portability
     """
 
-    def __init__(
-        self,
-        uow_service: Optional[Any] = None,
-        cache_manager: Optional[Any] = None,
-    ) -> None:
-        from api.services.base.dependency_provider import container
-        self.uow_service = uow_service or container.create_uow_service()
-        self.cache = cache_manager or container.cache
-
-    # ─── Account Data Export ──────────────────────────────────────────────
-
-    async def export_account_data(
-        self,
-        ctx: ServiceContext,
-        user_id: Union[uuid.UUID, str],
-        export_format: ExportFormat = ExportFormat.JSON,
-    ) -> ServiceResult[Dict[str, Any]]:
-        """
-        Export all user account data for GDPR compliance.
-        
-        Returns:
-        - User profile data
-        - Session history
-        - Login history
-        - Activity logs
-        - Preferences/settings
-        
-        Business Rules:
-        - User can only export their own data (unless admin)
-        - Export includes all PII and activity data
-        - Export is timestamped and audit-logged
-        """
-        try:
-            user_id = uuid.UUID(str(user_id))
-            
-            # Authorization: User can export their own data or admin can export any
-            if str(ctx.get_user_id_uuid()) != str(user_id):
-                if not ctx.has_permission("admin:users:export"):
-                    return ServiceResult.fail(
-                        error="Unauthorized: Cannot export other user's data",
-                        error_code="UNAUTHORIZED",
-                        status_code=403,
-                    )
-
-            async with self.uow_service:
-                user_repo: UserRepository = self.uow_service.get_repository(UserRepository)
-                session_repo: UserSessionRepository = self.uow_service.get_repository(
-                    UserSessionRepository
-                )
-
-                # Get user data
-                user = await user_repo.get_by_id(
-                    session=self.uow_service.session,
-                    id=user_id,
-                )
-                if not user:
-                    return ServiceResult.fail(
-                        error=f"User {user_id} not found",
-                        error_code="NOT_FOUND",
-                        status_code=404,
-                    )
-
-                # Get all sessions
-                sessions = await session_repo.list_user_sessions(
-                    session=self.uow_service.session,
-                    user_id=user_id,
-                )
-
-                # Build export data
-                export_data = {
-                    "export_metadata": {
-                        "exported_at": datetime.now(timezone.utc).isoformat(),
-                        "export_format": export_format.value,
-                        "user_id": str(user_id),
-                        "export_version": "1.0",
-                    },
-                    "account_profile": {
-                        "id": str(user.id),
-                        "email": user.email,
-                        "display_name": user.display_name,
-                        "role": user.role,
-                        "is_verified": user.is_verified,
-                        "created_at": user.created_at.isoformat() if user.created_at else None,
-                        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-                        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
-                        "organization_id": str(user.organization_id) if user.organization_id else None,
-                    },
-                    "account_status": {
-                        "is_active": user.is_active,
-                        "is_locked": user.is_locked,
-                        "is_deleted": user.deleted_at is not None,
-                        "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
-                        "failed_login_attempts": user.failed_login_attempts,
-                        "locked_until": user.locked_until.isoformat() if user.locked_until else None,
-                    },
-                    "security_settings": {
-                        "mfa_enabled": user.mfa_enabled,
-                        "change_password_required": user.change_password_required if hasattr(user, 'change_password_required') else None,
-                        "password_changed_at": user.password_changed_at.isoformat() if hasattr(user, 'password_changed_at') and user.password_changed_at else None,
-                    },
-                    "session_history": [
-                        {
-                            "id": str(session.id),
-                            "created_at": session.created_at.isoformat() if session.created_at else None,
-                            "last_active_at": session.last_active_at.isoformat() if session.last_active_at else None,
-                            "expires_at": session.expires_at.isoformat() if session.expires_at else None,
-                            "ip_address": session.ip_address,
-                            "user_agent": session.user_agent,
-                            "device_name": getattr(session, 'device_name', None),
-                            "device_type": getattr(session, 'device_type', None),
-                            "location": getattr(session, 'location', None),
-                            "is_revoked": session.is_revoked,
-                            "revoked_at": session.revoked_at.isoformat() if session.revoked_at else None,
-                        }
-                        for session in sessions
-                    ],
-                    "privacy_notice": {
-                        "data_retention": "This export contains all personal data associated with your account.",
-                        "right_to_erasure": "You may request permanent deletion of your account and all associated data.",
-                        "data_portability": "This export is provided in a structured, machine-readable format.",
-                    },
-                }
-
-                # Format based on requested format
-                if export_format == ExportFormat.JSON:
-                    formatted_data = export_data
-                elif export_format == ExportFormat.CSV:
-                    formatted_data = self._convert_to_csv(export_data)
-                else:
-                    formatted_data = export_data
-
-                logger.info(
-                    f"Account data exported for user {user_id}",
-                    extra={
-                        "user_id": str(user_id),
-                        "export_format": export_format.value,
-                        "correlation_id": ctx.correlation_id,
-                    },
-                )
-
-                return ServiceResult.ok(
-                    data={
-                        "export_data": formatted_data,
-                        "format": export_format.value,
-                        "total_sessions": len(sessions),
-                    }
-                )
-
-        except Exception as exc:
-            logger.error(f"export_account_data failed: {exc}", exc_info=True)
-            return ServiceResult.from_exception(exc)
-
-    def _convert_to_csv(self, export_data: Dict[str, Any]) -> str:
-        """Convert export data to CSV format."""
-        output = io.StringIO()
-        
-        # Profile section
-        writer = csv.writer(output)
-        writer.writerow(["Section", "Field", "Value"])
-        
-        for section_name, section_data in export_data.items():
-            if section_name == "session_history":
-                continue  # Handle separately
-            if isinstance(section_data, dict):
-                for key, value in section_data.items():
-                    writer.writerow([section_name, key, str(value)])
-        
-        # Session history section
-        writer.writerow([])
-        writer.writerow(["Session History"])
-        if export_data.get("session_history"):
-            sessions = export_data["session_history"]
-            if sessions:
-                headers = list(sessions[0].keys())
-                writer.writerow(headers)
-                for session in sessions:
-                    writer.writerow([session.get(h) for h in headers])
-        
-        return output.getvalue()
-
     # ─── Account Deactivation ─────────────────────────────────────────────
 
+    @staticmethod
     async def deactivate_account(
-        self,
-        ctx: ServiceContext,
+        db: AsyncSession,
         user_id: Union[uuid.UUID, str],
         reason: Optional[str] = None,
-    ) -> ServiceResult[Dict[str, Any]]:
-        """
-        Temporarily deactivate an account.
-        
-        Deactivation vs Deletion:
-        - Deactivation: Temporary, reversible, data retained
-        - Deletion: Permanent (after grace period), data removed
-        
-        Business Rules:
-        - Deactivated accounts cannot log in
-        - All active sessions are revoked
-        - Account can be reactivated at any time
-        - User profile and data remain intact
-        """
-        try:
-            user_id = uuid.UUID(str(user_id))
+    ) -> Dict[str, Any]:
+        """Temporarily deactivate an account."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-            async with self.uow_service:
-                user_repo: UserRepository = self.uow_service.get_repository(UserRepository)
-                session_repo: UserSessionRepository = self.uow_service.get_repository(
-                    UserSessionRepository
-                )
+        user.is_active = False
+        user.deactivated_at = datetime.now(timezone.utc)
+        user.deactivation_reason = reason
 
-                user = await user_repo.get_by_id(
-                    session=self.uow_service.session,
-                    id=user_id,
-                )
-                if not user:
-                    return ServiceResult.fail(
-                        error=f"User {user_id} not found",
-                        error_code="NOT_FOUND",
-                        status_code=404,
-                    )
+        # Revoke all active sessions
+        sessions_result = await db.execute(
+            select(UserSession).where(
+                UserSession.user_id == user.id,
+                UserSession.is_revoked == False,
+            )
+        )
+        sessions = sessions_result.scalars().all()
+        now = datetime.now(timezone.utc)
+        for session in sessions:
+            session.is_revoked = True
+            session.is_active = False
+            session.revoked_at = now
+            session.revocation_reason = "Account deactivated"
 
-                if not user.is_active:
-                    return ServiceResult.fail(
-                        error="Account is already deactivated",
-                        error_code="ALREADY_DEACTIVATED",
-                        status_code=400,
-                    )
+        await db.commit()
 
-                # Deactivate account
-                user.is_active = False
-                user.deactivated_at = datetime.now(timezone.utc)
-                user.deactivation_reason = reason
-                user.updated_at = datetime.now(timezone.utc)
+        return {
+            "success": True,
+            "user_id": str(user.id),
+            "deactivated_at": _iso(user.deactivated_at),
+            "sessions_revoked": len(sessions),
+            "message": "Account successfully deactivated",
+        }
 
-                await user_repo.update(
-                    session=self.uow_service.session,
-                    db_obj=user,
-                    obj_in={"is_active": False},
-                )
-
-                # Revoke all active sessions
-                active_sessions = await session_repo.list_user_sessions(
-                    session=self.uow_service.session,
-                    user_id=user_id,
-                )
-                for session in active_sessions:
-                    if not session.is_revoked:
-                        session.is_revoked = True
-                        session.revoked_at = datetime.now(timezone.utc)
-                        session.revocation_reason = "Account deactivated"
-                        await self.uow_service.session.flush()
-
-                logger.info(
-                    f"Account deactivated: {user_id}",
-                    extra={
-                        "user_id": str(user_id),
-                        "reason": reason,
-                        "sessions_revoked": len(active_sessions),
-                        "correlation_id": ctx.correlation_id,
-                    },
-                )
-
-                return ServiceResult.ok(
-                    data={
-                        "user_id": str(user_id),
-                        "deactivated_at": user.deactivated_at.isoformat(),
-                        "sessions_revoked": len(active_sessions),
-                        "message": "Account successfully deactivated",
-                    }
-                )
-
-        except Exception as exc:
-            logger.error(f"deactivate_account failed: {exc}", exc_info=True)
-            return ServiceResult.from_exception(exc)
-
+    @staticmethod
     async def reactivate_account(
-        self,
-        ctx: ServiceContext,
+        db: AsyncSession,
         user_id: Union[uuid.UUID, str],
-    ) -> ServiceResult[Dict[str, Any]]:
-        """
-        Reactivate a temporarily deactivated account.
-        
-        Business Rules:
-        - Only deactivated accounts can be reactivated
-        - Deleted accounts cannot be reactivated (use restore instead)
-        - User must re-authenticate after reactivation
-        """
-        try:
-            user_id = uuid.UUID(str(user_id))
+        email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Reactivate a deactivated account."""
+        query = select(User)
+        if email:
+            query = query.where(User.email == email)
+        else:
+            query = query.where(User.id == user_id)
+        result = await db.execute(query)
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError("Account not found")
 
-            async with self.uow_service:
-                user_repo: UserRepository = self.uow_service.get_repository(UserRepository)
+        user.is_active = True
+        user.deactivated_at = None
+        user.deactivation_reason = None
+        await db.commit()
 
-                user = await user_repo.get_by_id(
-                    session=self.uow_service.session,
-                    id=user_id,
-                )
-                if not user:
-                    return ServiceResult.fail(
-                        error=f"User {user_id} not found",
-                        error_code="NOT_FOUND",
-                        status_code=404,
-                    )
+        return {
+            "success": True,
+            "user_id": str(user.id),
+            "message": "Account successfully reactivated. Please log in.",
+        }
 
-                if user.is_active:
-                    return ServiceResult.fail(
-                        error="Account is already active",
-                        error_code="ALREADY_ACTIVE",
-                        status_code=400,
-                    )
+    @staticmethod
+    async def request_deletion(
+        db: AsyncSession,
+        user_id: Union[uuid.UUID, str],
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Request account deletion with a 30-day grace period."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-                if user.deleted_at is not None:
-                    return ServiceResult.fail(
-                        error="Deleted accounts must be restored, not reactivated",
-                        error_code="ACCOUNT_DELETED",
-                        status_code=400,
-                    )
+        now = datetime.now(timezone.utc)
+        scheduled = now + timedelta(days=30)
+        user.deletion_requested_at = now
+        user.scheduled_deletion_at = scheduled
+        user.deletion_reason = reason
+        await db.commit()
 
-                # Reactivate account
-                user.is_active = True
-                user.deactivated_at = None
-                user.deactivation_reason = None
-                user.updated_at = datetime.now(timezone.utc)
+        return {
+            "success": True,
+            "user_id": str(user.id),
+            "deletion_requested_at": _iso(now),
+            "scheduled_deletion_at": _iso(scheduled),
+        }
 
-                await user_repo.update(
-                    session=self.uow_service.session,
-                    db_obj=user,
-                    obj_in={"is_active": True},
-                )
+    @staticmethod
+    async def cancel_deletion(
+        db: AsyncSession,
+        user_id: Union[uuid.UUID, str],
+    ) -> Dict[str, Any]:
+        """Cancel a scheduled deletion."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-                logger.info(
-                    f"Account reactivated: {user_id}",
-                    extra={
-                        "user_id": str(user_id),
-                        "correlation_id": ctx.correlation_id,
-                    },
-                )
+        user.deletion_requested_at = None
+        user.scheduled_deletion_at = None
+        user.deletion_reason = None
+        await db.commit()
 
-                return ServiceResult.ok(
-                    data={
-                        "user_id": str(user_id),
-                        "reactivated_at": user.updated_at.isoformat(),
-                        "message": "Account successfully reactivated. Please log in.",
-                    }
-                )
+        return {"success": True, "user_id": str(user.id), "message": "Deletion canceled"}
 
-        except Exception as exc:
-            logger.error(f"reactivate_account failed: {exc}", exc_info=True)
-            return ServiceResult.from_exception(exc)
+    @staticmethod
+    async def confirm_deletion(
+        db: AsyncSession,
+        user_id: Union[uuid.UUID, str],
+    ) -> Dict[str, Any]:
+        """Confirm immediate deletion (marks deleted_at)."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-    # ─── Account Lockout Management ───────────────────────────────────────
+        user.deleted_at = datetime.now(timezone.utc)
+        user.is_active = False
+        await db.commit()
 
+        return {"success": True, "user_id": str(user.id), "message": "Account deleted"}
+
+    @staticmethod
     async def unlock_account(
-        self,
-        ctx: ServiceContext,
+        db: AsyncSession,
         user_id: Union[uuid.UUID, str],
-    ) -> ServiceResult[Dict[str, Any]]:
-        """
-        Manually unlock a locked account.
-        
-        Business Rules:
-        - Admin or user themselves can unlock
-        - Resets failed login attempt counter
-        - Clears locked_until timestamp
-        - Audit-logged for security
-        """
-        try:
-            user_id = uuid.UUID(str(user_id))
+    ) -> Dict[str, Any]:
+        """Unlock a locked account."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-            async with self.uow_service:
-                user_repo: UserRepository = self.uow_service.get_repository(UserRepository)
+        user.locked_until = None
+        user.failed_login_count = 0
+        user.failed_login_attempts = 0
+        await db.commit()
 
-                user = await user_repo.get_by_id(
-                    session=self.uow_service.session,
-                    id=user_id,
-                )
-                if not user:
-                    return ServiceResult.fail(
-                        error=f"User {user_id} not found",
-                        error_code="NOT_FOUND",
-                        status_code=404,
-                    )
+        return {"success": True, "user_id": str(user.id), "message": "Account unlocked"}
 
-                if not user.is_locked:
-                    return ServiceResult.fail(
-                        error="Account is not locked",
-                        error_code="NOT_LOCKED",
-                        status_code=400,
-                    )
+    # ─── Data Export ──────────────────────────────────────────────────────
 
-                # Unlock account
-                user.is_locked = False
-                user.locked_until = None
-                user.failed_login_attempts = 0
-                user.updated_at = datetime.now(timezone.utc)
-
-                await user_repo.update(
-                    session=self.uow_service.session,
-                    db_obj=user,
-                    obj_in={"is_locked": False, "failed_login_attempts": 0},
-                )
-
-                logger.info(
-                    f"Account unlocked: {user_id}",
-                    extra={
-                        "user_id": str(user_id),
-                        "unlocked_by": ctx.get_user_id_str(),
-                        "correlation_id": ctx.correlation_id,
-                    },
-                )
-
-                return ServiceResult.ok(
-                    data={
-                        "user_id": str(user_id),
-                        "unlocked_at": user.updated_at.isoformat(),
-                        "message": "Account successfully unlocked",
-                    }
-                )
-
-        except Exception as exc:
-            logger.error(f"unlock_account failed: {exc}", exc_info=True)
-            return ServiceResult.from_exception(exc)
-
-    # ─── Account Audit History ────────────────────────────────────────────
-
-    async def get_account_history(
-        self,
-        ctx: ServiceContext,
+    @staticmethod
+    async def export_user_data(
+        db: AsyncSession,
         user_id: Union[uuid.UUID, str],
-        limit: int = 100,
-    ) -> ServiceResult[Dict[str, Any]]:
-        """
-        Get account lifecycle event history.
-        
-        Returns:
-        - Account creation
-        - Password changes
-        - Email verification
-        - Login history (last N)
-        - Status changes (locked, deactivated, deleted)
-        - Session revocations
-        
-        Note: This is a simplified version. Full implementation would
-        query a dedicated audit_log table.
-        """
-        try:
-            user_id = uuid.UUID(str(user_id))
+    ) -> Dict[str, Any]:
+        """Export all user account data for GDPR compliance."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-            async with self.uow_service:
-                user_repo: UserRepository = self.uow_service.get_repository(UserRepository)
-                session_repo: UserSessionRepository = self.uow_service.get_repository(
-                    UserSessionRepository
-                )
+        sessions_result = await db.execute(
+            select(UserSession)
+            .where(UserSession.user_id == user.id)
+            .order_by(UserSession.created_at)
+        )
+        sessions = sessions_result.scalars().all()
 
-                user = await user_repo.get_by_id(
-                    session=self.uow_service.session,
-                    id=user_id,
-                )
-                if not user:
-                    return ServiceResult.fail(
-                        error=f"User {user_id} not found",
-                        error_code="NOT_FOUND",
-                        status_code=404,
-                    )
+        audit_result = await db.execute(
+            select(AuditLog)
+            .where(AuditLog.actor_id == user.id)
+            .order_by(AuditLog.created_at.desc())
+        )
+        audit_logs = audit_result.scalars().all()
 
-                # Get recent sessions for login history
-                sessions = await session_repo.list_user_sessions(
-                    session=self.uow_service.session,
-                    user_id=user_id,
-                )
-                recent_sessions = sorted(
-                    sessions,
-                    key=lambda s: s.created_at if s.created_at else datetime.min.replace(tzinfo=timezone.utc),
-                    reverse=True,
-                )[:limit]
+        user_payload = {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "created_at": _iso(user.created_at),
+            "last_login_at": _iso(user.last_login_at),
+        }
 
-                # Build timeline of events
-                timeline = []
+        sessions_payload = [
+            {
+                "id": str(s.id),
+                "created_at": _iso(s.created_at),
+                "last_active_at": _iso(s.last_active_at),
+                "expires_at": _iso(s.expires_at),
+                "ip_address": s.ip_address,
+                "user_agent": s.user_agent,
+                "device_name": getattr(s, "device_name", None),
+                "is_revoked": s.is_revoked,
+                "revoked_at": _iso(s.revoked_at),
+            }
+            for s in sessions
+        ]
 
-                # Account created
-                if user.created_at:
-                    timeline.append({
-                        "event_type": "account_created",
-                        "timestamp": user.created_at.isoformat(),
-                        "description": "Account created",
-                    })
+        audit_payload = [
+            {
+                "id": str(a.id),
+                "event_type": a.action,
+                "created_at": _iso(a.created_at),
+                "ip_address": a.actor_ip,
+            }
+            for a in audit_logs
+        ]
 
-                # Email verified
-                if user.is_verified and user.email_verified_at:
-                    timeline.append({
-                        "event_type": "email_verified",
-                        "timestamp": user.email_verified_at.isoformat(),
-                        "description": "Email address verified",
-                    })
+        user.export_count = (user.export_count or 0) + 1
+        user.last_export_at = datetime.now(timezone.utc)
+        await db.commit()
 
-                # Password changes
-                if hasattr(user, 'password_changed_at') and user.password_changed_at:
-                    timeline.append({
-                        "event_type": "password_changed",
-                        "timestamp": user.password_changed_at.isoformat(),
-                        "description": "Password changed",
-                    })
+        return {
+            "user": user_payload,
+            "sessions": sessions_payload,
+            "audit_logs": audit_payload,
+        }
 
-                # Account locked
-                if user.is_locked:
-                    timeline.append({
-                        "event_type": "account_locked",
-                        "timestamp": user.locked_until.isoformat() if user.locked_until else None,
-                        "description": f"Account locked after {user.failed_login_attempts} failed login attempts",
-                    })
+    # ─── Status & Privacy ─────────────────────────────────────────────────
 
-                # Account deactivated
-                if not user.is_active and hasattr(user, 'deactivated_at') and user.deactivated_at:
-                    timeline.append({
-                        "event_type": "account_deactivated",
-                        "timestamp": user.deactivated_at.isoformat(),
-                        "description": f"Account deactivated: {getattr(user, 'deactivation_reason', 'No reason provided')}",
-                    })
-
-                # Account deleted
-                if user.deleted_at:
-                    timeline.append({
-                        "event_type": "account_deleted",
-                        "timestamp": user.deleted_at.isoformat(),
-                        "description": "Account marked for deletion",
-                    })
-
-                # Recent logins
-                for session in recent_sessions:
-                    timeline.append({
-                        "event_type": "login",
-                        "timestamp": session.created_at.isoformat() if session.created_at else None,
-                        "description": f"Login from {getattr(session, 'device_name', 'Unknown device')}",
-                        "ip_address": session.ip_address,
-                        "location": getattr(session, 'location', None),
-                        "session_id": str(session.id),
-                    })
-
-                # Sort timeline by timestamp
-                timeline.sort(key=lambda e: e.get('timestamp', ''), reverse=True)
-
-                return ServiceResult.ok(
-                    data={
-                        "user_id": str(user_id),
-                        "timeline": timeline,
-                        "total_events": len(timeline),
-                    }
-                )
-
-        except Exception as exc:
-            logger.error(f"get_account_history failed: {exc}", exc_info=True)
-            return ServiceResult.from_exception(exc)
-
-    # ─── Account Status Check ─────────────────────────────────────────────
-
-    async def get_account_status(
-        self,
-        ctx: ServiceContext,
+    @staticmethod
+    async def get_lifecycle_status(
+        db: AsyncSession,
         user_id: Union[uuid.UUID, str],
-    ) -> ServiceResult[Dict[str, Any]]:
-        """
-        Get comprehensive account status information.
-        
-        Returns detailed status including:
-        - Basic account info
-        - Security status
-        - Activity metrics
-        - Compliance information
-        """
-        try:
-            user_id = uuid.UUID(str(user_id))
+    ) -> Dict[str, Any]:
+        """Get account lifecycle status."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-            async with self.uow_service:
-                user_repo: UserRepository = self.uow_service.get_repository(UserRepository)
-                session_repo: UserSessionRepository = self.uow_service.get_repository(
-                    UserSessionRepository
-                )
+        scheduled = user.scheduled_deletion_at
+        if scheduled and scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        deletion_scheduled = (
+            user.deletion_requested_at is not None
+            and scheduled is not None
+            and scheduled > datetime.now(timezone.utc)
+        )
 
-                user = await user_repo.get_by_id(
-                    session=self.uow_service.session,
-                    id=user_id,
-                )
-                if not user:
-                    return ServiceResult.fail(
-                        error=f"User {user_id} not found",
-                        error_code="NOT_FOUND",
-                        status_code=404,
-                    )
+        # Phase 8: derive lock state from the canonical locked_until field so
+        # is_locked never drifts from the login lockout logic.
+        locked_until = user.locked_until
+        if locked_until and locked_until.tzinfo is None:
+            locked_until = locked_until.replace(tzinfo=timezone.utc)
+        is_locked = locked_until is not None and locked_until > datetime.now(timezone.utc)
 
-                # Get active sessions count
-                sessions = await session_repo.list_user_sessions(
-                    session=self.uow_service.session,
-                    user_id=user_id,
-                )
-                active_sessions = [s for s in sessions if not s.is_revoked]
+        return {
+            "user_id": str(user.id),
+            "is_active": user.is_active,
+            "is_locked": is_locked,
+            "deletion_scheduled": bool(deletion_scheduled),
+            "deletion_requested_at": _iso(user.deletion_requested_at),
+            "scheduled_deletion_at": _iso(user.scheduled_deletion_at),
+            "deactivated_at": _iso(user.deactivated_at),
+            "deleted_at": _iso(user.deleted_at),
+        }
 
-                # Determine overall status
-                if user.deleted_at:
-                    overall_status = AccountStatus.DELETED
-                elif user.is_locked:
-                    overall_status = AccountStatus.LOCKED
-                elif not user.is_active:
-                    overall_status = AccountStatus.DEACTIVATED
-                else:
-                    overall_status = AccountStatus.ACTIVE
+    @staticmethod
+    async def get_privacy_dashboard(
+        db: AsyncSession,
+        user_id: Union[uuid.UUID, str],
+    ) -> Dict[str, Any]:
+        """Get privacy dashboard overview."""
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError(f"User {user_id} not found")
 
-                status_info = {
-                    "user_id": str(user_id),
-                    "email": user.email,
-                    "overall_status": overall_status.value,
-                    "account_info": {
-                        "created_at": user.created_at.isoformat() if user.created_at else None,
-                        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
-                        "is_verified": user.is_verified,
-                    },
-                    "security_status": {
-                        "is_active": user.is_active,
-                        "is_locked": user.is_locked,
-                        "locked_until": user.locked_until.isoformat() if user.locked_until else None,
-                        "failed_login_attempts": user.failed_login_attempts,
-                        "mfa_enabled": user.mfa_enabled,
-                        "change_password_required": getattr(user, 'change_password_required', False),
-                    },
-                    "session_info": {
-                        "active_sessions_count": len(active_sessions),
-                        "total_sessions_count": len(sessions),
-                    },
-                    "lifecycle_info": {
-                        "is_deleted": user.deleted_at is not None,
-                        "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
-                        "deactivated_at": getattr(user, 'deactivated_at', None),
-                        "can_be_restored": user.deleted_at is not None,
-                    },
-                }
+        data_summary = {
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_verified": user.is_verified,
+            "mfa_enabled": user.mfa_enabled,
+            "export_count": user.export_count or 0,
+        }
 
-                return ServiceResult.ok(data=status_info)
+        deletion_status = {
+            "is_deleted": user.deleted_at is not None,
+            "deleted_at": _iso(user.deleted_at),
+            "deletion_requested_at": _iso(user.deletion_requested_at),
+            "scheduled_deletion_at": _iso(user.scheduled_deletion_at),
+        }
 
-        except Exception as exc:
-            logger.error(f"get_account_status failed: {exc}", exc_info=True)
-            return ServiceResult.from_exception(exc)
+        return {
+            "data_summary": data_summary,
+            "export_history": [
+                {"exported_at": _iso(user.last_export_at), "format": "json"}
+            ]
+            if user.last_export_at
+            else [],
+            "deletion_status": deletion_status,
+        }

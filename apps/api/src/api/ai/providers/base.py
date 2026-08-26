@@ -1,8 +1,34 @@
 import abc
-from typing import Generator, List, Dict, Any, Optional
+import time
+import asyncio
+from typing import AsyncGenerator, Generator, List, Dict, Any, Optional
+import httpx
 
 
 class BaseLLMProvider(abc.ABC):
+    """
+    Abstract base class for all LLM Provider Adapters.
+    Designed for async-first operation with full httpx.AsyncClient integration
+    and synchronous compatibility fallbacks.
+    """
+
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self._async_client: Optional[httpx.AsyncClient] = None
+
+    def _get_async_client(self, timeout: float = 30.0) -> httpx.AsyncClient:
+        """Get or initialize persistent AsyncClient."""
+        if self._async_client is None or self._async_client.is_closed:
+            self._async_client = httpx.AsyncClient(timeout=timeout)
+        return self._async_client
+
+    async def aclose(self) -> None:
+        """Close underlying async HTTP client session."""
+        if self._async_client and not self._async_client.is_closed:
+            await self._async_client.aclose()
+            self._async_client = None
+
     @abc.abstractmethod
     def chat(
         self,
@@ -12,7 +38,7 @@ class BaseLLMProvider(abc.ABC):
         **kwargs,
     ) -> Dict[str, Any]:
         """
-        Execute synchronous chat completion.
+        Execute chat completion.
         Returns a dict containing:
         - 'content': Response string
         - 'prompt_tokens': Number of input tokens
@@ -33,17 +59,13 @@ class BaseLLMProvider(abc.ABC):
     ) -> Generator[Dict[str, Any], None, None]:
         """
         Execute streaming chat completion yielding chunk dictionaries.
-        Each yielded dict must contain:
-        - 'content': Delta content string
-        - 'prompt_tokens': Input tokens count (optional/final)
-        - 'completion_tokens': Output tokens count (optional/final)
         """
         pass
 
     @abc.abstractmethod
     def embeddings(self, text: str, model: str) -> List[float]:
         """
-        Generate a 1536-dimension float vector embedding for the input text.
+        Generate vector embedding for input text.
         """
         pass
 
@@ -61,13 +83,30 @@ class BaseLLMProvider(abc.ABC):
         self, messages: List[Dict[str, Any]], schema: Dict[str, Any], model: str
     ) -> Dict[str, Any]:
         """
-        Retrieve structured JSON output matching target Pydantic/JSON schema.
+        Retrieve structured JSON output matching target schema.
         """
         pass
 
     @abc.abstractmethod
     def health(self) -> bool:
         """
-        Perform standard health verification check on key status/latency.
+        Check if the provider configuration is present.
         """
         pass
+
+    def check_connectivity(self, timeout: float = 10.0) -> Dict[str, Any]:
+        """
+        Perform a real network liveness check against the provider API.
+        Subclasses override this to hit model list / ping endpoints.
+
+        Returns:
+            dict with keys: reachable (bool), latency_ms (int), error (str|None)
+        """
+        start = time.perf_counter()
+        try:
+            ok = self.health()
+            latency = int((time.perf_counter() - start) * 1000)
+            return {"reachable": ok, "latency_ms": latency, "error": None}
+        except Exception as e:
+            latency = int((time.perf_counter() - start) * 1000)
+            return {"reachable": False, "latency_ms": latency, "error": str(e)}

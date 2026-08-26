@@ -74,13 +74,11 @@ def create_agent_definition(
 
 
 @router.get("/definitions", response_model=PaginatedResponse[AgentDefinitionResponse])
-def list_agent_definitions(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1: Auth enforcement
+def list_agent_definitions(  # Sprint 8.3.1: Auth enforcement
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-) -> Any:
+    page_size: int = Query(20, ge=1, le=100),  _auth: None = Depends(enforce_all_auth_policies),) -> Any:
     skip = (page - 1) * page_size
     items = agent_definition_repo.list_by_org(
         db=db, organization_id=membership.organization_id, skip=skip, limit=page_size

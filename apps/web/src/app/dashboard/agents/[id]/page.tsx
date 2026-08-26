@@ -8,7 +8,7 @@ import { AgentDefinition, AgentType } from '@/features/agents/types';
 import { AgentAvatar } from '@/features/agents/components/badges';
 import { KnowledgeSelector, ToolSelector, MemorySelector } from '@/features/agents/components/selectors';
 import { RunTimeline, ExecutionLog } from '@/features/agents/components/timeline';
-import { AnalyticsCharts, AnalyticsCards } from '@/features/agents/components/analytics';
+import { AnalyticsCards } from '@/features/agents/components/analytics';
 import { Button } from '@/components/ui/button';
 import { 
   Bot, Settings, Sparkles, Folder, Play, CheckCircle2, ChevronRight, 
@@ -585,15 +585,15 @@ export default function AgentDetailsRoute({ params }: RouteProps) {
         {/* ANALYTICS PANEL */}
         {activeTab === 'analytics' && (
           <div className="animate-fadeIn">
-            <AnalyticsCharts 
-              data={[
-                { name: 'Mon', runs: 12, cost: 0.024, latency: 1400 },
-                { name: 'Tue', runs: 18, cost: 0.038, latency: 2200 },
-                { name: 'Wed', runs: 24, cost: 0.045, latency: 1800 },
-                { name: 'Thu', runs: 15, cost: 0.029, latency: 1900 },
-                { name: 'Fri', runs: 30, cost: 0.052, latency: 2400 },
-              ]}
-            />
+            <div className="rounded-xl border border-white/5 bg-neutral-950/40 p-8 text-center">
+              <Activity className="w-8 h-8 text-neutral-600 mx-auto mb-3" />
+              <h3 className="font-bold text-white text-sm mb-1">Execution Analytics</h3>
+              <p className="text-xs text-neutral-500 max-w-md mx-auto">
+                Run-level metrics (executions, success rate, latency, cost, tokens) are computed from
+                this agent&apos;s session runs. No fabricated data is shown here — analytics appear
+                once real execution runs are recorded for this agent.
+              </p>
+            </div>
           </div>
         )}
 

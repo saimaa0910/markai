@@ -4,6 +4,7 @@ Module-level configuration settings adapter.
 
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 class AppSettings(BaseSettings):
@@ -12,7 +13,7 @@ class AppSettings(BaseSettings):
     """
     ENV: str = "development"
     DEBUG: bool = True
-    SECRET_KEY: str = "eaimos_super_secret_key_change_in_production"
+    SECRET_KEY: str = Field(min_length=32, validation_alias="SECRET_KEY")
     DATABASE_URL: Optional[str] = None
     REDIS_URL: Optional[str] = None
 

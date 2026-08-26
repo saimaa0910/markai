@@ -77,7 +77,7 @@ export function TrustedDevices() {
               <div className="flex items-center gap-2 mb-2">
                 <h3 className="font-medium">{device.device_name}</h3>
                 {device.is_current && (
-                  <Badge variant="success">Current Device</Badge>
+                  <Badge variant="neutral">Current Device</Badge>
                 )}
               </div>
               

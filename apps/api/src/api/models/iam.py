@@ -25,7 +25,7 @@ Design Rules:
 - SecurityPolicy is 1:1 per organization
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, TYPE_CHECKING
 from sqlalchemy import (
     Boolean, CheckConstraint, Column, DateTime, Enum, Float, ForeignKey,
@@ -246,11 +246,29 @@ class UserSession(Base):
         ),
     )
 
+    # Override base timestamps with client-side defaults so multi-row inserts
+    # don't require RETURNING/sentinel correlation (id may be set as a string
+    # via the session_token synonym, which breaks sentinel matching).
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+    
+    from sqlalchemy.orm import synonym
+    session_token = synonym("id")
     organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="SET NULL"),
@@ -328,6 +346,7 @@ class UserSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_active_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
         comment="Sliding window — updated on each API call",
     )
 
@@ -340,6 +359,14 @@ class UserSession(Base):
         String(100), nullable=True,
         comment="logout | admin | security | timeout | password_change",
     )
+
+    @property
+    def is_active(self) -> bool:
+        return not self.is_revoked
+
+    @is_active.setter
+    def is_active(self, value: bool) -> None:
+        self.is_revoked = not value
 
 
 class RefreshToken(Base):
@@ -446,6 +473,16 @@ class PasswordResetToken(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(
         String(45), nullable=True, comment="IP of the requestor"
     )
+
+    @hybrid_property
+    def token(self) -> str:
+        """Raw token value. Stored hashed; the raw value is only exposed
+        so that fixtures/tests can create tokens directly."""
+        return self.token_hash
+
+    @token.setter
+    def token(self, value: str) -> None:
+        self.token_hash = value
 
 
 # ─── API KEYS ─────────────────────────────────────────────────────────────────

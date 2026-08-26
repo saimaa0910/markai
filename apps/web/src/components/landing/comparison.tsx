@@ -73,15 +73,15 @@ export function ComparisonSection() {
 
           {/* Viptant side */}
           <FadeUp delay={0.2}>
-            <div className="rounded-2xl border border-violet-500/20 bg-violet-500/4 p-8 h-full relative overflow-hidden glow-pulse">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-violet-600/8 rounded-full blur-3xl pointer-events-none" />
+            <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-8 h-full relative overflow-hidden shadow-lg shadow-violet-500/5">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-violet-600/10 rounded-full blur-3xl pointer-events-none" />
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shadow-md shadow-violet-500/20">
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white">Viptant AI Marketing OS</h3>
-                  <p className="text-xs text-black-400 font-medium">The intelligent way forward</p>
+                  <p className="text-xs text-violet-400 font-medium">The intelligent way forward</p>
                 </div>
               </div>
               <ul className="space-y-3.5">

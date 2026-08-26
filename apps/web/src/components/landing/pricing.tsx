@@ -75,7 +75,7 @@ function PricingCard({ name, price, period, description, features, cta, popular,
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: '-40px' }}
       transition={{ duration: 0.5, delay: index * 0.1 }}
-      className={`relative flex flex-col p-8 rounded-2xl border ${border} ${popular ? 'bg-neutral-950/80 shadow-2xl shadow-violet-500/10 scale-105' : 'bg-neutral-950/40'}`}
+      className={`relative flex flex-col p-8 rounded-2xl border ${border} ${popular ? 'bg-neutral-950/90 shadow-2xl shadow-violet-500/15 md:-translate-y-2' : 'bg-neutral-950/40'}`}
     >
       {popular && (
         <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 text-[10px] font-bold text-white uppercase tracking-widest whitespace-nowrap shadow-lg shadow-violet-500/20">

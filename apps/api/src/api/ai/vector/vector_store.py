@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sqlalchemy import select
 from api.models.knowledge import DocumentChunkEmbedding
 from api.database.session import SessionLocal
@@ -22,7 +22,7 @@ class PgVectorStore:
             else:
                 new_emb = DocumentChunkEmbedding(
                     chunk_id=chunk_uuid,
-                    organization_id=uuid.UUID(metadata.get("organization_id", str(uuid.uuid4()))),
+                    organization_id=uuid.UUID(str(metadata.get("organization_id", uuid.uuid4()))),
                     embedding=embedding,
                     embedding_model=metadata.get("embedding_model", "openai:text-embedding-3-small")
                 )
@@ -35,14 +35,21 @@ class PgVectorStore:
         finally:
             db.close()
 
-    async def search_similar(self, query_embedding: List[float], limit: int = 5) -> List[Dict[str, Any]]:
+    async def search_similar(
+        self,
+        query_embedding: List[float],
+        organization_id: Optional[uuid.UUID] = None,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
         """
-        Execute cosine / L2 distance similarity search in pgvector.
+        Execute cosine distance similarity search in pgvector with optional tenant scoping.
         """
         db = SessionLocal()
         try:
-            # We can use cosine_distance from pgvector:
-            stmt = select(DocumentChunkEmbedding).order_by(
+            stmt = select(DocumentChunkEmbedding)
+            if organization_id:
+                stmt = stmt.where(DocumentChunkEmbedding.organization_id == organization_id)
+            stmt = stmt.order_by(
                 DocumentChunkEmbedding.embedding.cosine_distance(query_embedding)
             ).limit(limit)
             results = db.scalars(stmt).all()
@@ -63,4 +70,5 @@ class PgVectorStore:
 
 
 vector_store = PgVectorStore()
+
 

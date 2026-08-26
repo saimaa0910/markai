@@ -1,5 +1,7 @@
 import * as React from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useModels } from '../hooks';
+import { useAIPlatformStore } from '../store/ai-platform';
 import { PageHeader } from '@/components/ui/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +17,7 @@ import { motion } from 'framer-motion';
 
 interface ModelComparisonState {
   modelName: string;
+  modelIdentifier: string;
   provider: string;
   latencySec: number;
   tokensPerSec: number;
@@ -25,70 +28,46 @@ interface ModelComparisonState {
   qualityScore: number;
 }
 
-const MODEL_PRESETS: Record<string, { response: string; speed: number; quality: number }> = {
-  'llama3-70b-8192': {
-    response: `Recursion is a programming technique where a function calls itself to solve a smaller instance of the same problem. 
-
-Think of it like a set of Russian nesting dolls. To find the smallest doll inside:
-1. If the current doll has no doll inside it, you have found it (This is the **Base Case**).
-2. Otherwise, you open the doll and repeat the process on the next doll inside (This is the **Recursive Step**).
-
-Here is a quick factorial example:
-\`\`\`javascript
-function factorial(n) {
-  if (n === 1) return 1; // Base Case
-  return n * factorial(n - 1); // Recursive Step
-}
-\`\`\``,
-    speed: 82,
-    quality: 80,
-  },
-  'gpt-4o': {
-    response: `Recursion is the process in which a function calls itself directly or indirectly. It allows us to break down complex problems into simple, repeatable sub-tasks.
-
-A recursive function must contain two essential parts:
-- **Base Case**: The termination condition that stops the recursion from running infinitely.
-- **Recursive Case**: The logic that reduces the problem size and invokes the function again.
-
-Let's look at a classic Fibonacci sequence recursion:
-\`\`\`javascript
-function fibonacci(n) {
-  if (n <= 1) return n; // Base Case
-  return fibonacci(n - 1) + fibonacci(n - 2); // Recursive Case
-}
-\`\`\``,
-    speed: 65,
-    quality: 92,
-  },
-  'claude-3-5-sonnet-20240620': {
-    response: `Recursion is a concept where a function solves a problem by calling a smaller copy of itself. It is a powerful alternative to loops.
-
-To grasp recursion, imagine being in a long queue and asking: "What position am I in?"
-1. You ask the person in front: "What position are you?"
-2. They ask the person in front of them, repeating this until it reaches the first person.
-3. The first person says: "I am position 1" (This is the **Base Case**).
-4. The message travels back, adding 1 at each step, until it reaches you.
-
-Factorial implementation:
-\`\`\`javascript
-const factorial = n => n === 1 ? 1 : n * factorial(n - 1);
-\`\`\``,
-    speed: 58,
-    quality: 95,
-  },
-};
-
 export function ComparePage() {
+  const searchParams = useSearchParams();
   const { models } = useModels();
+  const { comparisonModels } = useAIPlatformStore();
   const [activeCategory, setActiveCategory] = React.useState<'text' | 'image'>('text');
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [prompt, setPrompt] = React.useState('Explain recursion simply with a short code example.');
   const [comparisonList, setComparisonList] = React.useState<ModelComparisonState[]>([]);
   const [isRunning, setIsRunning] = React.useState(false);
+  const [hasInitializedFromRoute, setHasInitializedFromRoute] = React.useState(false);
 
-  // Set default models on load
+  // Set models on load from URL query params, store, or defaults
   React.useEffect(() => {
-    if (models.length > 0) {
+    if (models.length === 0) return;
+
+    const routeModelsParam = searchParams.get('models');
+    if (routeModelsParam && !hasInitializedFromRoute) {
+      const requested = routeModelsParam.split(',').map((s) => decodeURIComponent((s || '').trim().toLowerCase()));
+      const matched = models.filter((m) => 
+        (m?.model_name && requested.includes(m.model_name.toLowerCase())) || 
+        (m?.name && requested.includes(m.name.toLowerCase())) || 
+        (m?.id && requested.includes(m.id.toLowerCase()))
+      );
+      if (matched.length > 0) {
+        setSelectedIds(matched.slice(0, 3).map((m) => m.id));
+        setHasInitializedFromRoute(true);
+        return;
+      }
+    }
+
+    if (comparisonModels.length > 0 && !hasInitializedFromRoute) {
+      const matched = models.filter((m) => comparisonModels.includes(m.id));
+      if (matched.length > 0) {
+        setSelectedIds(matched.slice(0, 3).map((m) => m.id));
+        setHasInitializedFromRoute(true);
+        return;
+      }
+    }
+
+    if (!hasInitializedFromRoute) {
       if (activeCategory === 'image') {
         const imageModels = models.filter((m) => m.supports_images).slice(0, 3);
         setSelectedIds(imageModels.map((m) => m.id));
@@ -96,8 +75,9 @@ export function ComparePage() {
         const chatModels = models.filter((m) => m.supports_streaming).slice(0, 3);
         setSelectedIds(chatModels.map((m) => m.id));
       }
+      setHasInitializedFromRoute(true);
     }
-  }, [models, activeCategory]);
+  }, [models, searchParams, comparisonModels, activeCategory, hasInitializedFromRoute]);
 
   const handleCheckboxToggle = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -124,6 +104,7 @@ export function ComparePage() {
     const initialList: ModelComparisonState[] = selectedModels.map((m) => {
       return {
         modelName: m.name,
+        modelIdentifier: m.model_name,
         provider: m.provider,
         latencySec: 0,
         tokensPerSec: 0,
@@ -153,6 +134,7 @@ export function ComparePage() {
           const latencySec = matchingResult.latency_ms / 1000;
           return {
             modelName: m.name,
+            modelIdentifier: m.model_name,
             provider: m.provider,
             latencySec,
             tokensPerSec: latencySec > 0 ? Math.round(matchingResult.completion_tokens / latencySec) : 0,
@@ -165,6 +147,7 @@ export function ComparePage() {
         } else {
           return {
             modelName: m.name,
+            modelIdentifier: m.model_name,
             provider: m.provider,
             latencySec: 0,
             tokensPerSec: 0,
@@ -187,6 +170,24 @@ export function ComparePage() {
     }
   };
 
+  const [selectedProviderFilter, setSelectedProviderFilter] = React.useState<string>('all');
+
+  const availableProviders = React.useMemo(() => {
+    const activeModels = (models || []).filter((m) => activeCategory === 'image' ? m?.supports_images : m?.supports_streaming);
+    const provs = Array.from(new Set(activeModels.map((m) => (m?.provider || '').toLowerCase()).filter(Boolean)));
+    return ['all', ...provs];
+  }, [models, activeCategory]);
+
+  const selectableModels = React.useMemo(() => {
+    return (models || [])
+      .filter((m) => activeCategory === 'image' ? m?.supports_images : m?.supports_streaming)
+      .filter((m) => selectedProviderFilter === 'all' || (m?.provider || '').toLowerCase() === (selectedProviderFilter || '').toLowerCase());
+  }, [models, activeCategory, selectedProviderFilter]);
+
+  const currentlySelectedModels = React.useMemo(() => {
+    return models.filter((m) => selectedIds.includes(m.id));
+  }, [models, selectedIds]);
+
   return (
     <div className="flex flex-col gap-6 max-w-[1400px] mx-auto pb-12">
       <PageHeader
@@ -197,11 +198,12 @@ export function ComparePage() {
       />
 
       {/* Capability Tabs */}
-      <div className="flex gap-2 border-b border-white/5 pb-2 mb-4">
+      <div className="flex gap-2 border-b border-white/5 pb-2 mb-2">
         <Button
           variant="ghost"
           onClick={() => {
             setActiveCategory('text');
+            setSelectedProviderFilter('all');
             setPrompt('Explain recursion simply with a short code example.');
             setComparisonList([]);
           }}
@@ -217,6 +219,7 @@ export function ComparePage() {
           variant="ghost"
           onClick={() => {
             setActiveCategory('image');
+            setSelectedProviderFilter('all');
             setPrompt('A futuristic high-tech neon cyber city at night, masterpiece, photorealistic.');
             setComparisonList([]);
           }}
@@ -230,33 +233,76 @@ export function ComparePage() {
         </Button>
       </div>
 
-      {/* Models Selection Card */}
+      {/* Comparing Models Header Banner */}
+      {currentlySelectedModels.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border border-violet-500/20 bg-violet-950/20 backdrop-blur-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+              Comparing Models ({currentlySelectedModels.length}):
+            </span>
+            {currentlySelectedModels.map((m) => (
+              <Badge key={m.id} variant="violet" className="font-mono text-[11px] py-0.5 flex items-center gap-1">
+                <span className="font-bold text-white">{m.model_name}</span>
+                <span className="text-violet-300/60 font-sans text-[10px]">({m.provider})</span>
+              </Badge>
+            ))}
+          </div>
+          <span className="text-[11px] font-mono text-neutral-400">
+            {activeCategory === 'image' ? 'Image Generation Mode' : 'Streaming Chat Mode'}
+          </span>
+        </div>
+      )}
+
+      {/* Models Selection Card with Provider Filter */}
       <Card className="flex flex-col gap-4">
-        <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Select up to 3 models to compare</span>
-        <div className="flex flex-wrap gap-4">
-          {models
-            .filter((m) => activeCategory === 'image' ? m.supports_images : m.supports_streaming)
-            .map((m) => {
-              const checked = selectedIds.includes(m.id);
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => handleCheckboxToggle(m.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                    checked
-                      ? 'bg-violet-600/10 border-violet-500 text-white shadow-sm'
-                      : 'bg-neutral-950/20 border-white/5 text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${
-                    checked ? 'bg-violet-600 border-violet-500' : 'border-white/20'
-                  }`}>
-                    {checked && <div className="w-1.5 h-1.5 rounded-full bg-white animate-scaleIn" />}
-                  </div>
-                  <span>{m.name} ({m.provider})</span>
-                </button>
-              );
-            })}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-white/5 pb-3">
+          <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
+            Select up to 3 models to compare <span className="text-violet-400 font-mono">({selectedIds.length}/3 selected)</span>
+          </span>
+
+          {/* Provider Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-neutral-500 font-medium mr-1">Filter Provider:</span>
+            {availableProviders.map((p) => (
+              <button
+                key={p}
+                onClick={() => setSelectedProviderFilter(p)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium capitalize transition-all cursor-pointer ${
+                  selectedProviderFilter === p
+                    ? 'bg-violet-600/20 text-violet-400 border border-violet-500/40 shadow-sm'
+                    : 'bg-neutral-900/60 text-neutral-400 hover:text-white border border-white/5'
+                }`}
+              >
+                {p === 'all' ? 'All Providers' : p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          {selectableModels.map((m) => {
+            const checked = selectedIds.includes(m.id);
+            return (
+              <button
+                key={m.id}
+                onClick={() => handleCheckboxToggle(m.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                  checked
+                    ? 'bg-violet-600/10 border-violet-500 text-white shadow-sm'
+                    : 'bg-neutral-950/20 border-white/5 text-neutral-400 hover:text-white'
+                }`}
+              >
+                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${
+                  checked ? 'bg-violet-600 border-violet-500' : 'border-white/20'
+                }`}>
+                  {checked && <div className="w-1.5 h-1.5 rounded-full bg-white animate-scaleIn" />}
+                </div>
+                <span className="font-mono">{m.model_name}</span>
+                <span className="text-[10px] text-neutral-500 capitalize">({m.provider})</span>
+              </button>
+            );
+          })}
         </div>
       </Card>
 
@@ -291,9 +337,14 @@ export function ComparePage() {
             <Card key={i} className="flex flex-col gap-4 border border-white/5 bg-neutral-950/20">
               {/* Card Header Stats */}
               <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                <div className="flex flex-col">
-                  <span className="text-xs font-bold text-white">{c.modelName}</span>
-                  <span className="text-[10px] text-neutral-500 font-mono capitalize">{c.provider}</span>
+                <div className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white font-mono">{c.modelIdentifier}</span>
+                    <Badge variant="violet" size="sm" className="capitalize text-[9px] py-0">
+                      {c.provider}
+                    </Badge>
+                  </div>
+                  <span className="text-[11px] text-neutral-400 font-sans">{c.modelName}</span>
                 </div>
                 <Badge variant={c.isGenerating ? 'amber' : 'emerald'} size="sm" dot>
                   {c.isGenerating ? 'Streaming' : 'Ready'}

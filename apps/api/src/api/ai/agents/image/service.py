@@ -129,4 +129,8 @@ class ImageAgentService:
 
         except Exception as e:
             logger.error("Streaming image generation failed: %s", e)
-            yield _sse("error", {"message": str(e)})
+            yield _sse("error", {
+                "message": str(e),
+                "code": "GENERATION_FAILED",
+                "details": {"mode": "stream"},
+            })

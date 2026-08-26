@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc
+from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from api.database.session import get_db
@@ -113,16 +114,14 @@ def get_detailed_system_health(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
 
 @router.get("/traces")
-def get_traces_list(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_traces_list(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     trace_id: Optional[str] = None,
     name: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-) -> Any:
+    offset: int = Query(0, ge=0),  _auth: None = Depends(enforce_all_auth_policies)) -> Any:
     """Query and filter database-backed execution traces."""
     query = select(AITrace).where(
         (AITrace.organization_id == None) | (AITrace.organization_id == membership.organization_id)
@@ -157,8 +156,7 @@ def get_traces_list(
 
 
 @router.get("/logs")
-def get_logs_list(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_logs_list(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     trace_id: Optional[str] = None,
@@ -167,8 +165,7 @@ def get_logs_list(
     level: Optional[str] = None,
     search: Optional[str] = None,
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-) -> Any:
+    offset: int = Query(0, ge=0),  _auth: None = Depends(enforce_all_auth_policies)) -> Any:
     """Query and search structured JSON log entries."""
     query = select(AILog).where(
         (AILog.organization_id == None) | (AILog.organization_id == membership.organization_id)
@@ -206,15 +203,13 @@ def get_logs_list(
 
 
 @router.get("/incidents")
-def get_incidents_list(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_incidents_list(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     component: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-) -> Any:
+    offset: int = Query(0, ge=0),  _auth: None = Depends(enforce_all_auth_policies)) -> Any:
     """Query active or historical platform incidents."""
     query = select(AIIncident).where(
         (AIIncident.organization_id == None) | (AIIncident.organization_id == membership.organization_id)
@@ -246,16 +241,14 @@ def get_incidents_list(
 
 
 @router.get("/alerts")
-def get_alerts_list(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_alerts_list(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
     alert_type: Optional[str] = None,
     severity: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-) -> Any:
+    offset: int = Query(0, ge=0),  _auth: None = Depends(enforce_all_auth_policies)) -> Any:
     """Query active and sent alert manager logs."""
     query = select(AIAlert).where(
         (AIAlert.organization_id == None) | (AIAlert.organization_id == membership.organization_id)
@@ -287,12 +280,10 @@ def get_alerts_list(
 
 
 @router.get("/performance")
-def get_performance_analytics(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_performance_analytics(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(active_member),
-    days: int = Query(7, ge=1, le=90)
-) -> Dict[str, Any]:
+    days: int = Query(7, ge=1, le=90),  _auth: None = Depends(enforce_all_auth_policies)) -> Dict[str, Any]:
     """
     Returns aggregated percentile distributions (P50, P90, P95, P99),
     latencies, comparisons, and cache performance trends.
@@ -345,7 +336,6 @@ def get_performance_analytics(
 
     # Cache hit metrics from AICacheMetadata
     from api.models.infrastructure import AICacheMetadata
-from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
     cache_row = db.execute(
         select(func.sum(AICacheMetadata.hits), func.sum(AICacheMetadata.misses))
         .where(AICacheMetadata.timestamp >= since_date)
@@ -377,11 +367,9 @@ from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 
 
 
 @router.get("/live")
-def get_live_observability_feed(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def get_live_observability_feed(  # Sprint 8.3.1
     db: Session = Depends(get_db),
-    membership: UserOrganization = Depends(active_member)
-) -> Dict[str, Any]:
+    membership: UserOrganization = Depends(active_member),  _auth: None = Depends(enforce_all_auth_policies)) -> Dict[str, Any]:
     """
     Returns a snapshot of the live status of the system (active queues, jobs, errors, and traffic rate)
     for dashboard streaming or dynamic periodic updates.
@@ -450,12 +438,10 @@ def get_live_observability_feed(
 
 
 @router.post("/alerts/test")
-def trigger_test_alert(
-    _: None = Depends(enforce_all_auth_policies),  # Sprint 8.3.1
+def trigger_test_alert(  # Sprint 8.3.1
     db: Session = Depends(get_db),
     membership: UserOrganization = Depends(admin_only),
-    severity: str = Query("warning", enum=["warning", "critical", "info"])
-) -> Dict[str, Any]:
+    severity: str = Query("warning", enum=["warning", "critical", "info"]),  _auth: None = Depends(enforce_all_auth_policies)) -> Dict[str, Any]:
     """
     Admin-only test endpoint to trigger a simulated alert notification
     across active Slack, Email, and Webhook dispatch channels.

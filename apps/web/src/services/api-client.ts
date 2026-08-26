@@ -57,7 +57,8 @@ apiClient.interceptors.response.use(
           const refreshToken = parsed.state?.refreshToken;
           
           if (refreshToken) {
-            const refreshRes = await axios.post(`${API_BASE_URL}/auth/refresh?refresh_token=${refreshToken}`);
+            // P2-11: refresh token travels in the request body, not the URL query string.
+            const refreshRes = await axios.post(`${API_BASE_URL}/auth/refresh`, { refresh_token: refreshToken });
             const { access_token, refresh_token } = refreshRes.data;
             
             // Save back to Zustand store directly!
@@ -73,6 +74,7 @@ apiClient.interceptors.response.use(
         console.error('Session refresh failed. Redirecting to logout...', refreshError);
         if (typeof window !== 'undefined') {
           localStorage.removeItem('eaimos-auth-storage');
+          document.cookie = 'eaimos.session=; path=/; SameSite=Lax; expires=Thu, 01 Jan 1970 00:00:00 GMT';
           window.location.href = '/auth/login?expired=true';
         }
       }

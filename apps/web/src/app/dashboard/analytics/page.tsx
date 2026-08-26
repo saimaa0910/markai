@@ -70,14 +70,43 @@ export default function AnalyticsPage() {
     fill: FUNNEL_COLORS[Math.min(i, FUNNEL_COLORS.length - 1)],
   })).filter((d) => d.value > 0);
 
-  // Mock time-series (replace with real endpoint if available)
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'];
-  const revenueData = months.map((month, i) => ({
-    month,
-    revenue:  Math.round(pipelineValue * (0.4 + i * 0.1) / 7),
-    contacts: Math.round(contacts.length * (0.3 + i * 0.1)),
-    copies:   Math.round(copies.length  * (0.2 + i * 0.12)),
-  }));
+  // Real time-series derived from record timestamps (P2-6: no fabricated spread).
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const revenueData = React.useMemo(() => {
+    const buckets: Record<string, { revenue: number; contacts: number; copies: number }> = {};
+    const bucketKey = (v: any) => {
+      if (!v || !v.created_at) return null;
+      const d = new Date(v.created_at);
+      return `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+    };
+    for (const l of leads) {
+      const k = bucketKey(l);
+      if (!k) continue;
+      if (!buckets[k]) buckets[k] = { revenue: 0, contacts: 0, copies: 0 };
+      buckets[k].revenue += l.value || 0;
+    }
+    for (const c of contacts) {
+      const k = bucketKey(c);
+      if (!k) continue;
+      if (!buckets[k]) buckets[k] = { revenue: 0, contacts: 0, copies: 0 };
+      buckets[k].contacts += 1;
+    }
+    for (const c of copies) {
+      const k = bucketKey(c);
+      if (!k) continue;
+      if (!buckets[k]) buckets[k] = { revenue: 0, contacts: 0, copies: 0 };
+      buckets[k].copies += 1;
+    }
+    return Object.entries(buckets)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-7)
+      .map(([key, val]) => ({
+        month: monthNames[parseInt(key.slice(5, 7), 10) - 1],
+        revenue: val.revenue,
+        contacts: val.contacts,
+        copies: val.copies,
+      }));
+  }, [leads, contacts, copies]);
 
   // Provider token distribution
   const providerTokens = React.useMemo(() => {
