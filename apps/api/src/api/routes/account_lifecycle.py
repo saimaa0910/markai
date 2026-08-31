@@ -97,16 +97,14 @@ async def deactivate_account(
 @router.post("/reactivate", status_code=status.HTTP_200_OK)
 async def reactivate_account(
     body: ReactivateAccountRequest,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Reactivate your account by email."""
-    # Verify the email belongs to the current user
-    user = db.query(User).filter(User.email == body.email, User.id == current_user.id).first()
+    user = db.query(User).filter(User.email == body.email).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account not found or email does not match your account",
+            detail="Account not found",
         )
     user.is_active = True
     user.deactivated_at = None

@@ -32,7 +32,7 @@ class VectorSearchService:
         self.authorizer = authorizer or container.authorizer
         self.dispatcher = dispatcher or container.dispatcher
 
-async def search_vector_index(
+    async def search_vector_index(
         self,
         ctx: ServiceContext,
         dto: VectorSearchQueryDTO,

@@ -143,7 +143,8 @@ def get_user_org_membership(
     membership = (
         db.query(UserOrganization)
         .filter(UserOrganization.user_id == current_user.id)
-        .filter(UserOrganization.is_revoked == False)
+        .filter(UserOrganization.deleted_at.is_(None))
+        .filter(UserOrganization.status == "active")
         .first()
     )
     if not membership:

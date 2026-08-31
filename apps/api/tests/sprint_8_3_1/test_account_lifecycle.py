@@ -15,6 +15,10 @@ from api.services.account_lifecycle_service import AccountLifecycleService
 from api.core.security import create_access_token, get_password_hash
 
 
+from api.models.organization import Organization
+from api.models.membership import UserOrganization, UserRole
+
+
 @pytest.fixture
 def client():
     return TestClient(app)
@@ -22,6 +26,13 @@ def client():
 
 @pytest.fixture
 async def test_user(db: AsyncSession):
+    org = Organization(
+        id=uuid.uuid4(),
+        name="Test Org",
+        slug=f"test-org-{uuid.uuid4().hex[:8]}",
+        plan_tier="enterprise",
+    )
+    db.add(org)
     user = User(
         email=f"test_{uuid.uuid4()}@example.com",
         hashed_password=get_password_hash("password"),
@@ -30,6 +41,15 @@ async def test_user(db: AsyncSession):
         is_verified=True,
     )
     db.add(user)
+    await db.flush()
+    user_org = UserOrganization(
+        user_id=user.id,
+        organization_id=org.id,
+        role=UserRole.ADMIN,
+        is_primary=True,
+        status="active",
+    )
+    db.add(user_org)
     await db.commit()
     await db.refresh(user)
     return user

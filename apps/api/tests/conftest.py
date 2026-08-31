@@ -240,6 +240,12 @@ _reflected_metadata = None
 @pytest.fixture(scope="function", autouse=True)
 def cleanup_db():
     yield
+    try:
+        from api.services.cache_service import CacheService
+        CacheService().clear_all()
+    except Exception:
+        pass
+
     global _reflected_metadata
     if _reflected_metadata is None:
         from sqlalchemy import MetaData

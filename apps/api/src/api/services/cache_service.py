@@ -145,12 +145,13 @@ class CacheService:
         """Manually invalidate/delete item from cache."""
         client = self.redis_manager.get_client()
         cache_key = self._get_key(namespace, org_id, key)
+        self._memory_cache.pop(cache_key, None)
         try:
             res = client.delete(cache_key)
             if res > 0:
                 self.evictions_count += 1
                 return True
-            return False
+            return True
         except Exception as e:
             logger.error(f"Failed to delete cache key {cache_key}: {e}")
             return False
@@ -161,36 +162,47 @@ class CacheService:
         org_pattern = f"org:{org_id}" if org_id else "*"
         pattern = f"eaimos:cache:{org_pattern}:{namespace}:*"
         
+        # Purge matching keys from memory cache
+        mem_keys = [k for k in self._memory_cache.keys() if f":{namespace}:" in k]
+        for mk in mem_keys:
+            self._memory_cache.pop(mk, None)
+
         try:
             keys = client.keys(pattern)
             if keys:
                 client.delete(*keys)
                 self.evictions_count += len(keys)
                 return len(keys)
-            return 0
+            return len(mem_keys)
         except Exception as e:
             logger.error(f"Failed to clear namespace pattern {pattern}: {e}")
-            return 0
+            return len(mem_keys)
 
     def clear_org(self, org_id: str) -> int:
         """Invalidate all cached items for a specific organization."""
         client = self.redis_manager.get_client()
         pattern = f"eaimos:cache:org:{org_id}:*:*"
+        
+        mem_keys = [k for k in self._memory_cache.keys() if f":org:{org_id}:" in k]
+        for mk in mem_keys:
+            self._memory_cache.pop(mk, None)
+
         try:
             keys = client.keys(pattern)
             if keys:
                 client.delete(*keys)
                 self.evictions_count += len(keys)
                 return len(keys)
-            return 0
+            return len(mem_keys)
         except Exception as e:
             logger.error(f"Failed to clear org cache pattern {pattern}: {e}")
-            return 0
+            return len(mem_keys)
 
     def clear_all(self) -> int:
-        """Reset/invalidate the entire AI Platform cache."""
+        """Purge all application cache keys."""
         client = self.redis_manager.get_client()
         pattern = "eaimos:cache:*"
+        self._memory_cache.clear()
         try:
             keys = client.keys(pattern)
             if keys:

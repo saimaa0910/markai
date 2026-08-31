@@ -117,7 +117,7 @@ class TestRefreshRotation:
         await db.commit()
 
         # First refresh: rotate.
-        first = client.post("/api/v1/auth/refresh", params={"refresh_token": raw})
+        first = client.post("/api/v1/auth/refresh", json={"refresh_token": raw})
         assert first.status_code == 200
         new_token = first.json()["refresh_token"]
         assert new_token != raw
@@ -128,7 +128,7 @@ class TestRefreshRotation:
         assert stored.replaced_by is not None
 
         # Second refresh with the new token works.
-        second = client.post("/api/v1/auth/refresh", params={"refresh_token": new_token})
+        second = client.post("/api/v1/auth/refresh", json={"refresh_token": new_token})
         assert second.status_code == 200
 
     @pytest.mark.asyncio
@@ -168,10 +168,10 @@ class TestRefreshRotation:
         await db.commit()
 
         # Rotate once.
-        assert client.post("/api/v1/auth/refresh", params={"refresh_token": raw}).status_code == 200
+        assert client.post("/api/v1/auth/refresh", json={"refresh_token": raw}).status_code == 200
 
         # Presenting the rotated (used) token again -> compromise handling.
-        reused = client.post("/api/v1/auth/refresh", params={"refresh_token": raw})
+        reused = client.post("/api/v1/auth/refresh", json={"refresh_token": raw})
         assert reused.status_code == 401
 
         # Entire family revoked (stored + sibling + newly-issued = 3 tokens).
@@ -229,19 +229,19 @@ class TestRefreshRotation:
         await db.commit()
 
         new_token = client.post(
-            "/api/v1/auth/refresh", params={"refresh_token": raw}
+            "/api/v1/auth/refresh", json={"refresh_token": raw}
         ).json()["refresh_token"]
 
         # Reuse the rotated token -> family kill.
         assert (
-            client.post("/api/v1/auth/refresh", params={"refresh_token": raw}).status_code
+            client.post("/api/v1/auth/refresh", json={"refresh_token": raw}).status_code
             == 401
         )
 
         # The newly issued token is now also dead (same family).
         assert (
             client.post(
-                "/api/v1/auth/refresh", params={"refresh_token": new_token}
+                "/api/v1/auth/refresh", json={"refresh_token": new_token}
             ).status_code
             == 401
         )
@@ -250,7 +250,7 @@ class TestRefreshRotation:
     async def test_unknown_token_does_not_kill_family(self, client, test_user, db):
         await _make_session(db, test_user)
         unknown = create_refresh_token(str(test_user.id))
-        resp = client.post("/api/v1/auth/refresh", params={"refresh_token": unknown})
+        resp = client.post("/api/v1/auth/refresh", json={"refresh_token": unknown})
         assert resp.status_code == 401
 
 

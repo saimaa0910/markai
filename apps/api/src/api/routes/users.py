@@ -376,11 +376,27 @@ def delete_my_account(  # Sprint 8.3.1
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-# ─── Admin user deletion deprecated: use 7-day recovery window ──────────────
-# The `delete_user` endpoint is deprecated. Permanent deletion is not supported;
-# users must request account deletion via `/auth/me/delete` which schedules
-# permanent deletion after a 7-day recovery window with email notification.
-# ─────────────────────────────────────────────────────────────────────────────
+def delete_user(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _auth: None = Depends(enforce_all_auth_policies),
+) -> None:
+    """Admin-only deletion of a user account."""
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can delete user accounts",
+        )
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    db.delete(target_user)
+    db.commit()
+    return None
 
 
 # ─── Account Deletion (7-Day Recovery Window) ────────────────────────────────

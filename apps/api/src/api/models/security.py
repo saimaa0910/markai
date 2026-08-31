@@ -130,6 +130,8 @@ class TrustedDevice(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
     
     version: Mapped[int] = mapped_column(
@@ -202,6 +204,8 @@ class MFARecoveryCode(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
+        default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"),
     )
     
     version: Mapped[int] = mapped_column(

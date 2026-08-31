@@ -127,7 +127,8 @@ def test_token_refresh():
 
     # 2. Refresh Token
     refresh_response = client.post(
-        f"/api/v1/auth/refresh?refresh_token={tokens['refresh_token']}"
+        "/api/v1/auth/refresh",
+        json={"refresh_token": tokens["refresh_token"]},
     )
     assert refresh_response.status_code == 200
     new_tokens = refresh_response.json()
