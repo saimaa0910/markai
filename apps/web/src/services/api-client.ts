@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../store/auth';
+import { getSafeErrorMessage } from '../platform/errors/user-message';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL 
   ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1`
@@ -80,11 +81,14 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // Enhance timeout/network errors with descriptive message fields
+    // Enhance errors with safe user-facing message via error leak-stop
+    const safeMsg = getSafeErrorMessage(error);
+    (error as any).userMessage = safeMsg;
+
     if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
-      error.message = 'The server request timed out. Please verify provider connectivity and try again.';
+      error.message = safeMsg;
     } else if (!error.response) {
-      error.message = 'Network error: Cannot reach the Viptant API server.';
+      error.message = safeMsg;
     }
 
     return Promise.reject(error);
