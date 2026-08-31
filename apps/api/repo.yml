@@ -1,0 +1,57 @@
+schema_version: 1
+
+context:
+  type: repository
+  level: L2
+  canonical: true
+  last_verified: "2026-08-31"
+
+inheritance:
+  product: { repository: saimaa0910/markai, level: L1, file: context.yaml }
+
+repository:
+  name: eaimos-api
+  path: apps/api
+  product: eaimos-monorepo
+  type: backend
+  role: primary
+  status: active
+
+runtime:
+  language: Python
+  language_version: "3.13"
+  framework: FastAPI
+  orm: SQLAlchemy 2.0 (async + sync)
+  migrations: Alembic
+  task_runner: Celery + Redis
+  package_manager: Poetry
+
+architecture:
+  style: layered-ddd
+  layers:
+    - routes: apps/api/src/api/routes
+    - services: apps/api/src/api/services
+    - domain: apps/api/src/api/domain
+    - repositories: apps/api/src/api/repositories
+    - models: apps/api/src/api/models
+    - core: apps/api/src/api/core
+    - middleware: apps/api/src/api/middleware
+  enforcement:
+    mechanism: ast-architecture-fitness-test
+    command: poetry run pytest tests/test_architecture_fitness.py
+
+security:
+  sensitive_paths:
+    - src/api/core/security.py
+    - src/api/core/deps.py
+    - src/api/middleware/auth_enforcement.py
+    - src/api/middleware/rate_limiting.py
+    - src/api/services/device_trust_service.py
+    - src/api/services/mfa_recovery_service.py
+  tenancy:
+    extractor: get_service_context
+    enforcer: TenantRepository (WHERE organization_id = :org_id)
+  never:
+    - leak raw database stack traces or SQL exceptions to client responses
+    - bypass tenant ownership validation on write operations
+    - execute unauthenticated mutation routes

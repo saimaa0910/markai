@@ -1,0 +1,73 @@
+schema_version: 1
+
+context:
+  id: eaimos-monorepo
+  type: product
+  level: L1
+  canonical: true
+  repository: saimaa0910/markai
+  status: active
+  last_verified: "2026-08-31"
+
+system:
+  name: Enterprise AI Marketing Operating System (EAIMOS / Viptant)
+  category: marketing-ai-platform
+  purpose: Multi-tenant AI marketing operating system coordinating campaign channels, LLM provider routing, copywriting variant generation, token rate tracking, and credit budget control.
+
+repositories:
+  primary:
+    - apps/api         # FastAPI backend service
+    - apps/web         # Next.js 15 web client
+  packages:
+    - packages/shared  # Shared utility functions (cn, date formatters)
+    - packages/ui      # Shared React UI primitives (Card)
+    - packages/types   # Shared domain interfaces and audit types
+  infrastructure:
+    - infra/docker     # Container images & compose configurations
+    - infra/kubernetes # K8s manifests
+    - infra/terraform  # Cloud infrastructure as code
+
+architecture:
+  style: modular-monolith-ddd
+  bounded_contexts:
+    - access           # Authentication, sessions, RBAC, device trust, MFA recovery
+    - identity         # Users, organizations, tenant memberships, accounts
+    - ai_platform      # LLM gateway, providers, prompt registry, model routing, SSE streaming
+    - ai_agents        # Multi-step planner, agent runtime, tool registry, memory manager
+    - crm              # Companies, contacts, leads, activities
+    - campaigns        # Campaign coordination, content variant generator, workflows
+    - knowledge        # RAG pipeline, vector store, document parser, collections
+    - billing          # Credit budgets, token consumption rate tracking, subscriptions
+    - observability    # Prometheus metrics, OpenTelemetry tracing, audit logs
+  shared_kernel: apps/api/src/api/core
+  composition_root: apps/api/src/api/main.py
+  boundary_enforcement: ast-fitness-test
+  datastore: postgresql
+  cache_and_queue: redis
+  object_storage: minio
+  schemas:
+    - auth
+    - iam
+    - users
+    - organizations
+    - memberships
+    - ai_registry
+    - knowledge
+    - crm
+    - campaigns
+    - billing
+    - platform_events
+
+contracts:
+  api:
+    source_repository: apps/api
+    path: apps/api/openapi.json
+    format: openapi-3.1
+    prefix: /api/v1
+
+security:
+  tenancy_discriminator: organization_id
+  tenancy_enforcement: application-layer
+  access_token_ttl: 15m
+  refresh_token_ttl: 720h
+  session_cookie_name: eaimos.session

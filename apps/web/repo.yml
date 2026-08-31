@@ -1,0 +1,52 @@
+schema_version: 1
+
+context:
+  type: repository
+  level: L2
+  canonical: true
+  last_verified: "2026-08-31"
+
+inheritance:
+  product: { repository: saimaa0910/markai, level: L1, file: context.yaml }
+
+repository:
+  name: eaimos-web
+  path: apps/web
+  product: eaimos-monorepo
+  type: frontend
+  role: primary
+  status: active
+
+runtime:
+  language: TypeScript
+  framework: Next.js 15 (App Router) / React 19
+  state_management: Zustand
+  data_fetching: Axios + React Query
+  styling: Tailwind CSS
+  package_manager: npm
+
+architecture:
+  style: layered-with-route-guards
+  layers:
+    - app: src/app
+    - features: src/features
+    - components: src/components
+    - services: src/services
+    - store: src/store
+    - platform: src/platform
+    - shared: src/utils, packages/shared, packages/ui
+
+session:
+  model: client-jwt-with-guard-marker
+  cookie: eaimos.session
+  transition_target: server-resolved-BFF-HttpOnly
+
+security:
+  sensitive_paths:
+    - src/proxy.ts
+    - src/store/auth.ts
+    - src/services/api-client.ts
+    - src/platform/errors/user-message.ts
+  never:
+    - render backend raw error.message or error.response.data.detail directly to users
+    - treat client UI capability checks as true security boundaries
