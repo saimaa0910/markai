@@ -6,8 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  architecture-and-backend:
+  backend-gate:
     name: Architecture & Backend Quality Gate
     runs-on: ubuntu-latest
     services:
@@ -38,7 +42,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python 3.13
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -50,7 +54,15 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
-      - name: Install Dependencies
+      - name: Cache Poetry Virtualenv
+        uses: actions/cache@v4
+        with:
+          path: apps/api/.venv
+          key: poetry-${{ runner.os }}-${{ hashFiles('apps/api/poetry.lock') }}
+          restore-keys: |
+            poetry-${{ runner.os }}-
+
+      - name: Install Backend Dependencies
         working-directory: ./apps/api
         run: poetry install --no-interaction
 
@@ -62,7 +74,21 @@ jobs:
           ENVIRONMENT: test
         run: poetry run pytest tests/test_architecture_fitness.py -v
 
-      - name: Backend Test Suite (668 Tests)
+      - name: Database Migration Gate
+        working-directory: ./apps/api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eaimos_test
+          SECRET_KEY: test_secret_key_minimum_32_characters_long_12345
+          ENVIRONMENT: test
+        run: |
+          echo "=== 1. Verify Single Migration Head ==="
+          poetry run alembic heads
+          echo "=== 2. Apply Migrations to Fresh Database ==="
+          poetry run alembic upgrade head
+          echo "=== 3. Verify Database Revision Matches Head ==="
+          poetry run alembic current
+
+      - name: Backend Test Suite
         working-directory: ./apps/api
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eaimos_test
@@ -70,48 +96,93 @@ jobs:
           ENVIRONMENT: test
         run: poetry run pytest tests/ -v
 
-      - name: Alembic Migration Head Check
-        working-directory: ./apps/api
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eaimos_test
-          SECRET_KEY: test_secret_key_minimum_32_characters_long_12345
-          ENVIRONMENT: test
-        run: poetry run alembic heads
-
-  frontend:
+  frontend-gate:
     name: Frontend Quality Gate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install Dependencies
+      - name: Install Monorepo Dependencies
         run: npm ci --legacy-peer-deps
 
-      - name: TypeScript Typecheck
+      - name: TypeScript Typecheck Gate
         run: npm run typecheck
 
-      - name: Production Web Build
+      - name: Frontend Production Build Gate
         run: npm run web:build
 
-  docker:
-    name: Docker Build & Compose Validation
+  docker-and-e2e-gate:
+    name: Docker Stack & Browser E2E Gate
     runs-on: ubuntu-latest
+    needs: [backend-gate, frontend-gate]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Monorepo Dependencies
+        run: npm ci --legacy-peer-deps
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Validate Docker Compose Config
+      - name: Validate Docker Compose Specification
         run: docker compose config
 
       - name: Build Docker Stack
         run: docker compose build
+
+      - name: Start Docker Stack
+        run: docker compose up -d
+
+      - name: Verify Service Health & Readiness
+        run: |
+          echo "Waiting for core services to report healthy..."
+          timeout 120s bash -c 'until docker compose ps | grep "(healthy)"; do sleep 2; done'
+          
+          echo "Verifying API health endpoint..."
+          curl -f http://localhost:8000/health || exit 1
+          
+          echo "Verifying API liveness endpoint..."
+          curl -f http://localhost:8000/live || exit 1
+          
+          echo "Verifying API readiness endpoint..."
+          curl -f http://localhost:8000/ready || exit 1
+          
+          echo "Verifying Frontend availability..."
+          curl -f http://localhost:3000 || exit 1
+          
+          echo "Verifying Nginx reverse proxy..."
+          curl -f http://localhost:80 || exit 1
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Execute Browser E2E Test Suite
+        run: npm run test:e2e
+        env:
+          PLAYWRIGHT_TEST_BASE_URL: http://localhost:3000
+
+      - name: Upload E2E Test Reports & Artifacts on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Teardown Docker Stack
+        if: always()
+        run: docker compose down -v

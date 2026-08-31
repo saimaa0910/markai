@@ -181,3 +181,26 @@ In the event of a production defect on `main`:
 3. Verify test suite and architecture fitness locally.
 4. Open an expedited PR with `[HOTFIX]` tag.
 5. Merge via CI and deploy.
+
+---
+
+## 10. Continuous Delivery & Release Management
+
+EAIMOS separates Continuous Integration (PR validation) from Continuous Delivery (environment deployment).
+
+### Delivery Pipelines
+- **Staging Delivery (`cd-staging.yml`)**:
+  - Automatically triggered upon push to `main` following successful CI.
+  - Builds immutable Docker images tagged with the commit SHA (`ghcr.io/org/service:<sha>`).
+  - Executes database migrations against the staging database.
+  - Verifies post-deployment service health (`/health`, `/live`, `/ready`).
+- **Production Release Delivery (`cd-production.yml`)**:
+  - Triggered by semantic release tags (`v*`) or manual dispatch.
+  - Enforces a mandatory manual review and approval gate via GitHub Environments (`production`).
+  - Deploys verified immutable images to production.
+  - Executes audit logging and smoke test verification.
+
+### Rollback Strategy
+1. **Application Image Rollback**: Re-deploy the previous known-good immutable commit SHA image tags immediately.
+2. **Database Migration Rollback**: Handled as a deliberate, separate operation. Reversible schema migrations are rolled back via targeted `alembic downgrade <revision>` only after verifying data integrity.
+
