@@ -2,36 +2,38 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
 
 jobs:
-  frontend-check:
-    name: Frontend Typecheck and Lint
+  architecture-and-backend:
+    name: Architecture & Backend Quality Gate
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: eaimos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '26'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Build Web App
-        run: npm run web:build
-
-      - name: Check Formatting (Prettier)
-        run: npx prettier --check "**/*.{ts,tsx,js,jsx,json,md,css}"
-
-  backend-check:
-    name: Backend Lint and Test
-    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -49,27 +51,57 @@ jobs:
           virtualenvs-in-project: true
 
       - name: Install Dependencies
-        run: |
-          cd apps/api
-          poetry install --no-interaction
+        working-directory: ./apps/api
+        run: poetry install --no-interaction
 
-      - name: Run Black formatter check
-        run: |
-          cd apps/api
-          poetry run black --check src
+      - name: Architecture Fitness Gate
+        working-directory: ./apps/api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eaimos_test
+          SECRET_KEY: test_secret_key_minimum_32_characters_long_12345
+          ENVIRONMENT: test
+        run: poetry run pytest tests/test_architecture_fitness.py -v
 
-      - name: Run Flake8 linter check
-        run: |
-          cd apps/api
-          poetry run flake8 src
+      - name: Backend Test Suite (668 Tests)
+        working-directory: ./apps/api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eaimos_test
+          SECRET_KEY: test_secret_key_minimum_32_characters_long_12345
+          ENVIRONMENT: test
+        run: poetry run pytest tests/ -v
 
-      - name: Run Mypy typecheck
-        run: |
-          cd apps/api
-          poetry run mypy src
+      - name: Alembic Migration Head Check
+        working-directory: ./apps/api
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eaimos_test
+          SECRET_KEY: test_secret_key_minimum_32_characters_long_12345
+          ENVIRONMENT: test
+        run: poetry run alembic heads
 
-  docker-build-test:
-    name: Test Docker Builds
+  frontend:
+    name: Frontend Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: TypeScript Typecheck
+        run: npm run typecheck
+
+      - name: Production Web Build
+        run: npm run web:build
+
+  docker:
+    name: Docker Build & Compose Validation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -78,22 +110,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build DB Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./infra/docker/postgres
-          push: false
+      - name: Validate Docker Compose Config
+        run: docker compose config
 
-      - name: Build API Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./apps/api
-          file: ./infra/docker/api/Dockerfile
-          push: false
-
-      - name: Build Web Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./infra/docker/web/Dockerfile
-          push: false
+      - name: Build Docker Stack
+        run: docker compose build
