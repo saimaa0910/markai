@@ -368,6 +368,14 @@ class UserSession(Base):
     def is_active(self, value: bool) -> None:
         self.is_revoked = not value
 
+    @hybrid_property
+    def last_activity_at(self) -> datetime:
+        return self.last_active_at
+
+    @last_activity_at.setter
+    def last_activity_at(self, value: datetime) -> None:
+        self.last_active_at = value
+
 
 class RefreshToken(Base):
     """

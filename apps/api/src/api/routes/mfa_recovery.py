@@ -1,4 +1,4 @@
-﻿"""MFA Recovery Routes â€” Sprint 8.3.1 Phase 4
+"""MFA Recovery Routes - Sprint 8.3.1 Phase 4
 
 API endpoints for MFA recovery code management.
 """

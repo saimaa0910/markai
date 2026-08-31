@@ -349,3 +349,6 @@ class AccountLifecycleService:
             else [],
             "deletion_status": deletion_status,
         }
+
+    # Alias for contract compatibility
+    export_account_data = export_user_data
