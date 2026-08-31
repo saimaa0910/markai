@@ -143,14 +143,22 @@ Potential failure modes and exact rollback procedure.
 
 ## 6. Automated CI Quality Gates
 
-The GitHub Actions CI pipeline enforces the following gates on every Pull Request to `main`:
+The GitHub Actions CI pipeline (`.github/workflows/ci.yml`) enforces the following quality gates on every Pull Request to `main`:
 
 1. **Architecture Fitness Gate**: Zero layer boundary violations (`test_architecture_fitness.py`).
-2. **Backend Pytest Suite**: 100% green execution across all test suites.
-3. **Database Migration Verification**: Exactly one linear Alembic head (`alembic heads`).
-4. **Frontend TypeScript Check**: `npm run typecheck` (`tsc --noEmit`) with 0 errors.
-5. **Frontend Production Build**: `npm run web:build` with Next.js Turbopack compilation.
-6. **Docker Configuration & Build**: `docker compose config` and container image builds.
+2. **Database Migration Verification Gate**: 
+   - Verify single migration head (`alembic heads`).
+   - Apply linear migrations to fresh database (`alembic upgrade head`).
+   - Validate active revision matches single head (`alembic current`).
+3. **Backend Pytest Suite Gate**: 100% green execution across all test suites with pgvector PostgreSQL and Redis service containers.
+4. **Frontend TypeScript Check Gate**: `npm run typecheck` (`tsc --noEmit`) with 0 errors.
+5. **Frontend Production Build Gate**: `npm run web:build` with Next.js Turbopack compilation.
+6. **Docker Compose & Build Gate**: Validate compose specification (`docker compose config`) and build all application containers (`docker compose build`).
+7. **Docker Runtime Smoke Test Gate**: Launch stack (`docker compose up -d`), verify health/readiness endpoints (`/health`, `/live`, `/ready`, `:3000`, `:80`), and cleanly tear down (`docker compose down -v`).
+
+### Real AI Provider Testing Policy
+- **Pull Request CI**: Strictly uses deterministic unit/integration mocks and contract tests. Zero external AI API calls (Groq, OpenAI, Google, Anthropic) are made in PR validation.
+- **Staging / Nightly Validation**: Controlled live provider health circuits run separately via `.github/workflows/ai-smoke-tests.yml` with dedicated secrets on a scheduled/manual basis.
 
 ---
 

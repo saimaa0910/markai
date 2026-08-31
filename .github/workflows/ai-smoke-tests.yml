@@ -1,0 +1,47 @@
+name: Real AI Provider Smoke Tests (Staging / Nightly)
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'Specific AI Provider to test (or all)'
+        required: false
+        default: 'all'
+  schedule:
+    # Run nightly at 02:00 UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  ai-provider-smoke-test:
+    name: Controlled AI Provider Contract Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '2.2.1'
+
+      - name: Install Dependencies
+        working-directory: ./apps/api
+        run: poetry install --no-interaction
+
+      - name: Execute Controlled Staging AI Smoke Tests
+        working-directory: ./apps/api
+        env:
+          OPENAI_API_KEY: ${{ secrets.STAGING_OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.STAGING_GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.STAGING_GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.STAGING_ANTHROPIC_API_KEY }}
+          SECRET_KEY: test_secret_key_minimum_32_characters_long_12345
+          ENVIRONMENT: staging
+        run: |
+          echo "Executing nightly/staging AI provider live integration tests..."
+          poetry run pytest tests/test_provider_health_failure_circuits.py -v
