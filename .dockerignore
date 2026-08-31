@@ -9,11 +9,13 @@ dist
 
 # Python artifacts
 .venv
+**/.venv
 **/__pycache__
 *.pyc
 *.pyo
 *.pyd
 .pytest_cache
+**/.pytest_cache
 .coverage
 htmlcov
 
