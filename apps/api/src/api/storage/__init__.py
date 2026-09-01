@@ -1,3 +1,0 @@
-"""
-Enterprise Storage Package Initializer.
-"""
