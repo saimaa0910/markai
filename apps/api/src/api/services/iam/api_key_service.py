@@ -398,7 +398,7 @@ class APIKeyService:
             return ServiceResult.ok(data=True)
 
         except Exception as exc:
-            logger.error(f"revoke_api_key failed for {api_key_id}: {exc}", exc_info=True)
+            logger.error("revoke_api_key failed.", exc_info=True)
             return ServiceResult.from_exception(exc)
 
     # ─── Validate (Authentication Path) ──────────────────────────────────────
