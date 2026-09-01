@@ -391,8 +391,8 @@ def _send_email(
     print(f"📧 EMAIL (DEV MODE - PROVIDER UNAVAILABLE)")
     print(f"   To:      {to_email}")
     print(f"   Subject: {subject}")
-    for url in urls:
-        print(f"   Link:    {url}")
+    if urls:
+        print(f"   Links:   {len(urls)} link(s) redacted")
     print(f"{'='*60}\n")
 
     _write_email_log(
