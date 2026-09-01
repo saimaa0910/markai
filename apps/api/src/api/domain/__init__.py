@@ -1,3 +1,0 @@
-"""
-Enterprise Domain Package Initializer.
-"""

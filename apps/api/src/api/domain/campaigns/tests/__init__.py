@@ -1,1 +1,0 @@
-"""Campaigns domain tests package."""

@@ -1,5 +1,0 @@
-"""
-Analytics Constants.
-"""
-
-DEFAULT_RETENTION_DAYS = 90

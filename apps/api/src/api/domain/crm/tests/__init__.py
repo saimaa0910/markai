@@ -1,1 +1,0 @@
-"""CRM domain tests package."""
