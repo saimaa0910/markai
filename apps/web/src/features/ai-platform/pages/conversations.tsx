@@ -799,13 +799,23 @@ export function ConversationsPage() {
     ]);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/chat/conversations/${selectedConvId}/stream`, {
+      const baseUrl = apiClient.defaults.baseURL || '/api/v1';
+      const token = useAuthStore.getState().accessToken;
+      const orgId = useAuthStore.getState().activeOrg?.id;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      if (orgId) {
+        headers['X-Organization-ID'] = orgId;
+      }
+
+      const response = await fetch(`${baseUrl}/chat/conversations/${selectedConvId}/stream`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${useAuthStore.getState().accessToken || ''}`,
-          'X-Organization-ID': useAuthStore.getState().activeOrg?.id || '',
-        },
+        headers,
         body: JSON.stringify({
           content: userQuery || `Files attached: ${fileIds.length}`,
           model_name: selectedModel,
@@ -918,10 +928,25 @@ export function ConversationsPage() {
     }
   };
 
-  const handleExport = (format: 'markdown' | 'json' | 'txt') => {
+  const handleExport = async (format: 'markdown' | 'json' | 'txt') => {
     if (!messages.length || !selectedConvId) return;
-    window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/chat/conversations/${selectedConvId}/export?format=${format}`);
-    toast.success('Export Triggered', `Exporting file as ${format.toUpperCase()}`);
+    try {
+      const response = await apiClient.get(`/chat/conversations/${selectedConvId}/export?format=${format}`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([response.data]);
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `conversation-${selectedConvId}.${format === 'markdown' ? 'md' : format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+      toast.success('Export Complete', `Exported conversation as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error('Export Failed', 'Could not export conversation history.');
+    }
   };
 
   return (
