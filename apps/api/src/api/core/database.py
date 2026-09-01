@@ -9,12 +9,20 @@ async_db_url = settings.ASYNC_DATABASE_URL or settings.DATABASE_URL
 if async_db_url.startswith("postgresql://"):
     async_db_url = async_db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-async_engine = create_async_engine(
-    async_db_url,
-    pool_pre_ping=True,
-    pool_size=50,
-    max_overflow=100,
-)
+if settings.ENVIRONMENT == "test":
+    from sqlalchemy.pool import NullPool
+    async_engine = create_async_engine(
+        async_db_url,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+    )
+else:
+    async_engine = create_async_engine(
+        async_db_url,
+        pool_pre_ping=True,
+        pool_size=50,
+        max_overflow=100,
+    )
 
 async_session_maker = async_sessionmaker(
     bind=async_engine,
