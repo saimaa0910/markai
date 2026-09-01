@@ -175,7 +175,7 @@ class APIKeyService:
 
             logger.info(
                 "API key created",
-                extra={"key_prefix": key_prefix, "org_id": str(org_id), "correlation_id": ctx.correlation_id},
+                extra={"org_id": str(org_id), "correlation_id": ctx.correlation_id},
             )
             return ServiceResult.ok(
                 data=APIKeyCreatedDTO(
