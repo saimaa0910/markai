@@ -20,7 +20,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -111,7 +111,9 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Validate Docker Compose Config
-        run: docker compose config
+        run: |
+          cp .env.example .env
+          docker compose config
 
       - name: Build Docker Stack
         run: docker compose build
