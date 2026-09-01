@@ -342,7 +342,7 @@ class APIKeyService:
             return ServiceResult.ok(data=response)
 
         except Exception as exc:
-            logger.error(f"update_api_key failed for {api_key_id}: {exc}", exc_info=True)
+            logger.error("update_api_key failed", exc_info=True)
             return ServiceResult.from_exception(exc)
 
     # ─── Revoke ───────────────────────────────────────────────────────────────
