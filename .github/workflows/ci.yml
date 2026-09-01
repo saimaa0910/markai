@@ -111,7 +111,9 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Validate Docker Compose Config
-        run: docker compose config
+        run: |
+          cp .env.example .env
+          docker compose config
 
       - name: Build Docker Stack
         run: docker compose build
