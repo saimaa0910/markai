@@ -19,6 +19,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Ensure required PostgreSQL extensions are enabled
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+    op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+    op.execute("CREATE EXTENSION IF NOT EXISTS unaccent;")
+
     # Users table
     op.create_table(
         "users",

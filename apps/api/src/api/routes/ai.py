@@ -1180,25 +1180,8 @@ def sync_providers_and_models(db: Session) -> None:
         db.execute(text("ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS config JSONB"))
         db.commit()
     except Exception:
-        try:
-            db.execute(text("ALTER TABLE ai_providers ADD COLUMN config JSON"))
-            db.commit()
-        except Exception:
-            pass
+        db.rollback()
 
-    try:
-        db.execute(text("ALTER TABLE ai_token_usage ADD COLUMN IF NOT EXISTS request_id VARCHAR(64)"))
-        db.commit()
-        db.execute(text("CREATE INDEX IF NOT EXISTS ix_ai_token_usage_request_id ON ai_token_usage (request_id, status)"))
-        db.commit()
-    except Exception:
-        try:
-            db.execute(text("CREATE INDEX IF NOT EXISTS ix_ai_token_usage_request_id ON ai_token_usage (request_id, status)"))
-            db.commit()
-        except Exception:
-            pass
-
-    # P2-2: pgvector HNSW index for fast approximate vector search
     try:
         db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         db.execute(text(
@@ -1207,18 +1190,13 @@ def sync_providers_and_models(db: Session) -> None:
         ))
         db.commit()
     except Exception:
-        pass
+        db.rollback()
 
     try:
         db.execute(text("ALTER TABLE ai_models ADD COLUMN IF NOT EXISTS supports_images BOOLEAN DEFAULT FALSE"))
         db.commit()
     except Exception:
         db.rollback()
-        try:
-            db.execute(text("ALTER TABLE ai_models ADD COLUMN supports_images BOOLEAN"))
-            db.commit()
-        except Exception:
-            db.rollback()
 
     try:
         db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0"))
@@ -1228,14 +1206,6 @@ def sync_providers_and_models(db: Session) -> None:
         db.commit()
     except Exception:
         db.rollback()
-        try:
-            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN retry_count INTEGER"))
-            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN capability VARCHAR(50)"))
-            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN agent VARCHAR(100)"))
-            db.execute(text("ALTER TABLE ai_token_usages ADD COLUMN request_id VARCHAR(100)"))
-            db.commit()
-        except Exception:
-            db.rollback()
 
     provider_names = ["groq", "openai", "anthropic", "google", "openrouter", "deepseek", "mistral", "ollama", "cloudflare", "pollinations", "replicate", "together", "fal", "stability", "ideogram", "blackforestlabs"]
     providers = {}
