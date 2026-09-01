@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from api.models.agent import AgentType, AgentStatus, AgentRunStatus
 
 
@@ -66,9 +66,7 @@ class AgentDefinitionResponse(AgentDefinitionBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- AGENT SESSION SCHEMAS ---
 
@@ -94,9 +92,7 @@ class AgentSessionResponse(AgentSessionBase):
     organization_id: uuid.UUID
     is_active: bool
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- AGENT RUN SCHEMAS ---
 
@@ -118,9 +114,7 @@ class AgentRunResponse(BaseModel):
     total_tokens: int
     latency_ms: Optional[int] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- AGENT LOG SCHEMAS ---
 
@@ -133,9 +127,7 @@ class AgentLogResponse(BaseModel):
     content: str
     meta_data: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sprint 7.1 — Runtime API Schemas
@@ -182,9 +174,7 @@ class AgentEvaluationResponse(BaseModel):
     suggested_edits: Optional[str] = None
     is_satisfactory: bool = True
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class AgentToolInfo(BaseModel):
     """Descriptor for a registered tool."""

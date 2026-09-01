@@ -1,7 +1,7 @@
 import uuid
 import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class FileAssetBase(BaseModel):
@@ -21,5 +21,4 @@ class FileAssetResponse(FileAssetBase):
     organization_id: uuid.UUID
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

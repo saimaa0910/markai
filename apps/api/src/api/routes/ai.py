@@ -1,6 +1,6 @@
 import uuid
 from typing import Any, List, Optional, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_, func
@@ -1817,9 +1817,7 @@ class ProviderKeyResponse(BaseModel):
     user_id: Optional[uuid.UUID] = None
     level: Optional[str] = None  # "user" or "organization"
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ProviderKeyCreate(BaseModel):
     provider_id: uuid.UUID
@@ -1841,9 +1839,7 @@ class ProviderHealthLogResponse(BaseModel):
     last_checked: datetime.datetime
     error_message: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class OrgCapLimitResponse(BaseModel):
     organization_id: uuid.UUID
@@ -1852,9 +1848,7 @@ class OrgCapLimitResponse(BaseModel):
     rpm_limit: int
     tpm_limit: int
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class AddCreditsRequest(BaseModel):
     amount: float

@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, List, Union, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # --- PROMPT SCHEMAS ---
@@ -53,9 +53,7 @@ class PromptResponse(BaseModel):
     folder_id: Optional[uuid.UUID] = None
     collection_id: Optional[uuid.UUID] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptCollectionCreate(BaseModel):
     name: str
@@ -75,9 +73,7 @@ class PromptCollectionResponse(BaseModel):
     visibility: str
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptFolderCreate(BaseModel):
     name: str
@@ -92,9 +88,7 @@ class PromptFolderResponse(BaseModel):
     parent_id: Optional[uuid.UUID] = None
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptTestCaseCreate(BaseModel):
     name: str
@@ -110,9 +104,7 @@ class PromptTestCaseResponse(BaseModel):
     expected_output: Optional[str] = None
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptEvaluationResponse(BaseModel):
     id: uuid.UUID
@@ -132,9 +124,7 @@ class PromptEvaluationResponse(BaseModel):
     cost_usd: float
     tokens_used: int
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptExecuteRequest(BaseModel):
     variables: dict
@@ -170,9 +160,7 @@ class ConversationResponse(ConversationBase):
     user_id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- MESSAGE SCHEMAS ---
 
@@ -200,9 +188,7 @@ class MessageResponse(MessageBase):
     completion_tokens: Optional[int] = None
     cost_usd: Optional[float] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- KNOWLEDGE SCHEMAS ---
 
@@ -218,9 +204,7 @@ class DocumentChunkResponse(BaseModel):
     content: str
     document_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class KnowledgeDocumentResponse(BaseModel):
     id: uuid.UUID
@@ -229,9 +213,7 @@ class KnowledgeDocumentResponse(BaseModel):
     organization_id: uuid.UUID
     chunks: List[DocumentChunkResponse]
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class KnowledgeDocumentListElement(BaseModel):
     id: uuid.UUID
@@ -243,9 +225,7 @@ class KnowledgeDocumentListElement(BaseModel):
     created_at: str
     collection_name: str
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class QuerySimilarChunksRequest(BaseModel):
     query_text: str
@@ -273,9 +253,7 @@ class ModelRegistryResponse(BaseModel):
     is_healthy: bool
     organization_id: Optional[uuid.UUID] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ModelRegistryUpdate(BaseModel):
     is_healthy: Optional[bool] = None
@@ -291,9 +269,7 @@ class RoutingRuleResponse(BaseModel):
     is_active: bool
     organization_id: Optional[uuid.UUID] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class RoutingRuleCreate(BaseModel):
     request_type: str
@@ -326,9 +302,7 @@ class TokenUsageResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- PLAYGROUND RUN SCHEMAS ---
 
@@ -357,9 +331,7 @@ class ProviderResponse(BaseModel):
     config: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ProviderCreate(BaseModel):
     name: str

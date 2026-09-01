@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
@@ -37,9 +37,7 @@ class SessionResponse(BaseModel):
     is_revoked: bool
     is_current: bool = False
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class RevokeSessionRequest(BaseModel):
     reason: Optional[str] = "user_logout"

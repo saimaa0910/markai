@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select, delete
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from api.database.session import get_db
@@ -70,9 +70,7 @@ class SecurityPolicyResponse(BaseModel):
     priority: int
     organization_id: Optional[uuid.UUID] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class SecurityEventResponse(BaseModel):
     id: uuid.UUID
     organization_id: Optional[uuid.UUID] = None
@@ -84,9 +82,7 @@ class SecurityEventResponse(BaseModel):
     action_taken: str
     created_at: Any
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class ScanLogResponse(BaseModel):
     id: uuid.UUID
     organization_id: Optional[uuid.UUID] = None
@@ -100,9 +96,7 @@ class ScanLogResponse(BaseModel):
     classification: str
     created_at: Any
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class QuotaUsageResponse(BaseModel):
     id: uuid.UUID
     organization_id: Optional[uuid.UUID] = None
@@ -115,9 +109,7 @@ class QuotaUsageResponse(BaseModel):
     monthly_spend: float
     last_reset_date: Any
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 @router.get("/policies", response_model=List[SecurityPolicyResponse])
 def get_security_policies(  # Sprint 8.3.1

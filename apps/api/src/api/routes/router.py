@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select, delete
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from api.database.session import get_db
 from api.core.deps import RoleChecker
@@ -60,9 +60,7 @@ class RoutingPolicyResponse(BaseModel):
     is_active: bool
     organization_id: Optional[uuid.UUID] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class RoutingLogResponse(BaseModel):
     id: uuid.UUID
     organization_id: Optional[uuid.UUID] = None
@@ -80,9 +78,7 @@ class RoutingLogResponse(BaseModel):
     success: bool
     error_message: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class FailoverEventResponse(BaseModel):
     id: uuid.UUID
     organization_id: Optional[uuid.UUID] = None
@@ -93,9 +89,7 @@ class FailoverEventResponse(BaseModel):
     error_message: Optional[str] = None
     retry_attempts: int
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 @router.get("/strategies")
 def get_routing_strategies(  # Sprint 8.3.1

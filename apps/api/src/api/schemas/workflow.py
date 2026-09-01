@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from api.models.workflow import WorkflowTrigger, WorkflowStatus, ExecutionStatus
 
 
@@ -38,9 +38,7 @@ class WorkflowDefinitionResponse(WorkflowDefinitionBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- WORKFLOW EXECUTION SCHEMAS ---
 
@@ -60,9 +58,7 @@ class WorkflowExecutionResponse(BaseModel):
     retry_count: int
     latency_ms: Optional[int] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- WORKFLOW STEP SCHEMAS ---
 
@@ -78,5 +74,4 @@ class WorkflowStepResponse(BaseModel):
     error_message: Optional[str] = None
     latency_ms: Optional[int] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

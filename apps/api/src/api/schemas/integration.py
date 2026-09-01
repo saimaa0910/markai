@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, ConfigDict
 from api.models.integration import IntegrationProvider, IntegrationStatus
 
 
@@ -29,9 +29,7 @@ class IntegrationResponse(IntegrationBase):
     last_synced_at: Optional[str] = None
     error_message: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- CREDENTIAL SCHEMAS ---
 
@@ -54,5 +52,4 @@ class SyncJobResponse(BaseModel):
     error_message: Optional[str] = None
     meta_data: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

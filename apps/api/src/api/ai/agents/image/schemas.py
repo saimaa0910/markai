@@ -1,6 +1,6 @@
 import uuid
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ImageGenerateRequest(BaseModel):
@@ -89,9 +89,7 @@ class ImageLibraryItemResponse(BaseModel):
     campaign_id: Optional[uuid.UUID] = None
     run_id: Optional[uuid.UUID] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ImageProviderResponse(BaseModel):
     name: str
@@ -117,9 +115,7 @@ class CollectionResponse(BaseModel):
     organization_id: uuid.UUID
     created_at: Any
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class BulkActionRequest(BaseModel):
     ids: List[uuid.UUID]

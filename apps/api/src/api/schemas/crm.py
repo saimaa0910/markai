@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 from api.models.lead import LeadStatus
 from api.models.activity import ActivityType
 
@@ -23,9 +23,7 @@ class CompanyResponse(CompanyBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- CONTACT SCHEMAS ---
 
@@ -47,9 +45,7 @@ class ContactResponse(ContactBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- LEAD SCHEMAS ---
 
@@ -78,9 +74,7 @@ class LeadResponse(LeadBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- ACTIVITY SCHEMAS ---
 
@@ -101,5 +95,4 @@ class ActivityResponse(ActivityBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 # --- COLLECTION SCHEMAS ---
 
@@ -32,9 +32,7 @@ class CollectionResponse(CollectionBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 # --- FOLDER SCHEMAS ---
 
 class FolderCreate(BaseModel):
@@ -54,9 +52,7 @@ class FolderResponse(BaseModel):
     organization_id: uuid.UUID
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 # --- DOCUMENT SCHEMAS ---
 
 class DocumentChunkResponse(BaseModel):
@@ -65,9 +61,7 @@ class DocumentChunkResponse(BaseModel):
     chunk_index: Optional[int] = None
     page_number: Optional[int] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class KnowledgeDocumentResponse(BaseModel):
     id: uuid.UUID
@@ -94,9 +88,7 @@ class KnowledgeDocumentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class KnowledgeDocumentUpdate(BaseModel):
     title: Optional[str] = None
     collection_id: Optional[uuid.UUID] = None
@@ -122,9 +114,7 @@ class DocumentVersionResponse(BaseModel):
     change_summary: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class VersionCompareResponse(BaseModel):
     version_a: int
     version_b: int
@@ -145,9 +135,7 @@ class ProcessingJobResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 # --- PERMISSIONS SCHEMAS ---
 
 class KnowledgePermissionCreate(BaseModel):
@@ -163,9 +151,7 @@ class KnowledgePermissionResponse(BaseModel):
     role: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 # --- SEARCH & RAG SCHEMAS ---
 
 class SearchFilters(BaseModel):
@@ -205,9 +191,7 @@ class SearchHistoryResponse(BaseModel):
     latency_ms: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class SavedSearchCreate(BaseModel):
     name: str
     query_text: str
@@ -222,9 +206,7 @@ class SavedSearchResponse(BaseModel):
     filters_applied: Optional[Dict[str, Any]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 class RAGQueryRequest(BaseModel):
     query_text: str
     conversation_id: Optional[uuid.UUID] = None

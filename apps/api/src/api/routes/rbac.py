@@ -25,7 +25,7 @@ active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER])
 from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from api.core.deps import get_current_user
@@ -47,9 +47,7 @@ class PermissionResponse(BaseModel):
     scope: str
     description: Optional[str]
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class RoleResponse(BaseModel):
     id: uuid.UUID
@@ -61,9 +59,7 @@ class RoleResponse(BaseModel):
     organization_id: Optional[uuid.UUID]
     permission_count: int = 0
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class CreateRoleRequest(BaseModel):
     name: str
