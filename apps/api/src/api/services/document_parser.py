@@ -174,14 +174,17 @@ class DocumentParser:
 
     @classmethod
     def _parse_html(cls, file_path: str) -> str:
+        from bs4 import BeautifulSoup
+
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             html_content = f.read()
-            # Remove scripts and styles
-            html_content = re.sub(r"<script.*?>.*?</script>", " ", html_content, flags=re.DOTALL)
-            html_content = re.sub(r"<style.*?>.*?</style>", " ", html_content, flags=re.DOTALL)
-            # Remove tag wrappers
-            clean_text = re.sub(r"<[^>]+>", " ", html_content)
-            return re.sub(r"\s+", " ", clean_text).strip()
+
+        soup = BeautifulSoup(html_content, "html.parser")
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+
+        clean_text = soup.get_text(separator=" ")
+        return re.sub(r"\s+", " ", clean_text).strip()
 
     @classmethod
     def _parse_excel(cls, file_path: str) -> str:
