@@ -1,3 +1,4 @@
+/// <reference path="./e2e/playwright.d.ts" />
 import { defineConfig, devices } from '@playwright/test';
 
 /**
