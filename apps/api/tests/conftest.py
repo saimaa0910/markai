@@ -1,5 +1,6 @@
 import datetime
 import os
+import urllib.parse
 
 # Override key environment variables to ensure all tests run in mock mode
 os.environ["ENVIRONMENT"] = "test"
@@ -484,7 +485,9 @@ def mock_minio_client():
     original_get = httpx.get
 
     def mock_get(url, *args, **kwargs):
-        if "duckduckgo.com" in str(url):
+        parsed = urllib.parse.urlparse(str(url))
+        host = (parsed.hostname or "").lower()
+        if host == "duckduckgo.com" or host.endswith(".duckduckgo.com"):
             class MockResponse:
                 status_code = 200
                 text = """
