@@ -187,6 +187,11 @@ def _get_from_address() -> str:
     return addr
 
 
+def _host_matches_domain(host: str, domain: str) -> bool:
+    """Return True when host is exactly domain or a subdomain of domain."""
+    return host == domain or host.endswith(f".{domain}")
+
+
 def _detect_smtp_provider(host: Optional[str]) -> str:
     """Detect SMTP provider from hostname for logging purposes."""
     if not host:
@@ -194,15 +199,15 @@ def _detect_smtp_provider(host: Optional[str]) -> str:
     host_lower = host.lower()
     if host_lower in ("localhost", "127.0.0.1", "mailpit", "0.0.0.0"):
         return "mailpit"
-    if "sendgrid" in host_lower:
+    if _host_matches_domain(host_lower, "sendgrid.net"):
         return "sendgrid"
-    if "gmail" in host_lower or "google" in host_lower:
+    if _host_matches_domain(host_lower, "gmail.com") or _host_matches_domain(host_lower, "google.com"):
         return "gmail"
-    if "amazonaws.com" in host_lower or "ses" in host_lower:
+    if _host_matches_domain(host_lower, "amazonaws.com") or _host_matches_domain(host_lower, "amazonses.com"):
         return "amazon-ses"
-    if "mailgun" in host_lower:
+    if _host_matches_domain(host_lower, "mailgun.org") or _host_matches_domain(host_lower, "mailgun.net"):
         return "mailgun"
-    if "outlook" in host_lower or "office365" in host_lower:
+    if _host_matches_domain(host_lower, "outlook.com") or _host_matches_domain(host_lower, "office365.com"):
         return "microsoft"
     return "custom-smtp"
 
