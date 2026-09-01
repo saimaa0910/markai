@@ -36,6 +36,9 @@ export default function AccountSettingsPage() {
   const [fullName, setFullName] = React.useState('');
   const [email, setEmail] = React.useState('');
 
+  const avatarSeed = encodeURIComponent((fullName || 'User').trim());
+  const fallbackAvatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${avatarSeed}`;
+
   React.useEffect(() => {
     if (userProfile) {
       setFullName(userProfile.full_name || currentUser?.full_name || '');
@@ -132,7 +135,7 @@ export default function AccountSettingsPage() {
         <div className="flex flex-col md:flex-row gap-8 items-start">
           <div className="flex flex-col items-center gap-3 shrink-0">
             <img 
-              src={userProfile?.avatar || (currentUser as any)?.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${fullName || 'User'}`}
+              src={userProfile?.avatar || (currentUser as any)?.avatar || fallbackAvatarUrl}
               alt="Avatar" 
               className="w-20 h-20 rounded-full border border-violet-500/20 bg-neutral-900 object-cover"
             />
