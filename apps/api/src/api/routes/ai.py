@@ -58,13 +58,6 @@ from api.schemas.ai import (
 prompts_router = APIRouter(prefix="/ai/prompts", tags=["ai-prompts"])
 conversations_router = APIRouter(prefix="/ai/conversations", tags=["ai-conversations"])
 knowledge_router = APIRouter(prefix="/ai/knowledge", tags=["ai-knowledge"])
-models_router = APIRouter(prefix="/ai/models", tags=["ai-models"])
-routing_rules_router = APIRouter(prefix="/ai/routing-rules", tags=["ai-routing-rules"])
-usage_router = APIRouter(prefix="/ai/usage", tags=["ai-usage"])
-providers_router = APIRouter(prefix="/ai/providers", tags=["ai-providers"])
-playground_router = APIRouter(prefix="/ai/playground", tags=["ai-playground"])
-compare_router = APIRouter(prefix="/ai/compare", tags=["ai-compare"])
-analytics_router = APIRouter(prefix="/ai/analytics", tags=["ai-analytics"])
 
 active_member = RoleChecker([UserRole.OWNER, UserRole.ADMIN, UserRole.MEMBER, UserRole.GUEST])
 
