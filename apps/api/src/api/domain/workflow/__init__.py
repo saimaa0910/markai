@@ -1,3 +1,0 @@
-"""
-Workflow Domain Package Initializer.
-"""

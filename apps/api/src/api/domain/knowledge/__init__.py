@@ -1,3 +1,0 @@
-"""
-Knowledge Domain Package Initializer.
-"""

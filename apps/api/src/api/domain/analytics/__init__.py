@@ -1,3 +1,0 @@
-"""
-Analytics Domain Package Initializer.
-"""

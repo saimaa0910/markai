@@ -1,3 +1,0 @@
-"""
-Campaigns Domain Package Initializer.
-"""

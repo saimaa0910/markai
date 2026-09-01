@@ -1,6 +1,0 @@
-"""
-Auth Domain Constants.
-"""
-
-TOKEN_EXPIRY_HOURS = 24
-REFRESH_TOKEN_EXPIRY_DAYS = 7

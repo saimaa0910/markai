@@ -1,3 +1,0 @@
-"""
-Notifications Domain Package Initializer.
-"""

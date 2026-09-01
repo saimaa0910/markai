@@ -1,3 +1,0 @@
-"""
-Authentication & Identity Domain Module.
-"""
