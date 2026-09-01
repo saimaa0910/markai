@@ -1,7 +1,7 @@
 import uuid
 import datetime
 from typing import Optional, List, Union, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # --- CATEGORY SCHEMAS ---
@@ -23,9 +23,7 @@ class PromptCategoryResponse(PromptCategoryBase):
     organization_id: uuid.UUID
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- TAG SCHEMAS ---
 
@@ -43,9 +41,7 @@ class PromptTagResponse(PromptTagBase):
     organization_id: uuid.UUID
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- COLLECTION & FOLDER SCHEMAS ---
 
@@ -67,9 +63,7 @@ class PromptCollectionResponse(BaseModel):
     visibility: str = "ORGANIZATION"
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptFolderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -84,9 +78,7 @@ class PromptFolderResponse(BaseModel):
     parent_id: Optional[uuid.UUID] = None
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- PROMPT SCHEMAS ---
 
@@ -149,9 +141,7 @@ class PromptResponse(BaseModel):
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptVersionResponse(BaseModel):
     id: uuid.UUID
@@ -165,9 +155,7 @@ class PromptVersionResponse(BaseModel):
     created_by: Optional[uuid.UUID] = None
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptExecuteRequest(BaseModel):
     variables: Dict[str, Any] = Field(default_factory=dict)
@@ -254,9 +242,7 @@ class PromptTestCaseResponse(BaseModel):
     expected_output: Optional[str] = None
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptEvaluationResponse(BaseModel):
     id: uuid.UUID
@@ -276,9 +262,7 @@ class PromptEvaluationResponse(BaseModel):
     cost_usd: float
     tokens_used: int
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class PromptAnalyticsResponse(BaseModel):
     total_prompts: int
@@ -300,5 +284,4 @@ class PromptAuditLogResponse(BaseModel):
     metadata_json: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

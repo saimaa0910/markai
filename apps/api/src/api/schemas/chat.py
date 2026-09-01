@@ -1,7 +1,7 @@
 import uuid
 from typing import Optional, List
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ChatConversationCreate(BaseModel):
@@ -35,9 +35,7 @@ class ChatConversationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ChatMessageCreate(BaseModel):
     content: str
@@ -70,9 +68,7 @@ class ChatMessageResponse(BaseModel):
     cost_usd: Optional[float] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Extended Phase 2 Schemas ---
 
@@ -82,9 +78,7 @@ class ConversationBookmarkResponse(BaseModel):
     conversation_id: uuid.UUID
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ConversationShareCreate(BaseModel):
     permission: Optional[str] = "viewer"  # "viewer", "editor"
@@ -99,9 +93,7 @@ class ConversationShareResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ChatParticipantCreate(BaseModel):
     user_email: str
@@ -116,9 +108,7 @@ class ChatParticipantResponse(BaseModel):
     role: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ChatAttachmentResponse(BaseModel):
     id: uuid.UUID
@@ -129,9 +119,7 @@ class ChatAttachmentResponse(BaseModel):
     storage_url: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class ChatSearchHighlight(BaseModel):
     message_id: uuid.UUID

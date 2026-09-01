@@ -21,7 +21,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from api.core.config import settings
@@ -54,9 +54,7 @@ class SessionResponse(BaseModel):
     expires_at: datetime
     is_current: bool
     
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class SessionListResponse(BaseModel):
     """List of user sessions."""

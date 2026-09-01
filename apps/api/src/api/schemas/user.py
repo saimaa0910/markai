@@ -1,6 +1,6 @@
 from typing import Optional, List
 import uuid
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 
 class UserBase(BaseModel):
@@ -30,6 +30,4 @@ class UserResponse(UserBase):
     avatar: Optional[str] = None
     preferences: Optional[dict] = None
 
-    class Config:
-        from_attributes = True
-        populate_by_name = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)

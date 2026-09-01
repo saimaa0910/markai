@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from api.models.integration import NotificationChannel, NotificationPriority
 
 
@@ -26,9 +26,7 @@ class NotificationResponse(NotificationBase):
     organization_id: uuid.UUID
     is_read: bool
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- PREFERENCE SCHEMAS ---
 
@@ -48,5 +46,4 @@ class NotificationPreferenceResponse(NotificationPreferenceBase):
     user_id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

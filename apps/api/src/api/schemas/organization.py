@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class OrganizationBase(BaseModel):
@@ -21,9 +21,7 @@ class OrganizationUpdate(BaseModel):
 class OrganizationResponse(OrganizationBase):
     id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class OrganizationMemberResponse(BaseModel):
     id: uuid.UUID
@@ -34,5 +32,4 @@ class OrganizationMemberResponse(BaseModel):
     role: str
     created_at: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

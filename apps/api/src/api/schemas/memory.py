@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from api.models.memory import MemoryType
 
 
@@ -24,9 +24,7 @@ class AgentMemoryResponse(AgentMemoryBase):
     organization_id: uuid.UUID
     access_count: int
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- CONVERSATION MEMORY SCHEMAS ---
 
@@ -45,9 +43,7 @@ class ConversationMemoryResponse(ConversationMemoryBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 # --- ORGANIZATION MEMORY SCHEMAS ---
 
@@ -75,5 +71,4 @@ class OrganizationMemoryResponse(OrganizationMemoryBase):
     id: uuid.UUID
     organization_id: uuid.UUID
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

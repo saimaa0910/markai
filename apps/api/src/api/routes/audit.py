@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from api.middleware.auth_enforcement import enforce_all_auth_policies  # Sprint 8.3.1
 
@@ -45,9 +45,7 @@ class AuditLogResponse(BaseModel):
     session_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
+    model_config = ConfigDict(from_attributes=True)
 
 class AuditStatsResponse(BaseModel):
     total: int
