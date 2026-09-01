@@ -1,6 +1,9 @@
 import uuid
 import logging
 import datetime
+import socket
+import ipaddress
+from urllib.parse import urlparse
 import requests
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
@@ -53,12 +56,44 @@ class ImageExecutor:
             logger.warning("RAG fetch failed (non-fatal): %s", e)
         return ""
 
+    def _is_public_http_url(self, url: str) -> bool:
+        """Validate URL scheme/host and block private/internal IP destinations."""
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"}:
+                return False
+            if not parsed.hostname:
+                return False
+
+            addrinfo = socket.getaddrinfo(parsed.hostname, None)
+            if not addrinfo:
+                return False
+
+            for entry in addrinfo:
+                ip_str = entry[4][0]
+                ip_obj = ipaddress.ip_address(ip_str)
+                if (
+                    ip_obj.is_private
+                    or ip_obj.is_loopback
+                    or ip_obj.is_link_local
+                    or ip_obj.is_multicast
+                    or ip_obj.is_reserved
+                    or ip_obj.is_unspecified
+                ):
+                    return False
+            return True
+        except Exception:
+            return False
+
     def _download_url(self, url: str) -> bytes:
         """Helper to download image content from URL."""
         if not url:
             return b""
+        if not self._is_public_http_url(url):
+            logger.warning("Blocked unsafe image URL: %s", url)
+            return b""
         try:
-            res = requests.get(url, timeout=30)
+            res = requests.get(url, timeout=30, allow_redirects=False)
             res.raise_for_status()
             return res.content
         except Exception as e:
