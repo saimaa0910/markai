@@ -501,5 +501,5 @@ class APIKeyService:
             return ServiceResult.ok(data=True)
 
         except Exception as exc:
-            logger.warning(f"record_api_key_usage failed for {api_key_id}: {exc}")
+            logger.exception("record_api_key_usage failed")
             return ServiceResult.from_exception(exc)
