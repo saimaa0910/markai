@@ -70,6 +70,9 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-mailpit}
+      - SMTP_HOST=${SMTP_HOST:-mailpit}
+      - SMTP_PORT=${SMTP_PORT:-1025}
     depends_on:
       db:
         condition: service_healthy
@@ -100,6 +103,9 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-mailpit}
+      - SMTP_HOST=${SMTP_HOST:-mailpit}
+      - SMTP_PORT=${SMTP_PORT:-1025}
     depends_on:
       db:
         condition: service_healthy
@@ -141,6 +147,9 @@ services:
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-mailpit}
+      - SMTP_HOST=${SMTP_HOST:-mailpit}
+      - SMTP_PORT=${SMTP_PORT:-1025}
     depends_on:
       db:
         condition: service_healthy
