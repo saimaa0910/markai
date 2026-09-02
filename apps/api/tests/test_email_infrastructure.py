@@ -22,6 +22,8 @@ from api.services.email_service import (
     _make_info_body,
     _send_email,
     _get_from_address,
+    get_email_provider,
+    validate_email_config,
     send_verification_email,
     send_password_reset_email,
     send_invitation_email,
@@ -51,6 +53,15 @@ class TestProviderDetection:
 
     def test_detect_mailpit_container(self):
         assert _detect_smtp_provider("mailpit") == "mailpit"
+
+    def test_detect_brevo_relay(self):
+        assert _detect_smtp_provider("smtp-relay.brevo.com") == "brevo"
+
+    def test_detect_brevo_direct(self):
+        assert _detect_smtp_provider("smtp.brevo.com") == "brevo"
+
+    def test_detect_sendinblue_relay(self):
+        assert _detect_smtp_provider("smtp-relay.sendinblue.com") == "brevo"
 
     def test_detect_sendgrid(self):
         assert _detect_smtp_provider("smtp.sendgrid.net") == "sendgrid"
@@ -98,6 +109,134 @@ class TestSMTPConfiguration:
     def test_smtp_not_configured_whitespace(self, monkeypatch):
         monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "   ")
         assert _is_smtp_configured() is False
+
+
+# ─── Email Provider Resolution ───────────────────────────────────────────────
+
+class TestEmailProviderResolution:
+    """Test environment-driven email provider resolution."""
+
+    def test_provider_mailpit_explicit(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "mailpit")
+        assert get_email_provider() == "mailpit"
+
+    def test_provider_brevo_smtp_explicit(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "brevo_smtp")
+        assert get_email_provider() == "brevo_smtp"
+
+    def test_provider_brevo_alias(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "brevo")
+        assert get_email_provider() == "brevo_smtp"
+
+    def test_provider_resend_explicit(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "resend")
+        assert get_email_provider() == "resend"
+
+    def test_provider_smtp_explicit(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "smtp")
+        assert get_email_provider() == "smtp"
+
+    def test_provider_none_explicit(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "none")
+        assert get_email_provider() == "dev-console"
+
+    def test_provider_resend_detected_from_key(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "")
+        monkeypatch.setattr("api.services.email_service.settings.RESEND_API_KEY", "re_test_12345")
+        assert get_email_provider() == "resend"
+
+    def test_provider_brevo_detected_from_host(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "")
+        monkeypatch.setattr("api.services.email_service.settings.RESEND_API_KEY", "")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "smtp-relay.brevo.com")
+        assert get_email_provider() == "brevo_smtp"
+
+    def test_provider_mailpit_detected_from_host(self, monkeypatch):
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "")
+        monkeypatch.setattr("api.services.email_service.settings.RESEND_API_KEY", "")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "mailpit")
+        assert get_email_provider() == "mailpit"
+
+
+# ─── Brevo and Mailpit Execution Invariants ──────────────────────────────────
+
+class TestBrevoAndMailpitExecution:
+    """Test Brevo and Mailpit execution pathways and security invariants."""
+
+    @patch("api.services.email_service._send_smtp")
+    def test_brevo_smtp_success(self, mock_send_smtp, monkeypatch):
+        """When Brevo is configured with valid credentials, it sends via SMTP and logs brevo provider."""
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "brevo_smtp")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "smtp-relay.brevo.com")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PORT", 587)
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_USER", "brevo-user@domain.com")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PASSWORD", "xsmtpib-secret-key")
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_FROM", "verified@mydomain.com")
+
+        result = _send_email("recipient@test.com", "Test Brevo", "<p>Hello Brevo</p>")
+        assert result is True
+        mock_send_smtp.assert_called_once()
+
+    def test_brevo_missing_credentials_fails_without_mailpit_fallback(self, monkeypatch):
+        """When EMAIL_PROVIDER=brevo_smtp but credentials are missing, fails safely and does NOT fall back to Mailpit."""
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "brevo_smtp")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "smtp-relay.brevo.com")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_USER", "")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PASSWORD", "")
+
+        result = _send_email("recipient@test.com", "Test Missing Brevo", "<p>Content</p>")
+        assert result is False
+
+    @patch("api.services.email_service.smtplib.SMTP")
+    def test_brevo_smtp_starttls_and_auth(self, mock_smtp_class, monkeypatch):
+        """Verify Brevo SMTP initiates STARTTLS and authenticates on port 587."""
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "brevo_smtp")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "smtp-relay.brevo.com")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PORT", 587)
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_USER", "brevo-user@domain.com")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PASSWORD", "xsmtpib-secret-key")
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_FROM", "verified@mydomain.com")
+
+        result = _send_email("recipient@test.com", "Test Brevo Full", "<p>Hello</p>")
+        assert result is True
+        mock_smtp_class.assert_called_with("smtp-relay.brevo.com", 587, timeout=30)
+        mock_server.starttls.assert_called_once()
+        mock_server.login.assert_called_once_with("brevo-user@domain.com", "xsmtpib-secret-key")
+        mock_server.sendmail.assert_called_once()
+
+    @patch("api.services.email_service.smtplib.SMTP")
+    def test_mailpit_no_auth_success(self, mock_smtp_class, monkeypatch):
+        """Mailpit development provider connects without requiring authentication."""
+        mock_server = MagicMock()
+        mock_smtp_class.return_value.__enter__.return_value = mock_server
+
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "mailpit")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_HOST", "mailpit")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PORT", 1025)
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_USER", "")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PASSWORD", "")
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_FROM", "developer@example.test")
+
+        result = _send_email("recipient@test.com", "Test Mailpit", "<p>Hello Mailpit</p>")
+        assert result is True
+        mock_smtp_class.assert_called_with("mailpit", 1025, timeout=30)
+        mock_server.starttls.assert_not_called()
+        mock_server.login.assert_not_called()
+        mock_server.sendmail.assert_called_once()
+
+    @patch("api.services.email_service.logger.error")
+    def test_validate_email_config_logging(self, mock_log_error, monkeypatch):
+        """validate_email_config logs clear error on missing Brevo credentials without logging passwords."""
+        monkeypatch.setattr("api.services.email_service.settings.EMAIL_PROVIDER", "brevo_smtp")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_USER", "")
+        monkeypatch.setattr("api.services.email_service.settings.SMTP_PASSWORD", "")
+
+        validate_email_config()
+        mock_log_error.assert_called_once()
+        assert "EMAIL_PROVIDER is set to 'brevo_smtp'" in mock_log_error.call_args[0][0]
 
 
 # ─── From Address Formatting ─────────────────────────────────────────────────

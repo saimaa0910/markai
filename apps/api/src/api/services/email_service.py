@@ -38,24 +38,41 @@ _async_http_client = httpx.AsyncClient(timeout=15.0)
 
 def validate_email_config() -> None:
     """Validate email configurations on startup. Warns clearly if credentials are missing."""
-    has_resend = bool(getattr(settings, "RESEND_API_KEY", "").strip())
-    has_smtp = bool(getattr(settings, "SMTP_HOST", "").strip())
+    provider = get_email_provider()
 
-    if not has_resend:
-        if has_smtp:
-            logger.warning(
-                "[CONFIG] RESEND_API_KEY is missing. Transactional emails will fall back to legacy SMTP server."
+    if provider == "brevo_smtp":
+        has_user = bool(getattr(settings, "SMTP_USER", "").strip())
+        has_pass = bool(getattr(settings, "SMTP_PASSWORD", "").strip())
+        from_email = getattr(settings, "EMAIL_FROM", "").strip()
+        if not (has_user and has_pass):
+            logger.error(
+                "[CONFIG] EMAIL_PROVIDER is set to 'brevo_smtp' but SMTP_USER or SMTP_PASSWORD is not configured. "
+                "Real email testing will fail until Brevo SMTP credentials are provided."
             )
         else:
-            logger.warning(
-                "[CONFIG] Neither RESEND_API_KEY nor SMTP_HOST is configured. "
-                "The email service will run in development mode (printed to terminal) and will NOT report success."
+            logger.info(
+                f"[CONFIG] Email service configured for Brevo SMTP (host={getattr(settings, 'SMTP_HOST', 'smtp-relay.brevo.com')}, "
+                f"port={getattr(settings, 'SMTP_PORT', 587)}, sender={from_email})."
             )
+    elif provider == "mailpit":
+        host = getattr(settings, "SMTP_HOST", "").strip() or "mailpit"
+        port = getattr(settings, "SMTP_PORT", 1025)
+        logger.info(f"[CONFIG] Email service configured for local development via Mailpit (host={host}, port={port}).")
+    elif provider == "resend":
+        if not _is_resend_configured():
+            logger.error("[CONFIG] EMAIL_PROVIDER is set to 'resend' but RESEND_API_KEY is missing.")
+        else:
+            logger.info("[CONFIG] Email service configured for Resend API.")
+    elif provider == "smtp":
+        host = getattr(settings, "SMTP_HOST", "").strip()
+        if not host:
+            logger.warning("[CONFIG] Generic SMTP provider selected but SMTP_HOST is not configured.")
+        else:
+            logger.info(f"[CONFIG] Email service configured for generic SMTP ({host}).")
     else:
-        # Check sender attributes
-        from_email = getattr(settings, "EMAIL_FROM", "")
-        if not from_email:
-            logger.warning("[CONFIG] EMAIL_FROM address is not configured. Defaulting to noreply@eaimos.ai.")
+        logger.warning(
+            "[CONFIG] No active email provider configured. The email service will run in dev-console fallback mode."
+        )
 
 
 # ─── HTML Templates ───────────────────────────────────────────────────────────
@@ -179,6 +196,41 @@ def _is_smtp_configured() -> bool:
     return bool(getattr(settings, "SMTP_HOST", "").strip())
 
 
+def get_email_provider() -> str:
+    """
+    Resolve the active email provider based on configuration.
+    Returns one of: 'mailpit', 'brevo_smtp', 'resend', 'smtp', or 'dev-console'.
+    """
+    provider = getattr(settings, "EMAIL_PROVIDER", "").strip().lower()
+
+    if provider in ("brevo", "brevo_smtp", "brevo-smtp"):
+        return "brevo_smtp"
+    if provider == "resend":
+        return "resend"
+    if provider in ("smtp", "custom_smtp", "custom-smtp"):
+        return "smtp"
+    if provider in ("none", "console", "dev-console"):
+        return "dev-console"
+    if provider == "mailpit":
+        if _is_resend_configured():
+            return "resend"
+        return "mailpit"
+
+    # Default fallback
+    if _is_resend_configured():
+        return "resend"
+
+    if _is_smtp_configured():
+        detected = _detect_smtp_provider(getattr(settings, "SMTP_HOST", ""))
+        if detected == "brevo":
+            return "brevo_smtp"
+        elif detected == "mailpit":
+            return "mailpit"
+        return "smtp"
+
+    return "mailpit"
+
+
 def _get_from_address() -> str:
     name = getattr(settings, "EMAIL_FROM_NAME", "EAIMOS Platform")
     addr = getattr(settings, "EMAIL_FROM", "noreply@eaimos.ai")
@@ -199,6 +251,8 @@ def _detect_smtp_provider(host: Optional[str]) -> str:
     host_lower = host.lower()
     if host_lower in ("localhost", "127.0.0.1", "mailpit", "0.0.0.0"):
         return "mailpit"
+    if _host_matches_domain(host_lower, "brevo.com") or _host_matches_domain(host_lower, "sendinblue.com"):
+        return "brevo"
     if _host_matches_domain(host_lower, "sendgrid.net"):
         return "sendgrid"
     if _host_matches_domain(host_lower, "gmail.com") or _host_matches_domain(host_lower, "google.com"):
@@ -315,16 +369,27 @@ def _send_email(
 ) -> bool:
     """
     Send transactional email synchronously.
-    - If RESEND_API_KEY is set: sends via Resend with 3-attempt retry.
-    - Else if SMTP is configured: sends via SMTP with 3-attempt retry.
-    - Otherwise: prints to console (dev mode) and returns False.
+    Dispatches to the configured email provider:
+    - 'mailpit': Local Mailpit SMTP server (default in development).
+    - 'brevo_smtp': Brevo real-email testing SMTP (smtp-relay.brevo.com:587).
+    - 'resend': Resend transactional email API.
+    - 'smtp': Generic custom SMTP server.
+    - 'dev-console': Prints to terminal when no provider is configured.
     """
     full_html = _BASE_TEMPLATE.format(subject=subject, body=html_body)
     start_time = time.perf_counter()
     retries = 0
+    provider = get_email_provider()
 
-    # 1. Primary: Resend API
-    if _is_resend_configured():
+    # 1. Resend API
+    if provider == "resend":
+        if not _is_resend_configured():
+            logger.error("[Resend] Missing RESEND_API_KEY. Provider unavailable.")
+            _write_email_log(
+                to_email, subject, template_name, "FAILED", "resend", 0,
+                None, correlation_id, "RESEND_API_KEY is not configured.", log_id
+            )
+            return False
         backoff = 1
         last_exc = None
         for attempt in range(1, 4):
@@ -354,43 +419,93 @@ def _send_email(
         logger.error(f"[Resend] All retry attempts exhausted for {to_email}")
         return False
 
-    # 2. Secondary: SMTP
-    if _is_smtp_configured():
-        smtp_success = False
-        smtp_provider = _detect_smtp_provider(getattr(settings, "SMTP_HOST", ""))
+    # 2. Brevo Real-Email Testing SMTP
+    if provider == "brevo_smtp":
+        smtp_user = getattr(settings, "SMTP_USER", "").strip()
+        smtp_password = getattr(settings, "SMTP_PASSWORD", "").strip()
+        if not smtp_user or not smtp_password:
+            logger.error(
+                "[Brevo SMTP] Missing required Brevo credentials (SMTP_USER or SMTP_PASSWORD). "
+                "Real email delivery aborted (will NOT fall back to Mailpit)."
+            )
+            _write_email_log(
+                to_email, subject, template_name, "FAILED", "brevo", 0,
+                None, correlation_id, "Brevo SMTP credentials (SMTP_USER/SMTP_PASSWORD) missing.", log_id
+            )
+            return False
+
         last_exc = None
         for attempt in range(1, 4):
             try:
                 _send_smtp(to_email, subject, full_html)
                 latency = time.perf_counter() - start_time
                 _write_email_log(
-                    to_email, subject, template_name, "SENT", smtp_provider, retries,
+                    to_email, subject, template_name, "SENT", "brevo", retries,
                     latency, correlation_id, None, log_id
                 )
-                logger.info(f"Email sent via SMTP: to={to_email}, subject={subject}, latency={latency:.3f}s")
+                logger.info(f"[Brevo SMTP] Email sent: to={to_email}, subject={subject}, latency={latency:.3f}s")
                 return True
             except smtplib.SMTPAuthenticationError as exc:
                 last_exc = exc
-                logger.error(f"SMTP authentication failed (no retry): {exc}")
+                logger.error(f"[Brevo SMTP] Authentication failed (no retry): {exc}")
                 break
             except smtplib.SMTPRecipientsRefused as exc:
                 last_exc = exc
-                logger.error(f"SMTP recipient refused (no retry): {exc}")
+                logger.error(f"[Brevo SMTP] Recipient refused (no retry): {exc}")
                 break
             except Exception as exc:
                 retries = attempt
                 last_exc = exc
-                logger.error(f"SMTP send failed on attempt {attempt}: {exc}")
+                logger.error(f"[Brevo SMTP] Send failed on attempt {attempt}: {exc}")
                 if attempt < 3:
                     time.sleep(attempt)
         latency = time.perf_counter() - start_time
         _write_email_log(
-            to_email, subject, template_name, "FAILED", smtp_provider, retries,
+            to_email, subject, template_name, "FAILED", "brevo", retries,
             latency, correlation_id, str(last_exc), log_id
         )
         return False
 
-    # 3. Fallback: Dev console (never fake success, return False)
+    # 3. Mailpit Local SMTP or Generic SMTP
+    if provider in ("mailpit", "smtp"):
+        # If SMTP_HOST is explicitly empty (e.g. unit tests checking console fallback), fall through to dev console
+        if not _is_smtp_configured() and getattr(settings, "SMTP_HOST", "") == "":
+            pass
+        else:
+            log_provider = "mailpit" if provider == "mailpit" else _detect_smtp_provider(getattr(settings, "SMTP_HOST", ""))
+            last_exc = None
+            for attempt in range(1, 4):
+                try:
+                    _send_smtp(to_email, subject, full_html)
+                    latency = time.perf_counter() - start_time
+                    _write_email_log(
+                        to_email, subject, template_name, "SENT", log_provider, retries,
+                        latency, correlation_id, None, log_id
+                    )
+                    logger.info(f"[{log_provider}] Email sent: to={to_email}, subject={subject}, latency={latency:.3f}s")
+                    return True
+                except smtplib.SMTPAuthenticationError as exc:
+                    last_exc = exc
+                    logger.error(f"SMTP authentication failed (no retry): {exc}")
+                    break
+                except smtplib.SMTPRecipientsRefused as exc:
+                    last_exc = exc
+                    logger.error(f"SMTP recipient refused (no retry): {exc}")
+                    break
+                except Exception as exc:
+                    retries = attempt
+                    last_exc = exc
+                    logger.error(f"SMTP send failed on attempt {attempt}: {exc}")
+                    if attempt < 3:
+                        time.sleep(attempt)
+            latency = time.perf_counter() - start_time
+            _write_email_log(
+                to_email, subject, template_name, "FAILED", log_provider, retries,
+                latency, correlation_id, str(last_exc), log_id
+            )
+            return False
+
+    # 4. Fallback: Dev console (never fake success, return False)
     urls = re.findall(r'href="(http[^"]+)"', full_html)
     print(f"\n{'='*60}")
     print(f"📧 EMAIL (DEV MODE - PROVIDER UNAVAILABLE)")
@@ -440,11 +555,12 @@ async def _send_email_async(
     Send transactional email asynchronously.
     Supports timeout and exponential retry.
     """
-    full_html = _BASE_TEMPLATE.format(subject=subject, body=html_body)
-    start_time = time.perf_counter()
-    retries = 0
+    provider = get_email_provider()
 
-    if _is_resend_configured():
+    if provider == "resend" and _is_resend_configured():
+        full_html = _BASE_TEMPLATE.format(subject=subject, body=html_body)
+        start_time = time.perf_counter()
+        retries = 0
         backoff = 1
         last_exc = None
         for attempt in range(1, 4):
@@ -470,19 +586,24 @@ async def _send_email_async(
         )
         return False
 
-    if _is_smtp_configured():
-        # SMTP library in python is inherently synchronous; wrap in executor
-        loop = asyncio.get_running_loop()
-        try:
-            success = await loop.run_in_executor(
-                None, _send_email, to_email, subject, html_body, template_name, correlation_id, log_id
-            )
-            return success
-        except Exception as e:
-            logger.error(f"[SMTP Async] Failed: {e}")
-            return False
+    if provider in ("brevo_smtp", "mailpit", "smtp"):
+        # If SMTP_HOST is explicitly empty in mailpit/smtp mode, fall through to dev console
+        if provider in ("mailpit", "smtp") and not _is_smtp_configured() and getattr(settings, "SMTP_HOST", "") == "":
+            pass
+        else:
+            # SMTP library in python is inherently synchronous; wrap in executor
+            loop = asyncio.get_running_loop()
+            try:
+                success = await loop.run_in_executor(
+                    None, _send_email, to_email, subject, html_body, template_name, correlation_id, log_id
+                )
+                return success
+            except Exception as e:
+                logger.error(f"[SMTP Async] Failed: {e}")
+                return False
 
     # Dev Console Fallback
+    full_html = _BASE_TEMPLATE.format(subject=subject, body=html_body)
     urls = re.findall(r'href="(http[^"]+)"', full_html)
     print(f"\n{'='*60}")
     print(f"📧 EMAIL (DEV MODE - PROVIDER UNAVAILABLE - ASYNC)")
@@ -512,7 +633,17 @@ def send_email_background(
     Queue email delivery to the background queue (Celery task).
     Pre-creates an EmailLog in QUEUED state.
     """
-    provider = "resend" if _is_resend_configured() else ("smtp" if _is_smtp_configured() else "dev-console")
+    resolved = get_email_provider()
+    if resolved == "resend":
+        provider = "resend"
+    elif resolved == "brevo_smtp":
+        provider = "brevo"
+    elif resolved == "mailpit":
+        provider = "mailpit"
+    elif resolved == "smtp":
+        provider = _detect_smtp_provider(getattr(settings, "SMTP_HOST", ""))
+    else:
+        provider = "dev-console"
 
     # Generate log record in DB
     try:

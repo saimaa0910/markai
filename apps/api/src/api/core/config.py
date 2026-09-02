@@ -97,13 +97,14 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET_NAME: str = "eaimos-storage"
 
-    # Email configuration — Resend (primary) + SMTP (dev fallback)
+    # Email configuration — Provider selection: 'mailpit' (default dev), 'brevo_smtp' (real email testing), 'resend', or 'smtp'
+    EMAIL_PROVIDER: str = Field(default="mailpit", validation_alias="EMAIL_PROVIDER")
     RESEND_API_KEY: str = Field(default="", validation_alias="RESEND_API_KEY")
     EMAIL_FROM: str = Field(default="noreply@eaimos.ai", validation_alias="EMAIL_FROM")
     EMAIL_FROM_NAME: str = Field(default="EAIMOS Platform", validation_alias="EMAIL_FROM_NAME")
-    # Legacy SMTP fields kept for dev fallback (not used when RESEND_API_KEY is set)
+    # SMTP configuration (used for Mailpit, Brevo SMTP, or custom SMTP)
     SMTP_HOST: str = Field(default="", validation_alias="SMTP_HOST")
-    SMTP_PORT: int = Field(default=587, validation_alias="SMTP_PORT")
+    SMTP_PORT: int = Field(default=1025, validation_alias="SMTP_PORT")
     SMTP_USER: str = Field(default="", validation_alias="SMTP_USER")
     SMTP_PASSWORD: str = Field(default="", validation_alias="SMTP_PASSWORD")
     SMTP_TIMEOUT: int = Field(default=30, validation_alias="SMTP_TIMEOUT")
